@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"one-api/common"
 	"one-api/model"
+	"one-api/setting/ratio_setting"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,28 @@ func setupTestDB() *gorm.DB {
 
 	// 自动迁移表结构
 	db.AutoMigrate(&model.User{}, &model.Token{}, &model.TopUp{})
+	
+	// 创建channels表（模拟真实的渠道表结构）
+	db.Exec(`CREATE TABLE IF NOT EXISTS channels (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name VARCHAR(191),
+		type INTEGER,
+		status INTEGER DEFAULT 1,
+		models TEXT,
+		test_model VARCHAR(191),
+		created_time INTEGER,
+		other TEXT
+	)`)
+	
+	// 插入测试渠道数据（基于你的实际配置）
+	db.Exec(`INSERT INTO channels (name, type, status, models, test_model, created_time) VALUES (?, ?, ?, ?, ?, ?)`,
+		"test_ds", 43, 1, 
+		`deepseek-chat,deepseek-reasoner,deepseek-coder,gpt-3.5-turbo,gpt-4,claude-3-haiku-20240307`,
+		"deepseek-chat", // 设置默认测试模型
+		1640995200) // 2022-01-01 的时间戳
+	
+	// 初始化ratio setting
+	ratio_setting.InitRatioSettings()
 	
 	return db
 }

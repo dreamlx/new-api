@@ -80,9 +80,8 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.DELETE("/:id", controller.DeleteUser)
 			}
 
-			// 外部用户系统集成路由
+			// 外部用户系统集成路由 (无需认证，供前端系统调用)
 			externalRoute := userRoute.Group("/external")
-			externalRoute.Use(middleware.AdminAuth())
 			{
 				externalRoute.POST("/sync", controller.SyncExternalUser)
 				externalRoute.POST("/topup", controller.ExternalUserTopUp)

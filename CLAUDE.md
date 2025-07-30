@@ -129,10 +129,33 @@ GET /api/user/external/{external_user_id}
 - **前端集成**：JavaScript SDK
 - **认证方式**：External User ID Mapping
 
-## 当前状态
-- **开发阶段**：Demo阶段核心功能开发完成
-- **测试状态**：API接口功能验证中
-- **下一步**：单元测试和集成测试用例开发
+## 当前开发环境状态
+
+### 运行模式
+- **数据库服务**：使用 `docker-compose.db-only.yml` 启动 MySQL + Redis
+- **后端服务**：使用 `make start-backend` 本地运行 Go 服务
+- **前端服务**：未启动（开发阶段专注后端API）
+
+### 服务信息
+- **Go 后端**：运行在 `localhost:3000`，进程ID: 40357
+- **MySQL 数据库**：Docker容器 `mysql-dev`，端口 `localhost:3307`
+- **Redis 缓存**：Docker容器 `redis-dev`，端口 `localhost:6379`
+- **环境配置**：使用 `.env.dev` 文件加载环境变量
+
+### 数据库配置
+- **连接信息**：`root:dev123456@tcp(localhost:3307)/new_api_dev`
+- **渠道配置**：1个启用渠道(id=1, name="ds", type=43)
+- **支持模型**：`deepseek-chat,deepseek-reasoner`
+- **默认测试模型**：`deepseek-chat`
+
+### 当前问题
+- balance_capacity API 返回 models_available=0，未显示具体模型信息
+- 需要调试为什么模型倍率检查失败
+
+### 下一步任务
+- 修复 balance_capacity 中模型显示问题
+- 确保 deepseek-chat 优先显示
+- 完成所有功能测试
 
 ## 重要决策记录
 1. **计费策略**：采用方案1 - 前端处理货币转换，后端只接收美元

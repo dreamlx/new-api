@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"one-api/common"
 	"one-api/model"
+	"one-api/setting/ratio_setting"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -435,16 +438,150 @@ func getLoginType(loginType string) string {
 func calculateBalanceCapacity(quota int) map[string]interface{} {
 	capacity := make(map[string]interface{})
 	
-	// 示例计算
-	if quota > 0 {
-		capacity["gpt-4"] = map[string]interface{}{
-			"tokens_1k": quota / 15000,
-			"price":     0.03,
+	if quota <= 0 {
+		return capacity
+	}
+	
+	// 从数据库查询启用的渠道
+	var channels []struct {
+		Name      string `json:"name"`
+		Models    string `json:"models"`
+		TestModel string `json:"test_model"`
+		Status    int    `json:"status"`
+	}
+	
+	// 查询启用状态的渠道
+	if err := model.DB.Table("channels").
+		Select("name, models, test_model, status").
+		Where("status = ?", 1). // 只查询启用的渠道
+		Find(&channels).Error; err != nil {
+		common.SysLog(fmt.Sprintf("查询渠道配置失败: %v", err))
+		// 返回错误信息，提示联系管理员
+		capacity["_error"] = map[string]interface{}{
+			"message": "无法查询模型配置，请联系管理员检查系统配置",
+			"error_code": "CHANNEL_QUERY_FAILED",
 		}
-		capacity["gpt-3.5-turbo"] = map[string]interface{}{
-			"tokens_1k": quota / 500,
-			"price":     0.001,
+		return capacity
+	}
+	
+	
+	// 收集所有启用的模型和优先的测试模型
+	modelSet := make(map[string]bool)
+	testModels := make(map[string]bool) // 记录哪些是测试模型
+	
+	for _, channel := range channels {
+		// 优先收集测试模型
+		if channel.TestModel != "" {
+			testModel := strings.TrimSpace(channel.TestModel)
+			if testModel != "" {
+				modelSet[testModel] = true
+				testModels[testModel] = true
+			}
 		}
+		
+		// 然后收集其他模型
+		if channel.Models != "" {
+			// 解析models字段（可能是JSON数组或逗号分隔的字符串）
+			var models []string
+			if err := json.Unmarshal([]byte(channel.Models), &models); err != nil {
+				// 如果不是JSON格式，尝试按逗号分割
+				models = strings.Split(channel.Models, ",")
+			}
+			
+			for _, modelName := range models {
+				modelName = strings.TrimSpace(modelName)
+				if modelName != "" {
+					modelSet[modelName] = true
+				}
+			}
+		}
+	}
+	
+	// 获取分组倍率 (简化处理，使用默认分组倍率1.0)
+	groupRatio := 1.0
+	
+	// 创建模型列表，优先处理测试模型
+	var modelList []string
+	
+	// 先添加测试模型（优先显示）
+	for modelName := range testModels {
+		if modelSet[modelName] { // 确保模型在启用列表中
+			modelList = append(modelList, modelName)
+		}
+	}
+	
+	// 再添加其他模型
+	for modelName := range modelSet {
+		if !testModels[modelName] { // 不是测试模型的其他模型
+			modelList = append(modelList, modelName)
+		}
+	}
+	
+	// 计算余额容量
+	modelCount := 0
+	for _, modelName := range modelList {
+		// 获取模型倍率
+		modelRatio, exists, _ := ratio_setting.GetModelRatio(modelName)
+		if !exists {
+			continue // 跳过未配置倍率的模型
+		}
+		
+		// 获取补全倍率
+		completionRatio := ratio_setting.GetCompletionRatio(modelName)
+		
+		// 计算基础价格：modelRatio * $0.002 / 1K tokens
+		basePrice := modelRatio * 0.002
+		
+		// 计算每1K input tokens的消费（不考虑completion）
+		// 注意：New API的计费公式中，modelRatio可能是小数，我们需要保持精度
+		quotaPerToken := groupRatio * modelRatio // 每个token消耗的quota
+		quotaPer1K := quotaPerToken * 1000 // 每1K token消耗的quota
+		inputQuotaPer1K := int(quotaPer1K + 0.5) // 四舍五入转为整数
+		
+		// 防止除零错误
+		if inputQuotaPer1K <= 0 {
+			continue
+		}
+		
+		// 计算可调用的input tokens数量
+		maxInputTokens1K := quota / inputQuotaPer1K
+		
+		if maxInputTokens1K > 0 {
+			modelInfo := map[string]interface{}{
+				"input_tokens_1k":  maxInputTokens1K,
+				"model_ratio":      modelRatio,
+				"completion_ratio": completionRatio,
+				"group_ratio":      groupRatio,
+				"base_price_usd":   basePrice,
+				"quota_per_1k_input": inputQuotaPer1K,
+				"pricing_note": fmt.Sprintf("输入：%d quota/1K tokens，输出：%d quota/1K tokens", 
+					inputQuotaPer1K, int(float64(inputQuotaPer1K)*completionRatio)),
+			}
+			
+			// 标记是否为默认测试模型
+			if testModels[modelName] {
+				modelInfo["is_default_model"] = true
+			}
+			
+			capacity[modelName] = modelInfo
+			
+			modelCount++
+			// 限制返回的模型数量（避免返回太多模型）
+			if modelCount >= 8 {
+				break
+			}
+		}
+	}
+	
+	// 添加总体信息
+	dollarBalance := float64(quota) / common.QuotaPerUnit
+	capacity["_summary"] = map[string]interface{}{
+		"total_balance_usd": dollarBalance,
+		"total_quota":       quota,
+		"quota_per_usd":     common.QuotaPerUnit,
+		"billing_formula":   "消耗quota = 分组倍率 × 模型倍率 × (输入tokens + 输出tokens × 补全倍率)",
+		"models_available":  modelCount,
+		"note": "实际消费取决于输入和输出token数量，此处仅显示输入token的估算",
 	}
 	
 	return capacity
