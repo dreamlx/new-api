@@ -28,6 +28,15 @@ type User struct {
 	OidcId           string         `json:"oidc_id" gorm:"column:oidc_id;index"`
 	WeChatId         string         `json:"wechat_id" gorm:"column:wechat_id;index"`
 	TelegramId       string         `json:"telegram_id" gorm:"column:telegram_id;index"`
+	// 外部用户系统集成字段
+	ExternalUserId   string         `json:"external_user_id" gorm:"type:varchar(100);column:external_user_id;uniqueIndex"`
+	Phone            string         `json:"phone" gorm:"type:varchar(20);column:phone"`
+	WechatOpenId     string         `json:"wechat_openid" gorm:"type:varchar(100);column:wechat_openid"`
+	WechatUnionId    string         `json:"wechat_unionid" gorm:"type:varchar(100);column:wechat_unionid"`
+	AlipayUserId     string         `json:"alipay_userid" gorm:"type:varchar(100);column:alipay_userid"`
+	LoginType        string         `json:"login_type" gorm:"type:varchar(20);column:login_type;default:'email'"`
+	IsExternal       bool           `json:"is_external" gorm:"type:boolean;column:is_external;default:false"`
+	ExternalData     string         `json:"external_data" gorm:"type:text;column:external_data"`
 	VerificationCode string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
 	AccessToken      *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
 	Quota            int            `json:"quota" gorm:"type:int;default:0"`

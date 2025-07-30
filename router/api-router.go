@@ -79,6 +79,17 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.PUT("/", controller.UpdateUser)
 				adminRoute.DELETE("/:id", controller.DeleteUser)
 			}
+
+			// 外部用户系统集成路由
+			externalRoute := userRoute.Group("/external")
+			externalRoute.Use(middleware.AdminAuth())
+			{
+				externalRoute.POST("/sync", controller.SyncExternalUser)
+				externalRoute.POST("/topup", controller.ExternalUserTopUp)
+				externalRoute.POST("/token", controller.CreateExternalUserToken)
+				externalRoute.GET("/:external_user_id/stats", controller.GetExternalUserStats)
+				externalRoute.GET("/models", controller.GetExternalUserModels)
+			}
 		}
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())

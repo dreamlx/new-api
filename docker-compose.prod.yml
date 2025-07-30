@@ -1,0 +1,50 @@
+version: '3.4'
+
+services:
+  new-api:
+    image: dreamlx/new-api:latest  # 你的Docker Hub镜像
+    container_name: new-api-prod
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs
+    environment:
+      - SQL_DSN=root:${MYSQL_ROOT_PASSWORD}@tcp(mysql:3306)/new_api
+      - REDIS_CONN_STRING=redis://redis
+      - TZ=Asia/Shanghai
+      - ERROR_LOG_ENABLED=true
+      - SESSION_SECRET=${SESSION_SECRET}  # 生产环境必须设置
+    depends_on:
+      - redis
+      - mysql
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' | awk -F: '{print $$2}'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:latest
+    container_name: redis-prod
+    restart: always
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes  # 启用持久化
+
+  mysql:
+    image: mysql:8.2
+    container_name: mysql-prod
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: new_api
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --innodb-buffer-pool-size=512M --max-connections=200
+
+volumes:
+  mysql_data:
+  redis_data:

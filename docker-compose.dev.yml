@@ -1,0 +1,45 @@
+services:
+  new-api-dev:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: new-api-dev
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs
+      # 开发时挂载源码用于热重载（可选）
+      # - .:/app/src:ro
+    environment:
+      - SQL_DSN=root:dev123456@tcp(mysql-dev:3306)/new_api_dev
+      - REDIS_CONN_STRING=redis://redis-dev
+      - TZ=Asia/Shanghai
+      - GIN_MODE=debug  # 开发模式
+      - ERROR_LOG_ENABLED=true
+    depends_on:
+      - redis-dev
+      - mysql-dev
+
+  redis-dev:
+    image: redis:latest
+    container_name: redis-dev
+    restart: always
+    ports:
+      - "6379:6379"
+
+  mysql-dev:
+    image: mysql:8.2
+    container_name: mysql-dev
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: dev123456
+      MYSQL_DATABASE: new_api_dev
+    volumes:
+      - mysql_dev_data:/var/lib/mysql
+    ports:
+      - "3306:3306"  # 开发时暴露端口便于调试
+
+volumes:
+  mysql_dev_data:
