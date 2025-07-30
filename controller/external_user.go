@@ -23,6 +23,7 @@ type SyncExternalUserRequest struct {
 	WechatUnionId  string `json:"wechat_unionid" binding:"omitempty,max=100"`
 	AlipayUserId   string `json:"alipay_userid" binding:"omitempty,max=100"`
 	LoginType      string `json:"login_type" binding:"omitempty,oneof=email wechat alipay sms"`
+	AffCode        string `json:"aff_code" binding:"omitempty,max=32"`        // 推荐码（可选）
 	ExternalData   string `json:"external_data" binding:"omitempty"`
 }
 
@@ -126,11 +127,34 @@ func SyncExternalUser(c *gin.Context) {
 			Quota:          common.QuotaForNewUser,
 		}
 		
+		// 只在提供了推荐码时设置，否则保持 NULL
+		if req.AffCode != "" {
+			user.AffCode = req.AffCode
+		}
+		
 		if err := model.DB.Create(user).Error; err != nil {
 			common.SysError("创建外部用户失败: " + err.Error())
+			
+			// 提供更详细的错误信息
+			errorMsg := "创建用户失败"
+			if strings.Contains(err.Error(), "Duplicate entry") {
+				if strings.Contains(err.Error(), "username") {
+					errorMsg = "用户名已存在，请使用其他用户名"
+				} else if strings.Contains(err.Error(), "email") {
+					errorMsg = "邮箱已被使用，请使用其他邮箱"
+				} else if strings.Contains(err.Error(), "external_user_id") {
+					errorMsg = "外部用户ID已存在"
+				} else if strings.Contains(err.Error(), "aff_code") {
+					errorMsg = "推荐码已被使用，请使用其他推荐码"
+				} else {
+					errorMsg = "用户信息重复，请检查用户名、邮箱、推荐码等字段"
+				}
+			}
+			
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
-				"message": "创建用户失败",
+				"message": errorMsg,
+				"error_detail": err.Error(), // 开发环境可以显示详细错误
 			})
 			return
 		}
@@ -151,6 +175,11 @@ func SyncExternalUser(c *gin.Context) {
 			"external_data":   req.ExternalData,
 		}
 		
+		// 只在提供了推荐码时更新
+		if req.AffCode != "" {
+			updates["aff_code"] = req.AffCode
+		}
+		
 		// 只在提供了邮箱时更新邮箱
 		if req.Email != "" {
 			updates["email"] = req.Email
@@ -163,9 +192,23 @@ func SyncExternalUser(c *gin.Context) {
 		
 		if err := model.DB.Model(user).Updates(updates).Error; err != nil {
 			common.SysError("更新外部用户失败: " + err.Error())
+			
+			// 提供更详细的错误信息
+			errorMsg := "更新用户信息失败"
+			if strings.Contains(err.Error(), "Duplicate entry") {
+				if strings.Contains(err.Error(), "email") {
+					errorMsg = "邮箱已被其他用户使用，请使用其他邮箱"
+				} else if strings.Contains(err.Error(), "aff_code") {
+					errorMsg = "推荐码已被其他用户使用，请使用其他推荐码"
+				} else {
+					errorMsg = "用户信息重复，请检查邮箱、推荐码等字段"
+				}
+			}
+			
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
-				"message": "更新用户信息失败",
+				"message": errorMsg,
+				"error_detail": err.Error(), // 开发环境可以显示详细错误
 			})
 			return
 		}

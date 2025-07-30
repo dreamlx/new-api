@@ -434,6 +434,184 @@ curl -X POST http://localhost:3000/api/user/external/topup \
 # - current_balance: 25.50
 ```
 
+## LLM API 调用测试
+
+在创建用户、充值、生成Token后，可以测试实际的LLM模型调用功能。
+
+### 1. 测试可用模型
+```bash
+# 先查看用户可用的模型和余额
+curl -X GET http://localhost:3000/api/user/external/test_user_001/stats | jq '.data.user_info.balance_capacity'
+```
+
+### 2. Chat Completions API 测试
+
+#### 2.1 测试 Qwen Turbo (推荐)
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-YOUR_TOKEN_HERE" \
+  -d '{
+    "model": "qwen-turbo",
+    "messages": [
+      {
+        "role": "user",
+        "content": "你好！"
+      }
+    ]
+  }'
+```
+
+**期望响应：**
+```json
+{
+  "choices": [
+    {
+      "message": {
+        "content": "你好！很高兴见到你！😊 今天过得怎么样？有什么我可以帮你的吗？",
+        "role": "assistant"
+      },
+      "finish_reason": "stop",
+      "index": 0,
+      "logprobs": null
+    }
+  ],
+  "object": "chat.completion",
+  "usage": {
+    "prompt_tokens": 14,
+    "completion_tokens": 18,
+    "total_tokens": 32,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
+  },
+  "created": 1753902335,
+  "system_fingerprint": null,
+  "model": "qwen-turbo",
+  "id": "chatcmpl-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+}
+```
+
+#### 2.2 测试系统角色和多轮对话
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-YOUR_TOKEN_HERE" \
+  -d '{
+    "model": "qwen-turbo",
+    "messages": [
+      {
+        "role": "system",
+        "content": "你是一个有帮助的AI助手，专门回答技术问题。"
+      },
+      {
+        "role": "user",
+        "content": "什么是RESTful API？"
+      }
+    ],
+    "max_tokens": 200,
+    "temperature": 0.7
+  }'
+```
+
+#### 2.3 测试 DeepSeek Chat (如果可用)
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-YOUR_TOKEN_HERE" \
+  -d '{
+    "model": "deepseek-chat",
+    "messages": [
+      {
+        "role": "user",
+        "content": "解释一下机器学习的概念"
+      }
+    ]
+  }'
+```
+
+#### 2.4 测试其他可用模型
+```bash
+# 测试 Qwen Plus (更强大的模型)
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-YOUR_TOKEN_HERE" \
+  -d '{
+    "model": "qwen-plus",
+    "messages": [
+      {
+        "role": "user",
+        "content": "请写一个Python函数来计算斐波那契数列"
+      }
+    ]
+  }'
+```
+
+### 3. 错误场景测试
+
+#### 3.1 无效Token
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-invalid-token" \
+  -d '{
+    "model": "qwen-turbo",
+    "messages": [{"role": "user", "content": "test"}]
+  }'
+```
+
+#### 3.2 不支持的模型
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-YOUR_TOKEN_HERE" \
+  -d '{
+    "model": "nonexistent-model",
+    "messages": [{"role": "user", "content": "test"}]
+  }'
+```
+
+#### 3.3 余额不足
+```bash
+# 先创建一个低余额用户进行测试
+# (需要先同步用户但不充值)
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-LOW_BALANCE_TOKEN" \
+  -d '{
+    "model": "qwen-turbo",
+    "messages": [{"role": "user", "content": "test"}]
+  }'
+```
+
+### 4. 使用统计验证
+
+#### 4.1 调用前查看统计
+```bash
+curl -X GET http://localhost:3000/api/user/external/test_user_001/stats | jq '.data.user_info | {current_quota, used_quota, total_requests}'
+```
+
+#### 4.2 进行LLM调用
+```bash
+curl http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-YOUR_TOKEN_HERE" \
+  -d '{
+    "model": "qwen-turbo",
+    "messages": [{"role": "user", "content": "这是一个测试消息"}]
+  }'
+```
+
+#### 4.3 调用后再次查看统计
+```bash
+curl -X GET http://localhost:3000/api/user/external/test_user_001/stats | jq '.data.user_info | {current_quota, used_quota, total_requests}'
+```
+
+**应该能观察到：**
+- `used_quota` 增加（根据token使用量）
+- `total_requests` 增加1
+- `current_quota` 相应减少
+
 ## 错误处理测试
 
 ### 常见错误场景
@@ -462,6 +640,13 @@ docker logs redis-dev
 - [ ] Token创建API - 成功创建
 - [ ] 用户统计API - 获取统计信息
 
+### LLM API 集成测试 ✅
+- [ ] Chat Completions - qwen-turbo 模型
+- [ ] Chat Completions - deepseek-chat 模型（如果可用）
+- [ ] Chat Completions - qwen-plus 模型
+- [ ] 系统角色和多轮对话
+- [ ] 模型参数配置（max_tokens, temperature等）
+
 ### 边界情况测试 ✅
 - [ ] 参数验证 - 缺少必需字段
 - [ ] 参数验证 - 无效枚举值
@@ -469,17 +654,28 @@ docker logs redis-dev
 - [ ] 金额验证 - 负数/零值
 - [ ] Token名称验证 - 空值
 
+### LLM API 错误测试 ✅
+- [ ] 无效Token - 认证失败
+- [ ] 不支持的模型 - 模型不存在
+- [ ] 余额不足 - quota耗尽
+- [ ] 请求格式错误 - 无效JSON/参数
+
 ### 业务逻辑测试 ✅
 - [ ] Quota计算准确性
 - [ ] 用户信息更新完整性
 - [ ] Token创建和权限
 - [ ] 统计数据一致性
+- [ ] LLM调用后用量统计更新
+- [ ] Balance capacity 模型显示
+- [ ] 渠道禁用实时生效
 
 ### 性能测试 (可选)
 - [ ] 并发用户创建
 - [ ] 批量充值处理
 - [ ] 高频Token创建
 - [ ] 统计查询性能
+- [ ] 并发LLM API调用
+- [ ] 大量token消耗场景
 
 ---
 
