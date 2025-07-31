@@ -24,7 +24,7 @@ func setupTestDB() *gorm.DB {
 	}
 
 	// 自动迁移表结构
-	db.AutoMigrate(&model.User{}, &model.Token{}, &model.TopUp{})
+	db.AutoMigrate(&model.User{}, &model.Token{}, &model.TopUp{}, &model.Log{})
 	
 	// 创建channels表（模拟真实的渠道表结构）
 	db.Exec(`CREATE TABLE IF NOT EXISTS channels (
@@ -311,6 +311,163 @@ func TestCreateExternalUserToken(t *testing.T) {
 			}
 		})
 	}
+}
+
+// 测试消费记录查询API
+func TestGetExternalUserLogs(t *testing.T) {
+	// 设置测试数据库
+	testDB := setupTestDB()
+	model.DB = testDB
+	model.LOG_DB = testDB // 日志使用同一个数据库
+
+	// 创建测试路由
+	router := gin.New()
+	router.GET("/api/user/external/:external_user_id/logs", GetExternalUserLogs)
+
+	// 创建测试用户
+	testUser := &model.User{
+		Id:             999,
+		Username:       "logtest",
+		ExternalUserId: "log_test_user",
+		Email:          "logtest@external.local",
+		Quota:          1000000,
+		IsExternal:     true,
+	}
+	if err := model.DB.Create(testUser).Error; err != nil {
+		t.Fatalf("创建测试用户失败: %v", err)
+	}
+
+	// 创建测试日志记录
+	testLogs := []*model.Log{
+		{
+			UserId:           testUser.Id,
+			Username:         testUser.Username,
+			CreatedAt:        1640995200, // 2022-01-01 00:00:00
+			Type:             model.LogTypeConsume,
+			Content:          "Chat completion request",
+			ModelName:        "qwen-turbo",
+			Quota:            1000,
+			PromptTokens:     50,
+			CompletionTokens: 30,
+		},
+		{
+			UserId:           testUser.Id,
+			Username:         testUser.Username,
+			CreatedAt:        1641081600, // 2022-01-02 00:00:00
+			Type:             model.LogTypeTopup,
+			Content:          "User topup",
+			ModelName:        "",
+			Quota:            500000, // $1.00
+			PromptTokens:     0,
+			CompletionTokens: 0,
+		},
+	}
+
+	for _, log := range testLogs {
+		if err := model.LOG_DB.Create(log).Error; err != nil {
+			t.Fatalf("创建测试日志失败: %v", err)
+		}
+	}
+
+	tests := []struct {
+		name           string
+		externalUserId string
+		queryParams    string
+		expectedStatus int
+		checkResponse  func(*testing.T, *httptest.ResponseRecorder)
+	}{
+		{
+			name:           "查询所有记录",
+			externalUserId: "log_test_user",
+			queryParams:    "",
+			expectedStatus: 200,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response ExternalUserLogsResponse
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				assert.NoError(t, err)
+				assert.True(t, response.Success)
+				assert.Len(t, response.Data.Logs, 2)
+				assert.Equal(t, 1, response.Data.Pagination.Page)
+				assert.Equal(t, 20, response.Data.Pagination.PageSize)
+				assert.Equal(t, int64(2), response.Data.Pagination.Total)
+			},
+		},
+		{
+			name:           "按日期筛选",
+			externalUserId: "log_test_user",
+			queryParams:    "?start_date=2022-01-01&end_date=2022-01-01",
+			expectedStatus: 200,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response ExternalUserLogsResponse
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				assert.NoError(t, err)
+				assert.True(t, response.Success)
+				assert.Len(t, response.Data.Logs, 1)
+				assert.Equal(t, "qwen-turbo", response.Data.Logs[0].Model)
+			},
+		},
+		{
+			name:           "按模型筛选",
+			externalUserId: "log_test_user",
+			queryParams:    "?model_name=qwen",
+			expectedStatus: 200,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response ExternalUserLogsResponse
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				assert.NoError(t, err)
+				assert.True(t, response.Success)
+				assert.Len(t, response.Data.Logs, 1)
+				assert.Equal(t, "consume", response.Data.Logs[0].Type)
+			},
+		},
+		{
+			name:           "分页测试",
+			externalUserId: "log_test_user",
+			queryParams:    "?page=1&page_size=1",
+			expectedStatus: 200,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response ExternalUserLogsResponse
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				assert.NoError(t, err)
+				assert.True(t, response.Success)
+				assert.Len(t, response.Data.Logs, 1)
+				assert.Equal(t, 1, response.Data.Pagination.Page)
+				assert.Equal(t, 1, response.Data.Pagination.PageSize)
+				assert.Equal(t, 2, response.Data.Pagination.TotalPage)
+			},
+		},
+		{
+			name:           "用户不存在",
+			externalUserId: "nonexistent_user",
+			queryParams:    "",
+			expectedStatus: 404,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var response map[string]interface{}
+				err := json.Unmarshal(w.Body.Bytes(), &response)
+				assert.NoError(t, err)
+				assert.False(t, response["success"].(bool))
+				assert.Equal(t, "用户不存在", response["message"].(string))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", "/api/user/external/"+tt.externalUserId+"/logs"+tt.queryParams, nil)
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.checkResponse != nil {
+				tt.checkResponse(t, w)
+			}
+		})
+	}
+
+	// 清理测试数据
+	model.LOG_DB.Where("user_id = ?", testUser.Id).Delete(&model.Log{})
+	model.DB.Delete(testUser)
 }
 
 // 测试用户统计API

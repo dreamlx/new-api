@@ -354,7 +354,95 @@ curl -X GET http://localhost:3000/api/user/external/nonexistent_user/stats
 }
 ```
 
-### 5. 完整流程测试
+### 5. 消费记录查询API
+
+#### 5.1 查询所有消费记录
+```bash
+curl -X GET "http://localhost:3000/api/user/external/test_user_001/logs"
+```
+
+**期望响应：**
+```json
+{
+  "success": true,
+  "data": {
+    "logs": [
+      {
+        "time": "2024-01-30 15:30:25",
+        "username": "testuser",
+        "tokens": 32,
+        "type": "consume",
+        "model": "qwen-turbo",
+        "spend": 0.0017144
+      },
+      {
+        "time": "2024-01-30 10:00:00",  
+        "username": "testuser",
+        "tokens": 0,
+        "type": "topup",
+        "model": "",
+        "spend": 10.0
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "page_size": 20,
+      "total": 2,
+      "total_page": 1
+    },
+    "summary": {
+      "total_tokens": 32,
+      "total_spend": 10.0017144
+    }
+  }
+}
+```
+
+#### 5.2 按日期范围查询
+```bash
+curl -X GET "http://localhost:3000/api/user/external/test_user_001/logs?start_date=2024-01-01&end_date=2024-01-31"
+```
+
+#### 5.3 按模型筛选查询
+```bash
+curl -X GET "http://localhost:3000/api/user/external/test_user_001/logs?model_name=qwen"
+```
+
+#### 5.4 分页查询
+```bash
+curl -X GET "http://localhost:3000/api/user/external/test_user_001/logs?page=1&page_size=10"
+```
+
+#### 5.5 组合查询条件
+```bash
+curl -X GET "http://localhost:3000/api/user/external/test_user_001/logs?start_date=2024-01-15&model_name=qwen&page=1&page_size=5"
+```
+
+#### 5.6 测试用户不存在
+```bash
+curl -X GET "http://localhost:3000/api/user/external/nonexistent_user/logs"
+```
+
+**期望响应：**
+```json
+{
+  "success": false,
+  "message": "用户不存在"
+}
+```
+
+#### 5.7 测试无效日期格式
+```bash
+curl -X GET "http://localhost:3000/api/user/external/test_user_001/logs?start_date=invalid-date"
+```
+
+**说明：**
+- 无效日期会被忽略，按所有记录查询
+- `start_date` 和 `end_date` 必须是 `YYYY-MM-DD` 格式
+- `model_name` 支持模糊匹配（使用 LIKE 查询）
+- `page_size` 最大限制为100
+
+### 6. 完整流程测试
 
 以下是一个完整的用户生命周期测试流程：
 
@@ -639,6 +727,10 @@ docker logs redis-dev
 - [ ] 用户充值API - 成功充值
 - [ ] Token创建API - 成功创建
 - [ ] 用户统计API - 获取统计信息
+- [ ] 消费记录API - 查询所有记录
+- [ ] 消费记录API - 按日期筛选
+- [ ] 消费记录API - 按模型筛选
+- [ ] 消费记录API - 分页查询
 
 ### LLM API 集成测试 ✅
 - [ ] Chat Completions - qwen-turbo 模型

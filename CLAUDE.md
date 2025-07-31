@@ -108,17 +108,17 @@ GET /api/user/external/{external_user_id}
 - [x] 外部用户充值 API (controller/external_user.go) - POST /api/user/external/topup  
 - [x] 外部用户Token管理 API (controller/external_user.go) - POST /api/user/external/token
 - [x] 外部用户统计 API (controller/external_user.go) - GET /api/user/external/{id}/stats
+- [x] 外部用户消费记录 API (controller/external_user.go) - GET /api/user/external/{id}/logs
 - [x] 路由配置 (router/api-router.go) - 外部用户相关路由
-- [x] 数据库迁移脚本整合到代码中
-- [x] API文档完善 (docs/external-user-api.md)
-- [x] 开发指南文档 (docs/development-guide.md)
-
-### 当前进行中 🔄
-- [x] API接口功能测试和验证
+- [x] 数据库迁移脚本整合到代码中 (scripts/init-db.sh, scripts/init-external-user-db.sql)
+- [x] API文档完善 (docs/external-user-api.md) - 包含消费记录查询接口
+- [x] 开发指南文档 (docs/development-guide.md) - 基于 Make + Docker Compose 工作流
+- [x] curl测试指南 (docs/curl-testing-guide.md) - 包含消费记录测试用例
+- [x] 单元测试和集成测试用例 (controller/external_user_test.go) - 覆盖所有API
+- [x] 错误处理和边界情况优化 - 详细错误信息和参数验证
+- [x] API接口功能测试和验证 - 全部通过
 
 ### 待完成功能 📋
-- [ ] 单元测试和集成测试用例
-- [ ] 错误处理和边界情况优化
 - [ ] 性能优化和安全加固
 - [ ] 生产环境部署配置
 - [ ] 监控和日志系统集成

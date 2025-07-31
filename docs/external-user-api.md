@@ -216,6 +216,93 @@ GET /api/user/external/{external_user_id}/stats
 - `pricing_note`: 详细的计费说明，包含输入和输出token的消费
 - 只显示当前启用渠道的模型，禁用渠道的模型不会出现
 
+### 5. 消费记录查询接口
+
+#### 获取用户消费记录
+```http
+GET /api/user/external/{external_user_id}/logs
+```
+
+**查询参数**:
+- `start_date` (string, optional): 开始日期，格式：2024-01-01
+- `end_date` (string, optional): 结束日期，格式：2024-01-31  
+- `username` (string, optional): 用户名筛选
+- `model_name` (string, optional): 模型名筛选（支持模糊匹配）
+- `page` (int, optional): 页码，默认1
+- `page_size` (int, optional): 每页大小，默认20，最大100
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "data": {
+    "logs": [
+      {
+        "time": "2024-01-30 15:30:25",
+        "username": "testuser",
+        "tokens": 80,
+        "type": "consume",
+        "model": "qwen-turbo",
+        "spend": 0.002
+      },
+      {
+        "time": "2024-01-30 10:00:00",
+        "username": "testuser", 
+        "tokens": 0,
+        "type": "topup",
+        "model": "",
+        "spend": -10.0
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "page_size": 20,
+      "total": 25,
+      "total_page": 2
+    },
+    "summary": {
+      "total_tokens": 1250,
+      "total_spend": 2.15
+    }
+  }
+}
+```
+
+**字段说明**:
+- `time`: 记录时间，格式：YYYY-MM-DD HH:mm:ss
+- `username`: 用户名
+- `tokens`: Token消费数量（prompt + completion），充值记录为0
+- `type`: 记录类型
+  - `consume`: 消费记录（调用LLM）
+  - `topup`: 充值记录
+  - `error`: 错误记录
+- `model`: 使用的模型名称，充值记录为空
+- `spend`: 花费金额（美元）
+  - 正数：实际消费
+  - 负数：充值金额（显示为负数便于区分）
+- `pagination`: 分页信息
+- `summary`: 汇总信息
+  - `total_tokens`: 本页记录的总Token消费
+  - `total_spend`: 本页记录的总花费
+
+**使用示例**:
+```bash
+# 查询所有记录
+GET /api/user/external/test_user_001/logs
+
+# 按日期范围查询
+GET /api/user/external/test_user_001/logs?start_date=2024-01-01&end_date=2024-01-31
+
+# 按模型筛选
+GET /api/user/external/test_user_001/logs?model_name=qwen
+
+# 分页查询
+GET /api/user/external/test_user_001/logs?page=2&page_size=10
+
+# 组合查询
+GET /api/user/external/test_user_001/logs?start_date=2024-01-15&model_name=qwen&page=1&page_size=50
+```
+
 ## LLM API 使用
 
 创建Token后，用户可以使用标准的OpenAI兼容API调用LLM模型：

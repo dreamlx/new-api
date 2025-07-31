@@ -8,6 +8,7 @@ import (
 	"one-api/model"
 	"one-api/setting/ratio_setting"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -365,6 +366,201 @@ func CreateExternalUserToken(c *gin.Context) {
 	response.Data.TokenName = token.Name
 	response.Data.ExpiresAt = token.ExpiredTime
 	response.Data.RemainQuota = user.Quota
+
+	c.JSON(http.StatusOK, response)
+}
+
+// 外部用户消费记录查询请求结构
+type ExternalUserLogsRequest struct {
+	StartDate string `json:"start_date" form:"start_date"` // 格式: 2024-01-01
+	EndDate   string `json:"end_date" form:"end_date"`     // 格式: 2024-01-31
+	Username  string `json:"username" form:"username"`     // 用户名筛选
+	ModelName string `json:"model_name" form:"model_name"` // 模型名筛选
+	Page      int    `json:"page" form:"page"`             // 页码，默认1
+	PageSize  int    `json:"page_size" form:"page_size"`   // 每页大小，默认20
+}
+
+// 外部用户消费记录响应结构
+type ExternalUserLogsResponse struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Logs []struct {
+			Time     string  `json:"time"`      // 时间，格式: 2024-01-30 15:30:25
+			Username string  `json:"username"`  // 用户名
+			Tokens   int     `json:"tokens"`    // 消费的Token数量 (prompt + completion)
+			Type     string  `json:"type"`      // 类型: consume/topup/error
+			Model    string  `json:"model"`     // 模型名称
+			Spend    float64 `json:"spend"`     // 花费金额 (美元)
+		} `json:"logs"`
+		Pagination struct {
+			Page      int   `json:"page"`       // 当前页码
+			PageSize  int   `json:"page_size"`  // 每页大小
+			Total     int64 `json:"total"`      // 总记录数
+			TotalPage int   `json:"total_page"` // 总页数
+		} `json:"pagination"`
+		Summary struct {
+			TotalTokens int     `json:"total_tokens"` // 总Token消费
+			TotalSpend  float64 `json:"total_spend"`  // 总花费 (美元)
+		} `json:"summary"`
+	} `json:"data"`
+}
+
+// 获取外部用户消费记录
+func GetExternalUserLogs(c *gin.Context) {
+	externalUserId := c.Param("external_user_id")
+	if externalUserId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "external_user_id参数缺失",
+		})
+		return
+	}
+
+	// 查找外部用户
+	user := &model.User{}
+	if err := model.DB.Where("external_user_id = ?", externalUserId).First(user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "用户不存在",
+		})
+		return
+	}
+
+	// 解析查询参数
+	var req ExternalUserLogsRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请求参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 设置默认值
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 20
+	}
+	if req.PageSize > 100 {
+		req.PageSize = 100 // 限制最大页面大小
+	}
+
+	// 转换时间参数
+	var startTimestamp, endTimestamp int64
+	if req.StartDate != "" {
+		if t, err := time.Parse("2006-01-02", req.StartDate); err == nil {
+			startTimestamp = t.Unix()
+		}
+	}
+	if req.EndDate != "" {
+		if t, err := time.Parse("2006-01-02", req.EndDate); err == nil {
+			// 设置为当天结束时间 (23:59:59)
+			endTimestamp = t.Add(24*time.Hour - time.Second).Unix()
+		}
+	}
+
+	// 计算分页参数
+	startIdx := (req.Page - 1) * req.PageSize
+
+	// 查询日志记录 (只查询消费和充值记录)
+	var logs []*model.Log
+	var total int64
+	
+	// 构建查询条件
+	tx := model.LOG_DB.Where("user_id = ? AND (type = ? OR type = ?)", 
+		user.Id, model.LogTypeConsume, model.LogTypeTopup)
+	
+	if req.Username != "" {
+		tx = tx.Where("username = ?", req.Username)
+	}
+	if req.ModelName != "" {
+		tx = tx.Where("model_name LIKE ?", "%"+req.ModelName+"%")
+	}
+	if startTimestamp > 0 {
+		tx = tx.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp > 0 {
+		tx = tx.Where("created_at <= ?", endTimestamp)
+	}
+
+	// 获取总数
+	if err := tx.Model(&model.Log{}).Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "查询失败",
+		})
+		return
+	}
+
+	// 获取分页数据
+	if err := tx.Order("created_at DESC").Offset(startIdx).Limit(req.PageSize).Find(&logs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "查询失败",
+		})
+		return
+	}
+
+	// 构造响应数据
+	var response ExternalUserLogsResponse
+	response.Success = true
+	
+	// 转换日志数据
+	var totalTokens int
+	var totalSpend float64
+	
+	for _, log := range logs {
+		logTime := time.Unix(log.CreatedAt, 0).Format("2006-01-02 15:04:05")
+		
+		// 计算Token数量
+		tokens := log.PromptTokens + log.CompletionTokens
+		totalTokens += tokens
+		
+		// 计算花费金额 (quota转美元)
+		spend := float64(log.Quota) / common.QuotaPerUnit
+		
+		// 确定记录类型
+		logType := "consume"
+		if log.Type == model.LogTypeTopup {
+			logType = "topup"
+			// 充值记录显示为负数，便于区分
+			spend = -spend
+		} else if log.Type == model.LogTypeError {
+			logType = "error"
+		}
+		
+		totalSpend += spend
+		
+		logItem := struct {
+			Time     string  `json:"time"`
+			Username string  `json:"username"`
+			Tokens   int     `json:"tokens"`
+			Type     string  `json:"type"`
+			Model    string  `json:"model"`
+			Spend    float64 `json:"spend"`
+		}{
+			Time:     logTime,
+			Username: log.Username,
+			Tokens:   tokens,
+			Type:     logType,
+			Model:    log.ModelName,
+			Spend:    spend,
+		}
+		
+		response.Data.Logs = append(response.Data.Logs, logItem)
+	}
+	
+	// 设置分页信息
+	response.Data.Pagination.Page = req.Page
+	response.Data.Pagination.PageSize = req.PageSize
+	response.Data.Pagination.Total = total
+	response.Data.Pagination.TotalPage = int((total + int64(req.PageSize) - 1) / int64(req.PageSize))
+	
+	// 设置汇总信息
+	response.Data.Summary.TotalTokens = totalTokens
+	response.Data.Summary.TotalSpend = totalSpend
 
 	c.JSON(http.StatusOK, response)
 }
