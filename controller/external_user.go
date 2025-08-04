@@ -24,13 +24,13 @@ type SyncExternalUserRequest struct {
 	WechatUnionId  string `json:"wechat_unionid" binding:"omitempty,max=100"`
 	AlipayUserId   string `json:"alipay_userid" binding:"omitempty,max=100"`
 	LoginType      string `json:"login_type" binding:"omitempty,oneof=email wechat alipay sms"`
-	AffCode        string `json:"aff_code" binding:"omitempty,max=32"`        // 推荐码（可选）
+	AffCode        string `json:"aff_code" binding:"omitempty,max=32"` // 推荐码（可选）
 	ExternalData   string `json:"external_data" binding:"omitempty"`
 }
 
 // 外部用户同步响应结构
 type SyncExternalUserResponse struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
 		UserId         int    `json:"user_id"`
@@ -48,14 +48,14 @@ type ExternalUserTopUpRequest struct {
 
 // 外部用户充值响应结构
 type ExternalUserTopUpResponse struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		AmountUSD       float64 `json:"amount_usd"`
-		QuotaAdded      int     `json:"quota_added"`
-		CurrentQuota    int     `json:"current_quota"`
-		CurrentBalance  float64 `json:"current_balance"`
-		PaymentId       string  `json:"payment_id"`
+		AmountUSD      float64 `json:"amount_usd"`
+		QuotaAdded     int     `json:"quota_added"`
+		CurrentQuota   int     `json:"current_quota"`
+		CurrentBalance float64 `json:"current_balance"`
+		PaymentId      string  `json:"payment_id"`
 	} `json:"data"`
 }
 
@@ -68,14 +68,14 @@ type ExternalUserTokenRequest struct {
 
 // 外部用户Token创建响应结构
 type ExternalUserTokenResponse struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		TokenId      int    `json:"token_id"`
-		AccessKey    string `json:"access_key"`
-		TokenName    string `json:"token_name"`
-		ExpiresAt    int64  `json:"expires_at"`
-		RemainQuota  int    `json:"remain_quota"`
+		TokenId     int    `json:"token_id"`
+		AccessKey   string `json:"access_key"`
+		TokenName   string `json:"token_name"`
+		ExpiresAt   int64  `json:"expires_at"`
+		RemainQuota int    `json:"remain_quota"`
 	} `json:"data"`
 }
 
@@ -93,23 +93,23 @@ func SyncExternalUser(c *gin.Context) {
 	// 检查external_user_id是否已存在
 	existingUser := &model.User{}
 	result := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(existingUser)
-	
+
 	var user *model.User
 	var isNewUser bool
-	
+
 	if result.Error != nil {
 		// 用户不存在，创建新用户
 		isNewUser = true
-		
+
 		// 生成虚拟邮箱（如果没有提供邮箱）
 		email := req.Email
 		if email == "" {
 			email = fmt.Sprintf("%s@external.local", req.ExternalUserId)
 		}
-		
+
 		// 生成默认密码（外部用户不需要密码登录）
 		defaultPassword := common.GetRandomString(16)
-		
+
 		user = &model.User{
 			Username:       req.Username,
 			DisplayName:    req.DisplayName,
@@ -127,15 +127,15 @@ func SyncExternalUser(c *gin.Context) {
 			Status:         common.UserStatusEnabled,
 			Quota:          common.QuotaForNewUser,
 		}
-		
+
 		// 只在提供了推荐码时设置，否则保持 NULL
 		if req.AffCode != "" {
-			user.AffCode = req.AffCode
+			user.AffCode = &req.AffCode
 		}
-		
+
 		if err := model.DB.Create(user).Error; err != nil {
 			common.SysError("创建外部用户失败: " + err.Error())
-			
+
 			// 提供更详细的错误信息
 			errorMsg := "创建用户失败"
 			if strings.Contains(err.Error(), "Duplicate entry") {
@@ -151,49 +151,49 @@ func SyncExternalUser(c *gin.Context) {
 					errorMsg = "用户信息重复，请检查用户名、邮箱、推荐码等字段"
 				}
 			}
-			
+
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"success": false,
-				"message": errorMsg,
+				"success":      false,
+				"message":      errorMsg,
 				"error_detail": err.Error(), // 开发环境可以显示详细错误
 			})
 			return
 		}
-		
+
 		common.SysLog(fmt.Sprintf("外部用户创建成功: %s (ID: %d)", req.ExternalUserId, user.Id))
 	} else {
 		// 用户已存在，更新用户信息
 		isNewUser = false
 		user = existingUser
-		
+
 		// 更新允许的字段
 		updates := map[string]interface{}{
-			"display_name":    req.DisplayName,
-			"phone":           req.Phone,
-			"wechat_openid":   req.WechatOpenId,
-			"wechat_unionid":  req.WechatUnionId,
-			"alipay_userid":   req.AlipayUserId,
-			"external_data":   req.ExternalData,
+			"display_name":   req.DisplayName,
+			"phone":          req.Phone,
+			"wechat_openid":  req.WechatOpenId,
+			"wechat_unionid": req.WechatUnionId,
+			"alipay_userid":  req.AlipayUserId,
+			"external_data":  req.ExternalData,
 		}
-		
+
 		// 只在提供了推荐码时更新
 		if req.AffCode != "" {
 			updates["aff_code"] = req.AffCode
 		}
-		
+
 		// 只在提供了邮箱时更新邮箱
 		if req.Email != "" {
 			updates["email"] = req.Email
 		}
-		
+
 		// 只在提供了登录类型时更新
 		if req.LoginType != "" {
 			updates["login_type"] = getLoginType(req.LoginType)
 		}
-		
+
 		if err := model.DB.Model(user).Updates(updates).Error; err != nil {
 			common.SysError("更新外部用户失败: " + err.Error())
-			
+
 			// 提供更详细的错误信息
 			errorMsg := "更新用户信息失败"
 			if strings.Contains(err.Error(), "Duplicate entry") {
@@ -205,15 +205,15 @@ func SyncExternalUser(c *gin.Context) {
 					errorMsg = "用户信息重复，请检查邮箱、推荐码等字段"
 				}
 			}
-			
+
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"success": false,
-				"message": errorMsg,
+				"success":      false,
+				"message":      errorMsg,
 				"error_detail": err.Error(), // 开发环境可以显示详细错误
 			})
 			return
 		}
-		
+
 		common.SysLog(fmt.Sprintf("外部用户更新成功: %s (ID: %d)", req.ExternalUserId, user.Id))
 	}
 
@@ -257,7 +257,7 @@ func ExternalUserTopUp(c *gin.Context) {
 
 	// 计算要增加的quota（$1 USD = 500,000 quota）
 	quotaToAdd := int(req.AmountUSD * common.QuotaPerUnit)
-	
+
 	// 更新用户quota
 	if err := model.DB.Model(user).Update("quota", user.Quota+quotaToAdd).Error; err != nil {
 		common.SysError("充值更新quota失败: " + err.Error())
@@ -278,7 +278,7 @@ func ExternalUserTopUp(c *gin.Context) {
 		CompleteTime: common.GetTimestamp(),
 		Status:       "success",
 	}
-	
+
 	if err := model.DB.Create(topUpRecord).Error; err != nil {
 		common.SysError("创建充值记录失败: " + err.Error())
 		// 这里不返回错误，因为quota已经更新成功
@@ -286,8 +286,8 @@ func ExternalUserTopUp(c *gin.Context) {
 
 	// 重新获取用户信息
 	model.DB.First(user, user.Id)
-	
-	common.SysLog(fmt.Sprintf("外部用户充值成功: %s, 金额: $%.2f, 增加quota: %d", 
+
+	common.SysLog(fmt.Sprintf("外部用户充值成功: %s, 金额: $%.2f, 增加quota: %d",
 		req.ExternalUserId, req.AmountUSD, quotaToAdd))
 
 	// 构造响应
@@ -333,14 +333,14 @@ func CreateExternalUserToken(c *gin.Context) {
 
 	// 创建Token
 	token := &model.Token{
-		UserId:        user.Id,
-		Key:           common.GetRandomString(32),
-		Name:          req.TokenName,
-		CreatedTime:   common.GetTimestamp(),
-		AccessedTime:  common.GetTimestamp(),
-		ExpiredTime:   common.GetTimestamp() + int64(expiresInDays*24*3600),
-		Status:        common.TokenStatusEnabled,
-		RemainQuota:   user.Quota,
+		UserId:         user.Id,
+		Key:            common.GetRandomString(32),
+		Name:           req.TokenName,
+		CreatedTime:    common.GetTimestamp(),
+		AccessedTime:   common.GetTimestamp(),
+		ExpiredTime:    common.GetTimestamp() + int64(expiresInDays*24*3600),
+		Status:         common.TokenStatusEnabled,
+		RemainQuota:    user.Quota,
 		UnlimitedQuota: false,
 	}
 
@@ -353,7 +353,7 @@ func CreateExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	common.SysLog(fmt.Sprintf("为外部用户创建Token成功: %s, Token名称: %s", 
+	common.SysLog(fmt.Sprintf("为外部用户创建Token成功: %s, Token名称: %s",
 		req.ExternalUserId, req.TokenName))
 
 	// 构造响应
@@ -385,12 +385,12 @@ type ExternalUserLogsResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
 		Logs []struct {
-			Time     string  `json:"time"`      // 时间，格式: 2024-01-30 15:30:25
-			Username string  `json:"username"`  // 用户名
-			Tokens   int     `json:"tokens"`    // 消费的Token数量 (prompt + completion)
-			Type     string  `json:"type"`      // 类型: consume/topup/error
-			Model    string  `json:"model"`     // 模型名称
-			Spend    float64 `json:"spend"`     // 花费金额 (美元)
+			Time     string  `json:"time"`     // 时间，格式: 2024-01-30 15:30:25
+			Username string  `json:"username"` // 用户名
+			Tokens   int     `json:"tokens"`   // 消费的Token数量 (prompt + completion)
+			Type     string  `json:"type"`     // 类型: consume/topup/error
+			Model    string  `json:"model"`    // 模型名称
+			Spend    float64 `json:"spend"`    // 花费金额 (美元)
 		} `json:"logs"`
 		Pagination struct {
 			Page      int   `json:"page"`       // 当前页码
@@ -467,11 +467,11 @@ func GetExternalUserLogs(c *gin.Context) {
 	// 查询日志记录 (只查询消费和充值记录)
 	var logs []*model.Log
 	var total int64
-	
+
 	// 构建查询条件
-	tx := model.LOG_DB.Where("user_id = ? AND (type = ? OR type = ?)", 
+	tx := model.LOG_DB.Where("user_id = ? AND (type = ? OR type = ?)",
 		user.Id, model.LogTypeConsume, model.LogTypeTopup)
-	
+
 	if req.Username != "" {
 		tx = tx.Where("username = ?", req.Username)
 	}
@@ -506,21 +506,21 @@ func GetExternalUserLogs(c *gin.Context) {
 	// 构造响应数据
 	var response ExternalUserLogsResponse
 	response.Success = true
-	
+
 	// 转换日志数据
 	var totalTokens int
 	var totalSpend float64
-	
+
 	for _, log := range logs {
 		logTime := time.Unix(log.CreatedAt, 0).Format("2006-01-02 15:04:05")
-		
+
 		// 计算Token数量
 		tokens := log.PromptTokens + log.CompletionTokens
 		totalTokens += tokens
-		
+
 		// 计算花费金额 (quota转美元)
 		spend := float64(log.Quota) / common.QuotaPerUnit
-		
+
 		// 确定记录类型
 		logType := "consume"
 		if log.Type == model.LogTypeTopup {
@@ -530,9 +530,9 @@ func GetExternalUserLogs(c *gin.Context) {
 		} else if log.Type == model.LogTypeError {
 			logType = "error"
 		}
-		
+
 		totalSpend += spend
-		
+
 		logItem := struct {
 			Time     string  `json:"time"`
 			Username string  `json:"username"`
@@ -548,16 +548,16 @@ func GetExternalUserLogs(c *gin.Context) {
 			Model:    log.ModelName,
 			Spend:    spend,
 		}
-		
+
 		response.Data.Logs = append(response.Data.Logs, logItem)
 	}
-	
+
 	// 设置分页信息
 	response.Data.Pagination.Page = req.Page
 	response.Data.Pagination.PageSize = req.PageSize
 	response.Data.Pagination.Total = total
 	response.Data.Pagination.TotalPage = int((total + int64(req.PageSize) - 1) / int64(req.PageSize))
-	
+
 	// 设置汇总信息
 	response.Data.Summary.TotalTokens = totalTokens
 	response.Data.Summary.TotalSpend = totalSpend
@@ -620,9 +620,9 @@ func GetExternalUserStats(c *gin.Context) {
 				"total_requests":   user.RequestCount,
 				"balance_capacity": balanceCapacity,
 			},
-			"tokens":       tokenInfos,
-			"recent_logs":  []interface{}{}, // 可以后续实现
-			"model_usage":  map[string]interface{}{}, // 可以后续实现
+			"tokens":      tokenInfos,
+			"recent_logs": []interface{}{},          // 可以后续实现
+			"model_usage": map[string]interface{}{}, // 可以后续实现
 		},
 	}
 
@@ -676,11 +676,11 @@ func getLoginType(loginType string) string {
 // 辅助函数：计算余额可购买的模型容量
 func calculateBalanceCapacity(quota int) map[string]interface{} {
 	capacity := make(map[string]interface{})
-	
+
 	if quota <= 0 {
 		return capacity
 	}
-	
+
 	// 从数据库查询启用的渠道
 	var channels []struct {
 		Name      string `json:"name"`
@@ -688,7 +688,7 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 		TestModel string `json:"test_model"`
 		Status    int    `json:"status"`
 	}
-	
+
 	// 查询启用状态的渠道
 	if err := model.DB.Table("channels").
 		Select("name, models, test_model, status").
@@ -697,17 +697,16 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 		common.SysLog(fmt.Sprintf("查询渠道配置失败: %v", err))
 		// 返回错误信息，提示联系管理员
 		capacity["_error"] = map[string]interface{}{
-			"message": "无法查询模型配置，请联系管理员检查系统配置",
+			"message":    "无法查询模型配置，请联系管理员检查系统配置",
 			"error_code": "CHANNEL_QUERY_FAILED",
 		}
 		return capacity
 	}
-	
-	
+
 	// 收集所有启用的模型和优先的测试模型
 	modelSet := make(map[string]bool)
 	testModels := make(map[string]bool) // 记录哪些是测试模型
-	
+
 	for _, channel := range channels {
 		// 优先收集测试模型
 		if channel.TestModel != "" {
@@ -717,7 +716,7 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 				testModels[testModel] = true
 			}
 		}
-		
+
 		// 然后收集其他模型
 		if channel.Models != "" {
 			// 解析models字段（可能是JSON数组或逗号分隔的字符串）
@@ -726,7 +725,7 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 				// 如果不是JSON格式，尝试按逗号分割
 				models = strings.Split(channel.Models, ",")
 			}
-			
+
 			for _, modelName := range models {
 				modelName = strings.TrimSpace(modelName)
 				if modelName != "" {
@@ -735,27 +734,27 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 			}
 		}
 	}
-	
+
 	// 获取分组倍率 (简化处理，使用默认分组倍率1.0)
 	groupRatio := 1.0
-	
+
 	// 创建模型列表，优先处理测试模型
 	var modelList []string
-	
+
 	// 先添加测试模型（优先显示）
 	for modelName := range testModels {
 		if modelSet[modelName] { // 确保模型在启用列表中
 			modelList = append(modelList, modelName)
 		}
 	}
-	
+
 	// 再添加其他模型
 	for modelName := range modelSet {
 		if !testModels[modelName] { // 不是测试模型的其他模型
 			modelList = append(modelList, modelName)
 		}
 	}
-	
+
 	// 计算余额容量
 	modelCount := 0
 	for _, modelName := range modelList {
@@ -764,46 +763,46 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 		if !exists {
 			continue // 跳过未配置倍率的模型
 		}
-		
+
 		// 获取补全倍率
 		completionRatio := ratio_setting.GetCompletionRatio(modelName)
-		
+
 		// 计算基础价格：modelRatio * $0.002 / 1K tokens
 		basePrice := modelRatio * 0.002
-		
+
 		// 计算每1K input tokens的消费（不考虑completion）
 		// 注意：New API的计费公式中，modelRatio可能是小数，我们需要保持精度
 		quotaPerToken := groupRatio * modelRatio // 每个token消耗的quota
-		quotaPer1K := quotaPerToken * 1000 // 每1K token消耗的quota
+		quotaPer1K := quotaPerToken * 1000       // 每1K token消耗的quota
 		inputQuotaPer1K := int(quotaPer1K + 0.5) // 四舍五入转为整数
-		
+
 		// 防止除零错误
 		if inputQuotaPer1K <= 0 {
 			continue
 		}
-		
+
 		// 计算可调用的input tokens数量
 		maxInputTokens1K := quota / inputQuotaPer1K
-		
+
 		if maxInputTokens1K > 0 {
 			modelInfo := map[string]interface{}{
-				"input_tokens_1k":  maxInputTokens1K,
-				"model_ratio":      modelRatio,
-				"completion_ratio": completionRatio,
-				"group_ratio":      groupRatio,
-				"base_price_usd":   basePrice,
+				"input_tokens_1k":    maxInputTokens1K,
+				"model_ratio":        modelRatio,
+				"completion_ratio":   completionRatio,
+				"group_ratio":        groupRatio,
+				"base_price_usd":     basePrice,
 				"quota_per_1k_input": inputQuotaPer1K,
-				"pricing_note": fmt.Sprintf("输入：%d quota/1K tokens，输出：%d quota/1K tokens", 
+				"pricing_note": fmt.Sprintf("输入：%d quota/1K tokens，输出：%d quota/1K tokens",
 					inputQuotaPer1K, int(float64(inputQuotaPer1K)*completionRatio)),
 			}
-			
+
 			// 标记是否为默认测试模型
 			if testModels[modelName] {
 				modelInfo["is_default_model"] = true
 			}
-			
+
 			capacity[modelName] = modelInfo
-			
+
 			modelCount++
 			// 限制返回的模型数量（避免返回太多模型）
 			if modelCount >= 8 {
@@ -811,7 +810,7 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 			}
 		}
 	}
-	
+
 	// 添加总体信息
 	dollarBalance := float64(quota) / common.QuotaPerUnit
 	capacity["_summary"] = map[string]interface{}{
@@ -820,8 +819,8 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 		"quota_per_usd":     common.QuotaPerUnit,
 		"billing_formula":   "消耗quota = 分组倍率 × 模型倍率 × (输入tokens + 输出tokens × 补全倍率)",
 		"models_available":  modelCount,
-		"note": "实际消费取决于输入和输出token数量，此处仅显示输入token的估算",
+		"note":              "实际消费取决于输入和输出token数量，此处仅显示输入token的估算",
 	}
-	
+
 	return capacity
 }

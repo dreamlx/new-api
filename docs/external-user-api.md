@@ -411,6 +411,68 @@ const response = await fetch('https://api.example.com/v1/chat/completions', {
 const updatedStats = await newApi.getUserStats('amos_wechat_123');
 console.log('消费后余额：$', updatedStats.data.user_info.current_balance);
 console.log('总请求次数：', updatedStats.data.user_info.total_requests);
+
+// 7. 查询消费记录
+const logs = await newApi.getUserLogs('amos_wechat_123', {
+  start_date: '2024-01-01',
+  end_date: '2024-01-31',
+  page: 1,
+  page_size: 10
+});
+console.log('消费记录：', logs.data.logs);
+console.log('总消费：$', logs.data.summary.total_spend);
+console.log('消费Token数：', logs.data.summary.total_tokens);
+```
+
+### 常见消费记录查询场景
+
+#### 场景1：用户账单查询
+```javascript
+// 查询当月消费记录
+const monthlyLogs = await fetch('/api/user/external/user_001/logs?start_date=2024-01-01&end_date=2024-01-31');
+const data = await monthlyLogs.json();
+
+// 按类型统计
+const consumeRecords = data.data.logs.filter(log => log.type === 'consume');
+const topupRecords = data.data.logs.filter(log => log.type === 'topup');
+
+console.log(`本月消费：${consumeRecords.length}次，充值：${topupRecords.length}次`);
+```
+
+#### 场景2：模型使用分析
+```javascript
+// 查询特定模型的使用情况
+const modelLogs = await fetch('/api/user/external/user_001/logs?model_name=qwen&page_size=100');
+const data = await modelLogs.json();
+
+// 计算模型使用统计
+const modelStats = data.data.logs.reduce((stats, log) => {
+  const model = log.model;
+  if (!stats[model]) stats[model] = { count: 0, tokens: 0, spend: 0 };
+  stats[model].count++;
+  stats[model].tokens += log.tokens;
+  stats[model].spend += log.spend;
+  return stats;
+}, {});
+
+console.log('模型使用统计：', modelStats);
+```
+
+#### 场景3：成本控制监控
+```javascript
+// 查询最近7天的消费趋势
+const weeklyLogs = await fetch('/api/user/external/user_001/logs?start_date=2024-01-25&end_date=2024-01-31');
+const data = await weeklyLogs.json();
+
+// 按日期分组统计
+const dailySpend = data.data.logs.reduce((daily, log) => {
+  const date = log.time.split(' ')[0]; // 获取日期部分
+  if (!daily[date]) daily[date] = 0;
+  if (log.spend > 0) daily[date] += log.spend; // 只统计消费，不包括充值
+  return daily;
+}, {});
+
+console.log('每日消费趋势：', dailySpend);
 ```
 
 ## 数据库变更

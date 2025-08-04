@@ -496,6 +496,12 @@ curl -X POST http://localhost:3000/api/user/external/sync \
 
 echo -e "\n\n=== 6. 再次查看用户统计 ==="
 curl -X GET http://localhost:3000/api/user/external/flow_test_user/stats
+
+echo -e "\n\n=== 7. 查询消费记录 ==="
+curl -X GET "http://localhost:3000/api/user/external/flow_test_user/logs?page_size=10"
+
+echo -e "\n\n=== 8. 按日期查询消费记录 ==="
+curl -X GET "http://localhost:3000/api/user/external/flow_test_user/logs?start_date=2024-01-01&end_date=2024-01-31"
 ```
 
 ## 计费验证
@@ -699,6 +705,96 @@ curl -X GET http://localhost:3000/api/user/external/test_user_001/stats | jq '.d
 - `used_quota` 增加（根据token使用量）
 - `total_requests` 增加1
 - `current_quota` 相应减少
+
+#### 4.4 查询消费记录验证
+```bash
+# 查询最新的消费记录
+curl -X GET "http://localhost:3000/api/user/external/test_user_001/logs?page_size=5" | jq '.data.logs[0]'
+```
+
+**应该能看到：**
+- 最新一条记录为 `consume` 类型
+- `model` 字段显示调用的模型名称
+- `tokens` 字段显示消费的token数量
+- `spend` 字段显示消费金额
+
+### 5. 完整集成测试流程
+
+以下是一个完整的集成测试，验证从用户创建到消费记录查询的整个流程：
+
+```bash
+#!/bin/bash
+# 完整集成测试脚本
+
+USER_ID="integration_test_$(date +%s)"
+TOKEN_KEY=""
+
+echo "=== 完整集成测试开始 ==="
+echo "测试用户ID: $USER_ID"
+
+# 1. 创建用户
+echo "1. 创建用户..."
+curl -s -X POST http://localhost:3000/api/user/external/sync \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"external_user_id\": \"$USER_ID\",
+    \"username\": \"integration_user\",
+    \"display_name\": \"集成测试用户\",
+    \"email\": \"integration@test.com\"
+  }" | jq '.success'
+
+# 2. 充值
+echo "2. 用户充值..."
+curl -s -X POST http://localhost:3000/api/user/external/topup \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"external_user_id\": \"$USER_ID\",
+    \"amount_usd\": 5.0,
+    \"payment_id\": \"integration_test_payment\"
+  }" | jq '.data.current_balance'
+
+# 3. 创建Token
+echo "3. 创建API Token..."
+TOKEN_RESPONSE=$(curl -s -X POST http://localhost:3000/api/user/external/token \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"external_user_id\": \"$USER_ID\",
+    \"token_name\": \"Integration Test Token\"
+  }")
+
+TOKEN_KEY=$(echo $TOKEN_RESPONSE | jq -r '.data.access_key')
+echo "Token创建成功: ${TOKEN_KEY:0:20}..."
+
+# 4. 调用LLM API
+echo "4. 调用LLM API..."
+curl -s -X POST http://localhost:3000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN_KEY" \
+  -d '{
+    "model": "qwen-turbo",
+    "messages": [{"role": "user", "content": "Hello, this is an integration test!"}]
+  }' | jq '.usage.total_tokens'
+
+# 5. 等待日志记录
+echo "5. 等待日志记录写入..."
+sleep 2
+
+# 6. 查询消费记录
+echo "6. 查询消费记录..."
+curl -s -X GET "http://localhost:3000/api/user/external/$USER_ID/logs?page_size=3" | jq '{
+  total_records: .data.pagination.total,
+  latest_log: .data.logs[0] | {time, type, model, tokens, spend},
+  total_spend: .data.summary.total_spend
+}'
+
+echo "=== 集成测试完成 ==="
+```
+
+**运行集成测试：**
+```bash
+chmod +x integration_test.sh
+./integration_test.sh
+```
 
 ## 错误处理测试
 
