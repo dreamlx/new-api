@@ -26,6 +26,14 @@
 - **无需认证**：外部用户 API 已移除认证限制，供前端系统直接调用
 - **IP 白名单**：建议通过 Nginx 配置限制访问（可选）
 
+### 接口列表
+- `POST /api/user/external/sync` - 用户同步接口
+- `POST /api/user/external/topup` - 用户充值接口
+- `POST /api/user/external/token` - 创建 Access Key
+- `DELETE /api/user/external/token` - 删除 Access Key
+- `GET /api/user/external/{id}/stats` - 用户统计接口
+- `GET /api/user/external/{id}/logs` - 消费记录查询接口
+
 ### 1. 用户同步接口
 
 #### 创建或更新外部用户
@@ -111,9 +119,9 @@ Content-Type: application/json
   - 充值卡: `"card_20241201_001"`
   - 自定义: `"custom_order_12345"`
 
-### 3. 创建 Access Key 接口
+### 3. Token 管理接口
 
-#### 为外部用户创建 Token
+#### 3.1 创建 Access Key
 ```http
 POST /api/user/external/token
 Content-Type: application/json
@@ -142,6 +150,37 @@ Content-Type: application/json
   }
 }
 ```
+
+#### 3.2 删除 Access Key
+```http
+DELETE /api/user/external/token
+Content-Type: application/json
+```
+
+**请求参数**:
+```json
+{
+  "external_user_id": "string, required, 外部用户ID",
+  "token_id": "number, required, 要删除的Token ID"
+}
+```
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "message": "Token删除成功",
+  "data": {
+    "token_id": 1,
+    "external_user_id": "test_user_001"
+  }
+}
+```
+
+**说明**:
+- 只能删除属于指定外部用户的Token
+- Token删除后立即失效，无法恢复
+- 删除不存在的Token或无权限的Token会返回404错误
 
 ### 4. 用户统计接口
 
@@ -198,7 +237,7 @@ GET /api/user/external/{external_user_id}/stats
       {
         "id": 1,
         "name": "My API Token",
-        "key": "sk-xxxx...xxxx",
+        "key": "sk-xxxxxxxxxxxxxxxxxxxx",
         "status": 1,
         "expired_time": 1767195600
       }
@@ -422,6 +461,13 @@ const logs = await newApi.getUserLogs('amos_wechat_123', {
 console.log('消费记录：', logs.data.logs);
 console.log('总消费：$', logs.data.summary.total_spend);
 console.log('消费Token数：', logs.data.summary.total_tokens);
+
+// 8. 删除不需要的Token
+await newApi.deleteToken({
+  external_user_id: 'amos_wechat_123',
+  token_id: token.data.token_id
+});
+console.log('Token删除成功');
 ```
 
 ### 常见消费记录查询场景
@@ -571,6 +617,11 @@ CREATE UNIQUE INDEX idx_users_external_user_id ON users(external_user_id);
 6. **推荐码**：可选字段，为 NULL 时不会产生唯一索引冲突
 7. **模型显示**：只显示当前启用渠道的模型，测试模型优先显示
 8. **实时性**：渠道启用/禁用会立即反映在 API 响应中
+9. **Token 管理**：
+   - 统计接口返回完整的 Access Key，前端可自行决定是否隐藏显示
+   - 用户可以自由创建和删除自己的 Token
+   - 删除 Token 后立即失效，无法恢复
+   - Token 删除只能由该 Token 的所有者执行
 
 ## 开发工具
 

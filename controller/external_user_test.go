@@ -59,6 +59,7 @@ func setupTestRouter() *gin.Engine {
 	// 设置测试数据库
 	testDB := setupTestDB()
 	model.DB = testDB
+	model.LOG_DB = testDB
 	
 	// 注册外部用户路由
 	api := router.Group("/api")
@@ -68,7 +69,9 @@ func setupTestRouter() *gin.Engine {
 			externalUser.POST("/sync", SyncExternalUser)
 			externalUser.POST("/topup", ExternalUserTopUp)
 			externalUser.POST("/token", CreateExternalUserToken)
+			externalUser.DELETE("/token", DeleteExternalUserToken)
 			externalUser.GET("/:external_user_id/stats", GetExternalUserStats)
+			externalUser.GET("/:external_user_id/logs", GetExternalUserLogs)
 		}
 	}
 	
@@ -535,4 +538,119 @@ func TestGetExternalUserStats(t *testing.T) {
 			}
 		})
 	}
+}
+
+// 测试删除外部用户Token
+func TestDeleteExternalUserToken(t *testing.T) {
+	router := setupTestRouter()
+
+	// 先创建一个测试用户
+	user := &model.User{
+		Username:       "tokenuser",
+		Email:          "token@example.com",
+		ExternalUserId: "test_token_user",
+		IsExternal:     true,
+		Quota:          1000000,
+	}
+	model.DB.Create(user)
+
+	// 创建一个测试Token
+	token := &model.Token{
+		UserId:      user.Id,
+		Key:         "test_token_key_12345678",
+		Name:        "Test Token",
+		Status:      1,
+		CreatedTime: common.GetTimestamp(),
+		ExpiredTime: common.GetTimestamp() + 86400*365,
+	}
+	model.DB.Create(token)
+
+	tests := []struct {
+		name           string
+		requestBody    map[string]interface{}
+		expectedStatus int
+		expectedMsg    string
+	}{
+		{
+			name: "删除Token成功",
+			requestBody: map[string]interface{}{
+				"external_user_id": "test_token_user",
+				"token_id":         token.Id,
+			},
+			expectedStatus: 200,
+			expectedMsg:    "Token删除成功",
+		},
+		{
+			name: "用户不存在",
+			requestBody: map[string]interface{}{
+				"external_user_id": "nonexistent_user",
+				"token_id":         999,
+			},
+			expectedStatus: 404,
+			expectedMsg:    "用户不存在",
+		},
+		{
+			name: "Token不存在",
+			requestBody: map[string]interface{}{
+				"external_user_id": "test_token_user",
+				"token_id":         999999,
+			},
+			expectedStatus: 404,
+			expectedMsg:    "Token不存在或无权删除",
+		},
+		{
+			name: "缺少必需字段 - external_user_id",
+			requestBody: map[string]interface{}{
+				"token_id": token.Id,
+			},
+			expectedStatus: 400,
+			expectedMsg:    "ExternalUserId",
+		},
+		{
+			name: "缺少必需字段 - token_id",
+			requestBody: map[string]interface{}{
+				"external_user_id": "test_token_user",
+			},
+			expectedStatus: 400,
+			expectedMsg:    "TokenId",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jsonBody, _ := json.Marshal(tt.requestBody)
+			req, _ := http.NewRequest("DELETE", "/api/user/external/token", bytes.NewBuffer(jsonBody))
+			req.Header.Set("Content-Type", "application/json")
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+
+			var response map[string]interface{}
+			err := json.Unmarshal(w.Body.Bytes(), &response)
+			assert.NoError(t, err)
+
+			if tt.expectedStatus == 200 {
+				assert.Equal(t, true, response["success"])
+				assert.Equal(t, tt.expectedMsg, response["message"])
+				
+				// 验证响应数据
+				data := response["data"].(map[string]interface{})
+				assert.Equal(t, float64(token.Id), data["token_id"])
+				assert.Equal(t, "test_token_user", data["external_user_id"])
+				
+				// 验证Token确实被删除
+				var deletedToken model.Token
+				err := model.DB.Where("id = ?", token.Id).First(&deletedToken).Error
+				assert.Error(t, err) // 应该找不到已删除的Token
+			} else {
+				assert.Equal(t, false, response["success"])
+				assert.Contains(t, response["message"], tt.expectedMsg)
+			}
+		})
+	}
+
+	// 清理测试数据
+	model.DB.Delete(user)
 }

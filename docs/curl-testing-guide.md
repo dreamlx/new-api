@@ -213,7 +213,7 @@ curl -X POST http://localhost:3000/api/user/external/topup \
 }
 ```
 
-### 3. Token创建API
+### 3. Token管理API
 
 #### 3.1 成功创建Token
 ```bash
@@ -302,6 +302,64 @@ curl -X POST http://localhost:3000/api/user/external/token \
 }
 ```
 
+#### 3.5 删除Token
+```bash
+curl -X DELETE http://localhost:3000/api/user/external/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "test_user_001",
+    "token_id": 1
+  }'
+```
+
+**期望响应：**
+```json
+{
+  "success": true,
+  "message": "Token删除成功",
+  "data": {
+    "token_id": 1,
+    "external_user_id": "test_user_001"
+  }
+}
+```
+
+#### 3.6 删除不存在的Token
+```bash
+curl -X DELETE http://localhost:3000/api/user/external/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "test_user_001",
+    "token_id": 999999
+  }'
+```
+
+**期望响应：**
+```json
+{
+  "success": false,
+  "message": "Token不存在或无权删除"
+}
+```
+
+#### 3.7 删除Token时用户不存在
+```bash
+curl -X DELETE http://localhost:3000/api/user/external/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "nonexistent_user",
+    "token_id": 1
+  }'
+```
+
+**期望响应：**
+```json
+{
+  "success": false,
+  "message": "用户不存在"
+}
+```
+
 ### 4. 用户统计API
 
 #### 4.1 获取用户统计信息
@@ -326,13 +384,11 @@ curl -X GET http://localhost:3000/api/user/external/test_user_001/stats
     },
     "tokens": [
       {
-        "token_id": 1,
-        "token_name": "My API Token",
-        "access_key": "sk-xxxx...xxxx",
+        "id": 1,
+        "name": "My API Token",
+        "key": "sk-xxxxxxxxxxxxxxxxxxxx",
         "status": 1,
-        "created_time": 1722336000,
-        "expired_time": 1767195600,
-        "remain_quota": 5000000
+        "expired_time": 1767195600
       }
     ],
     "recent_logs": [],
@@ -502,6 +558,17 @@ curl -X GET "http://localhost:3000/api/user/external/flow_test_user/logs?page_si
 
 echo -e "\n\n=== 8. 按日期查询消费记录 ==="
 curl -X GET "http://localhost:3000/api/user/external/flow_test_user/logs?start_date=2024-01-01&end_date=2024-01-31"
+
+echo -e "\n\n=== 9. 删除Token ==="
+curl -X DELETE http://localhost:3000/api/user/external/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "flow_test_user",
+    "token_id": 1
+  }'
+
+echo -e "\n\n=== 10. 验证Token已删除 ==="
+curl -X GET http://localhost:3000/api/user/external/flow_test_user/stats
 ```
 
 ## 计费验证
@@ -822,7 +889,8 @@ docker logs redis-dev
 - [ ] 用户同步API - 更新现有用户
 - [ ] 用户充值API - 成功充值
 - [ ] Token创建API - 成功创建
-- [ ] 用户统计API - 获取统计信息
+- [ ] Token删除API - 成功删除
+- [ ] 用户统计API - 获取统计信息（包含完整Token）
 - [ ] 消费记录API - 查询所有记录
 - [ ] 消费记录API - 按日期筛选
 - [ ] 消费记录API - 按模型筛选
@@ -841,6 +909,8 @@ docker logs redis-dev
 - [ ] 用户不存在 - 所有相关API
 - [ ] 金额验证 - 负数/零值
 - [ ] Token名称验证 - 空值
+- [ ] Token删除 - 不存在的Token
+- [ ] Token删除 - 无权限删除他人Token
 
 ### LLM API 错误测试 ✅
 - [ ] 无效Token - 认证失败
@@ -852,7 +922,9 @@ docker logs redis-dev
 - [ ] Quota计算准确性
 - [ ] 用户信息更新完整性
 - [ ] Token创建和权限
+- [ ] Token删除和权限验证
 - [ ] 统计数据一致性
+- [ ] Token列表显示完整key
 - [ ] LLM调用后用量统计更新
 - [ ] Balance capacity 模型显示
 - [ ] 渠道禁用实时生效

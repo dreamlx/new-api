@@ -370,6 +370,77 @@ func CreateExternalUserToken(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// 删除外部用户Token请求结构
+type DeleteExternalUserTokenRequest struct {
+	ExternalUserId string `json:"external_user_id" binding:"required"`
+	TokenId        int    `json:"token_id" binding:"required"`
+}
+
+// 删除外部用户Token响应结构
+type DeleteExternalUserTokenResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		TokenId        int    `json:"token_id"`
+		ExternalUserId string `json:"external_user_id"`
+	} `json:"data"`
+}
+
+// 删除外部用户Token
+func DeleteExternalUserToken(c *gin.Context) {
+	var req DeleteExternalUserTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请求参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 查找外部用户
+	user := &model.User{}
+	if err := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "用户不存在",
+		})
+		return
+	}
+
+	// 查找Token并验证所有权
+	token := &model.Token{}
+	if err := model.DB.Where("id = ? AND user_id = ?", req.TokenId, user.Id).First(token).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "Token不存在或无权删除",
+		})
+		return
+	}
+
+	// 删除Token
+	if err := model.DB.Delete(token).Error; err != nil {
+		common.SysError("删除Token失败: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "删除Token失败",
+		})
+		return
+	}
+
+	common.SysLog(fmt.Sprintf("外部用户删除Token成功: %s, Token ID: %d, Token名称: %s",
+		req.ExternalUserId, req.TokenId, token.Name))
+
+	// 构造响应
+	response := DeleteExternalUserTokenResponse{
+		Success: true,
+		Message: "Token删除成功",
+	}
+	response.Data.TokenId = req.TokenId
+	response.Data.ExternalUserId = req.ExternalUserId
+
+	c.JSON(http.StatusOK, response)
+}
+
 // 外部用户消费记录查询请求结构
 type ExternalUserLogsRequest struct {
 	StartDate string `json:"start_date" form:"start_date"` // 格式: 2024-01-01
@@ -596,7 +667,7 @@ func GetExternalUserStats(c *gin.Context) {
 		tokenInfo := map[string]interface{}{
 			"id":           token.Id,
 			"name":         token.Name,
-			"key":          "sk-" + token.Key[:8] + "..." + token.Key[len(token.Key)-8:],
+			"key":          "sk-" + token.Key, // 返回完整的access key
 			"status":       token.Status,
 			"expired_time": token.ExpiredTime,
 		}
