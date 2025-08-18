@@ -91,145 +91,133 @@ func SyncExternalUser(c *gin.Context) {
 	}
 
 	// 检查external_user_id是否已存在
-	existingUser := &model.User{}
-	result := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(existingUser)
-
-	var user *model.User
-	var isNewUser bool
-
-	if result.Error != nil {
-		// 用户不存在，创建新用户
-		isNewUser = true
-
-		// 生成虚拟邮箱（如果没有提供邮箱）
-		email := req.Email
-		if email == "" {
-			email = fmt.Sprintf("%s@external.local", req.ExternalUserId)
-		}
-
-		// 生成默认密码（外部用户不需要密码登录）
-		defaultPassword := common.GetRandomString(16)
-
-		user = &model.User{
-			Username:       req.Username,
-			DisplayName:    req.DisplayName,
-			Email:          email,
-			Password:       defaultPassword,
-			ExternalUserId: req.ExternalUserId,
-			Phone:          req.Phone,
-			WechatOpenId:   req.WechatOpenId,
-			WechatUnionId:  req.WechatUnionId,
-			AlipayUserId:   req.AlipayUserId,
-			LoginType:      getLoginType(req.LoginType),
-			IsExternal:     true,
-			ExternalData:   req.ExternalData,
-			Role:           common.RoleCommonUser,
-			Status:         common.UserStatusEnabled,
-			Quota:          common.QuotaForNewUser,
-		}
-
-		// 只在提供了推荐码时设置，否则保持 NULL
-		if req.AffCode != "" {
-			user.AffCode = &req.AffCode
-		}
-
-		if err := model.DB.Create(user).Error; err != nil {
-			common.SysError("创建外部用户失败: " + err.Error())
-
-			// 提供更详细的错误信息
-			errorMsg := "创建用户失败"
-			if strings.Contains(err.Error(), "Duplicate entry") {
-				if strings.Contains(err.Error(), "username") {
-					errorMsg = "用户名已存在，请使用其他用户名"
-				} else if strings.Contains(err.Error(), "email") {
-					errorMsg = "邮箱已被使用，请使用其他邮箱"
-				} else if strings.Contains(err.Error(), "external_user_id") {
-					errorMsg = "外部用户ID已存在"
-				} else if strings.Contains(err.Error(), "aff_code") {
-					errorMsg = "推荐码已被使用，请使用其他推荐码"
-				} else {
-					errorMsg = "用户信息重复，请检查用户名、邮箱、推荐码等字段"
-				}
-			}
-
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"success":      false,
-				"message":      errorMsg,
-				"error_detail": err.Error(), // 开发环境可以显示详细错误
-			})
-			return
-		}
-
-		common.SysLog(fmt.Sprintf("外部用户创建成功: %s (ID: %d)", req.ExternalUserId, user.Id))
-	} else {
+	if model.IsExternalUserIdAlreadyTaken(req.ExternalUserId) {
+		existingUser := &model.User{}
+		model.DB.Where("external_user_id = ?", req.ExternalUserId).First(existingUser)
 		// 用户已存在，更新用户信息
-		isNewUser = false
-		user = existingUser
-
-		// 更新允许的字段
-		updates := map[string]interface{}{
-			"display_name":   req.DisplayName,
-			"phone":          req.Phone,
-			"wechat_openid":  req.WechatOpenId,
-			"wechat_unionid": req.WechatUnionId,
-			"alipay_userid":  req.AlipayUserId,
-			"external_data":  req.ExternalData,
-		}
-
-		// 只在提供了推荐码时更新
-		if req.AffCode != "" {
-			updates["aff_code"] = req.AffCode
-		}
-
-		// 只在提供了邮箱时更新邮箱
+		existingUser.Username = req.Username
+		existingUser.DisplayName = req.DisplayName
 		if req.Email != "" {
-			updates["email"] = req.Email
+			existingUser.Email = req.Email
 		}
+		existingUser.Phone = req.Phone
+		existingUser.WechatOpenId = req.WechatOpenId
+		existingUser.WechatUnionId = req.WechatUnionId
+		existingUser.AlipayUserId = req.AlipayUserId
+		existingUser.LoginType = getLoginType(req.LoginType)
+		existingUser.ExternalData = req.ExternalData
 
-		// 只在提供了登录类型时更新
-		if req.LoginType != "" {
-			updates["login_type"] = getLoginType(req.LoginType)
-		}
-
-		if err := model.DB.Model(user).Updates(updates).Error; err != nil {
+		if err := model.DB.Save(existingUser).Error; err != nil {
 			common.SysError("更新外部用户失败: " + err.Error())
-
-			// 提供更详细的错误信息
-			errorMsg := "更新用户信息失败"
-			if strings.Contains(err.Error(), "Duplicate entry") {
-				if strings.Contains(err.Error(), "email") {
-					errorMsg = "邮箱已被其他用户使用，请使用其他邮箱"
-				} else if strings.Contains(err.Error(), "aff_code") {
-					errorMsg = "推荐码已被其他用户使用，请使用其他推荐码"
-				} else {
-					errorMsg = "用户信息重复，请检查邮箱、推荐码等字段"
-				}
-			}
-
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"success":      false,
-				"message":      errorMsg,
-				"error_detail": err.Error(), // 开发环境可以显示详细错误
+				"success": false,
+				"message": "更新用户信息失败",
 			})
 			return
 		}
 
-		common.SysLog(fmt.Sprintf("外部用户更新成功: %s (ID: %d)", req.ExternalUserId, user.Id))
+		c.JSON(http.StatusOK, SyncExternalUserResponse{
+			Success: true,
+			Message: "用户信息同步成功",
+			Data: struct {
+				UserId         int    `json:"user_id"`
+				ExternalUserId string `json:"external_user_id"`
+				IsNewUser      bool   `json:"is_new_user"`
+			}{
+				UserId:         existingUser.Id,
+				ExternalUserId: existingUser.ExternalUserId,
+				IsNewUser:      false,
+			},
+		})
+		return
 	}
+
+	// 检查用户名是否已存在（仅对非外部用户）
+	exist, err := model.CheckUserExistOrDeleted(req.Username, req.Email)
+	if err != nil {
+		common.SysError("检查用户是否存在失败: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "系统错误，请稍后重试",
+		})
+		return
+	}
+	if exist {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "用户名或邮箱已存在",
+		})
+		return
+	}
+
+	// 用户不存在，创建新用户
+	// 生成虚拟邮箱（如果没有提供邮箱）
+	email := req.Email
+	if email == "" {
+		email = fmt.Sprintf("%s@external.local", req.ExternalUserId)
+	}
+
+	// 生成默认密码（外部用户不需要密码登录）
+	defaultPassword := common.GetRandomString(16)
+
+	user := &model.User{
+		Username:       req.Username,
+		DisplayName:    req.DisplayName,
+		Email:          email,
+		Password:       defaultPassword,
+		ExternalUserId: req.ExternalUserId,
+		Phone:          req.Phone,
+		WechatOpenId:   req.WechatOpenId,
+		WechatUnionId:  req.WechatUnionId,
+		AlipayUserId:   req.AlipayUserId,
+		LoginType:      getLoginType(req.LoginType),
+		IsExternal:     true,
+		ExternalData:   req.ExternalData,
+		Role:           common.RoleCommonUser,
+		Status:         common.UserStatusEnabled,
+		Quota:          common.QuotaForNewUser,
+	}
+
+	// 只在提供了推荐码时设置，否则保持 NULL
+	if req.AffCode != "" {
+		user.AffCode = &req.AffCode
+	}
+
+	if err := model.DB.Create(user).Error; err != nil {
+		common.SysError("创建外部用户失败: " + err.Error())
+
+		// 提供更详细的错误信息
+		errorMsg := "创建用户失败"
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			if strings.Contains(err.Error(), "username") {
+				errorMsg = "用户名已存在，请使用其他用户名"
+			} else if strings.Contains(err.Error(), "email") {
+				errorMsg = "邮箱已被使用，请使用其他邮箱"
+			} else if strings.Contains(err.Error(), "aff_code") {
+				errorMsg = "推荐码已被使用，请使用其他推荐码"
+			} else {
+				errorMsg = "用户信息重复，请检查用户名、邮箱、推荐码等字段"
+			}
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success":      false,
+			"message":      errorMsg,
+			"error_detail": err.Error(), // 开发环境可以显示详细错误
+		})
+		return
+	}
+
+	common.SysLog(fmt.Sprintf("外部用户创建成功: %s (ID: %d)", req.ExternalUserId, user.Id))
 
 	// 构造响应
 	response := SyncExternalUserResponse{
 		Success: true,
-		Message: func() string {
-			if isNewUser {
-				return "用户创建成功"
-			}
-			return "用户信息更新成功"
-		}(),
+		Message: "用户创建成功",
 	}
 	response.Data.UserId = user.Id
 	response.Data.ExternalUserId = user.ExternalUserId
-	response.Data.IsNewUser = isNewUser
+	response.Data.IsNewUser = true
 
 	c.JSON(http.StatusOK, response)
 }

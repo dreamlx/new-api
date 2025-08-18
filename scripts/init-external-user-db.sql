@@ -21,11 +21,11 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- 检查并创建唯一索引
+-- 检查并创建普通索引（非唯一索引，避免空值冲突）
 SET @sql = (
     SELECT IF(
         COUNT(*) = 0,
-        'CREATE UNIQUE INDEX idx_users_external_user_id ON users(external_user_id);',
+        'CREATE INDEX idx_users_external_user_id ON users(external_user_id);',
         'SELECT ''索引 idx_users_external_user_id 已存在'' as message;'
     )
     FROM information_schema.STATISTICS 

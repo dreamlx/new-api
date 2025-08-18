@@ -29,7 +29,7 @@ type User struct {
 	WeChatId         string `json:"wechat_id" gorm:"column:wechat_id;index"`
 	TelegramId       string `json:"telegram_id" gorm:"column:telegram_id;index"`
 	// 外部用户系统集成字段
-	ExternalUserId   string         `json:"external_user_id" gorm:"type:varchar(100);column:external_user_id;uniqueIndex"`
+	ExternalUserId   string         `json:"external_user_id" gorm:"type:varchar(100);column:external_user_id;index"`
 	Phone            string         `json:"phone" gorm:"type:varchar(20);column:phone"`
 	WechatOpenId     string         `json:"wechat_openid" gorm:"type:varchar(100);column:wechat_openid"`
 	WechatUnionId    string         `json:"wechat_unionid" gorm:"type:varchar(100);column:wechat_unionid"`
@@ -819,6 +819,15 @@ func GetUsernameById(id int, fromDB bool) (username string, err error) {
 func IsLinuxDOIdAlreadyTaken(linuxDOId string) bool {
 	var user User
 	err := DB.Unscoped().Where("linux_do_id = ?", linuxDOId).First(&user).Error
+	return !errors.Is(err, gorm.ErrRecordNotFound)
+}
+
+func IsExternalUserIdAlreadyTaken(externalUserId string) bool {
+	if externalUserId == "" {
+		return false // 空值不检查唯一性
+	}
+	var user User
+	err := DB.Unscoped().Where("external_user_id = ? AND external_user_id != ''", externalUserId).First(&user).Error
 	return !errors.Is(err, gorm.ErrRecordNotFound)
 }
 

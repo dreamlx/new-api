@@ -47,6 +47,9 @@
 也可访问AI生成的DeepWiki:
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/QuantumNous/new-api)
 
+### 项目文档
+- [📝 更新日志](./CHANGELOG.md) - 版本变更记录和Bug修复日志
+
 ## ✨ 主要特性
 
 New API提供了丰富的功能，详细特性请参考[特性说明](https://docs.newapi.pro/wiki/features-introduction)：
