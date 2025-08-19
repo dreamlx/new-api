@@ -110,7 +110,7 @@ func TestSyncExternalUser(t *testing.T) {
 				"login_type":      "sms",
 			},
 			expectedStatus: 200,
-			expectedMsg:    "用户信息更新成功",
+			expectedMsg:    "用户信息同步成功",
 		},
 		{
 			name: "缺少必需字段",
