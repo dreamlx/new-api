@@ -136,12 +136,26 @@ func (e *NewAPIError) ToOpenAIError() OpenAIError {
 func (e *NewAPIError) ToClaudeError() ClaudeError {
 	switch e.ErrorType {
 	case ErrorTypeOpenAIError:
+		if e.RelayError == nil {
+			// 防护措施：如果 RelayError 为 nil，返回通用错误
+			return ClaudeError{
+				Message: e.Error(),
+				Type:    string(e.ErrorType),
+			}
+		}
 		openAIError := e.RelayError.(OpenAIError)
 		return ClaudeError{
 			Message: e.Error(),
 			Type:    fmt.Sprintf("%v", openAIError.Code),
 		}
 	case ErrorTypeClaudeError:
+		if e.RelayError == nil {
+			// 防护措施：如果 RelayError 为 nil，返回通用错误
+			return ClaudeError{
+				Message: e.Error(),
+				Type:    string(e.ErrorType),
+			}
+		}
 		return e.RelayError.(ClaudeError)
 	default:
 		return ClaudeError{

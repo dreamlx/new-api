@@ -182,8 +182,8 @@ GET /api/user/external/{external_user_id}
    - 删除错误的 `ErrorType` 强制设置
    - 正确构造 `OpenAIError` 对象并使用 `WithOpenAIError()` 创建错误
 
-2. **添加防护措施** (`types/error.go:108-116`):
-   - 在 `ToOpenAIError()` 中添加 `nil` 检查
+2. **添加防护措施** (`types/error.go:108-116, 139-159`):
+   - 在 `ToOpenAIError()` 和 `ToClaudeError()` 中添加 `nil` 检查
    - 当 `RelayError` 为 `nil` 时返回通用错误格式，避免 panic
 
 **影响文件**:
