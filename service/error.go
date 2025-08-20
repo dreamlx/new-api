@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -105,8 +104,12 @@ func RelayErrorHandler(resp *http.Response, showBodyWhenFail bool) (newApiErr *t
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		newApiErr = types.WithOpenAIError(errResponse.Error, resp.StatusCode)
 	} else {
-		newApiErr = types.NewErrorWithStatusCode(errors.New(errResponse.ToMessage()), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
-		newApiErr.ErrorType = types.ErrorTypeOpenAIError
+		// 构造 OpenAI 格式错误对象
+		openAIError := types.OpenAIError{
+			Message: errResponse.ToMessage(),
+			Type:    string(types.ErrorCodeBadResponseStatusCode),
+		}
+		newApiErr = types.WithOpenAIError(openAIError, resp.StatusCode)
 	}
 	return
 }
