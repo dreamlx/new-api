@@ -79,39 +79,37 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 }
 
 func RelayErrorHandler(resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
-	newApiErr = &types.NewAPIError{
-		StatusCode: resp.StatusCode,
-		ErrorType:  types.ErrorTypeOpenAIError,
-	}
-
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return
+		// 读取响应体失败时，直接创建一个通用错误
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadResponseBodyFailed, resp.StatusCode)
 	}
 	common.CloseResponseBodyGracefully(resp)
 	var errResponse dto.GeneralErrorResponse
 
 	err = common.Unmarshal(responseBody, &errResponse)
 	if err != nil {
+		// JSON解析失败时，创建包含响应体内容的错误
+		var errMsg error
 		if showBodyWhenFail {
-			newApiErr.Err = fmt.Errorf("bad response status code %d, body: %s", resp.StatusCode, string(responseBody))
+			errMsg = fmt.Errorf("bad response status code %d, body: %s", resp.StatusCode, string(responseBody))
 		} else {
-			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
+			errMsg = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
-		return
+		return types.NewErrorWithStatusCode(errMsg, types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 	}
+	
 	if errResponse.Error.Message != "" {
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
-		newApiErr = types.WithOpenAIError(errResponse.Error, resp.StatusCode)
+		return types.WithOpenAIError(errResponse.Error, resp.StatusCode)
 	} else {
 		// 构造 OpenAI 格式错误对象
 		openAIError := types.OpenAIError{
 			Message: errResponse.ToMessage(),
 			Type:    string(types.ErrorCodeBadResponseStatusCode),
 		}
-		newApiErr = types.WithOpenAIError(openAIError, resp.StatusCode)
+		return types.WithOpenAIError(openAIError, resp.StatusCode)
 	}
-	return
 }
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {
