@@ -32,10 +32,17 @@
 
 ## 📝 项目说明
 
-> [!NOTE]  
+> [!NOTE]
 > 本项目为开源项目，在[One API](https://github.com/songquanpeng/one-api)的基础上进行二次开发
 
-> [!IMPORTANT]  
+> [!TIP]
+> **🎉 最新更新**: 已成功合并上游 [New API v0.9.0](https://github.com/Calcium-Ion/new-api/releases/tag/v0.9.0) 版本！
+> - ✅ 保留完整的**外部用户系统集成**功能
+> - ✅ 保留**GLM-4.5系列模型**支持和优化
+> - ✅ 集成所有上游新特性：2FA、模型管理、响应式UI等
+> - ✅ 通过全面测试，确保功能完整性和向后兼容
+
+> [!IMPORTANT]
 > - 本项目仅供个人学习使用，不保证稳定性，且不提供任何技术支持。
 > - 使用者必须在遵循 OpenAI 的[使用条款](https://openai.com/policies/terms-of-use)以及**法律法规**的情况下使用，不得用于非法用途。
 > - 根据[《生成式人工智能服务管理暂行办法》](http://www.cac.gov.cn/2023-07/13/c_1690898327029107.htm)的要求，请勿对中国地区公众提供一切未经备案的生成式人工智能服务。
