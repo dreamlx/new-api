@@ -96,18 +96,17 @@ func ValidateUserToken(key string) (token *Token, err error) {
 			}
 			return token, errors.New("该令牌已过期")
 		}
-		if !token.UnlimitedQuota && token.RemainQuota <= 0 {
-			if !common.RedisEnabled {
-				// in this case, we can make sure the token is exhausted
-				token.Status = common.TokenStatusExhausted
-				err := token.SelectUpdate()
-				if err != nil {
-					common.SysLog("failed to update token status" + err.Error())
-				}
+		// 检查用户余额而不是Token余额（Token共享用户余额）
+		if !token.UnlimitedQuota {
+			userQuota, err := GetUserQuota(token.UserId, false)
+			if err != nil {
+				return token, fmt.Errorf("获取用户余额失败: %v", err)
 			}
-			keyPrefix := key[:3]
-			keySuffix := key[len(key)-3:]
-			return token, errors.New(fmt.Sprintf("[sk-%s***%s] 该令牌额度已用尽 !token.UnlimitedQuota && token.RemainQuota = %d", keyPrefix, keySuffix, token.RemainQuota))
+			if userQuota <= 0 {
+				keyPrefix := key[:3]
+				keySuffix := key[len(key)-3:]
+				return token, errors.New(fmt.Sprintf("[sk-%s***%s] 用户余额已用尽，当前余额: %d", keyPrefix, keySuffix, userQuota))
+			}
 		}
 		return token, nil
 	}

@@ -473,16 +473,19 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 	//if relayInfo.TokenUnlimited {
 	//	return nil
 	//}
-	token, err := model.GetTokenByKey(relayInfo.TokenKey, false)
-	if err != nil {
-		return err
-	}
-	if !relayInfo.TokenUnlimited && token.RemainQuota < quota {
-		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
-	}
-	err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
-	if err != nil {
-		return err
+	// Token共享用户余额，检查并扣减用户余额
+	if !relayInfo.TokenUnlimited {
+		userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
+		if err != nil {
+			return fmt.Errorf("获取用户余额失败: %v", err)
+		}
+		if userQuota < quota {
+			return fmt.Errorf("用户余额不足，当前余额: %s，需要: %s", logger.FormatQuota(userQuota), logger.FormatQuota(quota))
+		}
+		err = model.DecreaseUserQuota(relayInfo.UserId, quota)
+		if err != nil {
+			return fmt.Errorf("扣减用户余额失败: %v", err)
+		}
 	}
 	return nil
 }
@@ -498,16 +501,7 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 		return err
 	}
 
-	if !relayInfo.IsPlayground {
-		if quota > 0 {
-			err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
-		} else {
-			err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, -quota)
-		}
-		if err != nil {
-			return err
-		}
-	}
+	// Token共享用户余额，不再单独扣减Token额度
 
 	if sendEmail {
 		if (quota + preConsumedQuota) != 0 {
