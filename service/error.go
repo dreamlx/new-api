@@ -1,7 +1,7 @@
 package service
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -62,7 +62,7 @@ func ClaudeErrorWrapper(err error, code string, statusCode int) *dto.ClaudeError
 			text = "请求上游地址失败"
 		}
 	}
-	claudeError := dto.ClaudeError{
+	claudeError := types.ClaudeError{
 		Message: text,
 		Type:    "new_api_error",
 	}
@@ -79,12 +79,14 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 }
 
 func RelayErrorHandler(resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
+	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		// 读取响应体失败时，直接创建一个通用错误
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadResponseBodyFailed, resp.StatusCode)
 	}
-	common.CloseResponseBodyGracefully(resp)
+	CloseResponseBodyGracefully(resp)
 	var errResponse dto.GeneralErrorResponse
 
 	err = common.Unmarshal(responseBody, &errResponse)
@@ -94,22 +96,21 @@ func RelayErrorHandler(resp *http.Response, showBodyWhenFail bool) (newApiErr *t
 		if showBodyWhenFail {
 			errMsg = fmt.Errorf("bad response status code %d, body: %s", resp.StatusCode, string(responseBody))
 		} else {
+			if common.DebugEnabled {
+				println(fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, string(responseBody)))
+			}
 			errMsg = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
 		return types.NewErrorWithStatusCode(errMsg, types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 	}
-	
+
 	if errResponse.Error.Message != "" {
 		// General format error (OpenAI, Anthropic, Gemini, etc.)
 		return types.WithOpenAIError(errResponse.Error, resp.StatusCode)
 	} else {
-		// 构造 OpenAI 格式错误对象
-		openAIError := types.OpenAIError{
-			Message: errResponse.ToMessage(),
-			Type:    string(types.ErrorCodeBadResponseStatusCode),
-		}
-		return types.WithOpenAIError(openAIError, resp.StatusCode)
+		newApiErr = types.NewOpenAIError(errors.New(errResponse.ToMessage()), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 	}
+	return newApiErr
 }
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {
@@ -117,7 +118,7 @@ func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) 
 		return
 	}
 	statusCodeMapping := make(map[string]string)
-	err := json.Unmarshal([]byte(statusCodeMappingStr), &statusCodeMapping)
+	err := common.Unmarshal([]byte(statusCodeMappingStr), &statusCodeMapping)
 	if err != nil {
 		return
 	}
