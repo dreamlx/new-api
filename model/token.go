@@ -361,3 +361,32 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 
 	return len(tokens), nil
 }
+
+// UpdateTokenQuota 更新指定Token的剩余额度
+// 这个函数用于同步Token额度与用户主账户额度
+func UpdateTokenQuota(tokenId int, newQuota int) error {
+	if newQuota < 0 {
+		return errors.New("quota 不能为负数")
+	}
+
+	// 更新数据库中的Token额度
+	err := DB.Model(&Token{}).Where("id = ?", tokenId).Update("remain_quota", newQuota).Error
+	if err != nil {
+		return fmt.Errorf("更新Token额度失败: %v", err)
+	}
+
+	// 如果启用了Redis缓存，异步更新缓存
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			// 获取Token信息以更新缓存
+			var token Token
+			if err := DB.Where("id = ?", tokenId).First(&token).Error; err == nil {
+				if err := cacheSetToken(token); err != nil {
+					common.SysLog("failed to update token cache after quota sync: " + err.Error())
+				}
+			}
+		})
+	}
+
+	return nil
+}

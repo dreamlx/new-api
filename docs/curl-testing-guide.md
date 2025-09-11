@@ -30,6 +30,79 @@ go test ./controller -v -run "TestCreateExternalUserToken"
 go test ./controller -v -run "TestGetExternalUserStats"
 ```
 
+## 重要说明：Token额度机制
+
+### Token额度工作原理
+
+本系统中的API Token采用**智能额度同步机制**，确保充值后的额度能够立即在所有现有Token中生效。
+
+#### 核心机制说明
+
+1. **用户主账户额度**: 每个用户都有一个主账户额度（`user.quota`），这是用户的总可用额度。
+2. **Token额度快照**: 创建Token时，系统会将用户当时的主账户额度复制到Token的`remain_quota`字段。
+3. **智能同步**: 当使用Token进行API调用时，系统会自动检查并同步Token额度与用户主账户额度。
+
+#### 同步触发条件
+
+- 当Token的剩余额度**小于**用户主账户额度时
+- 且Token不是无限额度类型时
+- 系统会自动将用户主账户的额度同步到Token中
+
+#### 实际使用流程
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant API as API系统
+    participant DB as 数据库
+
+    Note over Client,DB: 标准集成流程
+    Client->>API: 1. 创建/同步用户
+    API->>DB: 用户额度初始为0
+    Client->>API: 2. 创建Token
+    API->>DB: Token额度=用户额度(0)
+    Client->>API: 3. 用户充值
+    API->>DB: 更新用户额度=500,000
+    Note over API: Token额度仍为0，但系统会自动同步
+    Client->>API: 4. 使用Token调用API
+    API->>API: 检测到Token额度<用户额度
+    API->>DB: 自动同步Token额度=500,000
+    API->>Client: API调用成功
+```
+
+### 最佳实践建议
+
+#### ✅ 推荐的集成顺序
+
+1. **创建/同步用户** → 获得用户ID
+2. **为用户充值** → 确保账户有足够额度
+3. **创建Token** → 获得访问凭证
+4. **使用Token调用API** → 系统自动处理额度同步
+
+#### ⚠️ 重要提示
+
+- **无需重新创建Token**: 充值后，现有的Token会自动获得新的额度，无需重新生成
+- **即时生效**: 额度同步在首次API调用时自动完成，无需等待
+- **向后兼容**: 此机制完全向后兼容，不影响现有的集成代码
+
+#### 🔧 故障排除
+
+如果遇到"余额不足"错误：
+
+1. **检查用户主账户额度**:
+   ```bash
+   # 通过用户统计API检查
+   curl -X GET "http://localhost:3000/api/user/external/stats?external_user_id=your_user_id"
+   ```
+
+2. **确认充值是否成功**:
+   - 检查充值API的返回结果
+   - 确认`current_balance`字段显示正确金额
+
+3. **重试API调用**:
+   - 系统会在下次API调用时自动同步额度
+   - 通常第一次调用会触发同步，后续调用正常工作
+
 ## API接口测试
 
 ### 1. 用户同步API
