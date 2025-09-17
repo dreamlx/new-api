@@ -36,6 +36,8 @@ type SyncExternalUserResponse struct {
 		UserId         int    `json:"user_id"`
 		ExternalUserId string `json:"external_user_id"`
 		IsNewUser      bool   `json:"is_new_user"`
+		IsUnified      bool   `json:"is_unified,omitempty"`      // 标识是否为统一账号
+		WechatOpenId   string `json:"wechat_openid,omitempty"`   // 微信OpenID
 	} `json:"data"`
 }
 
@@ -92,6 +94,7 @@ func SyncExternalUser(c *gin.Context) {
 
 	// 检查external_user_id是否已存在
 	if model.IsExternalUserIdAlreadyTaken(req.ExternalUserId) {
+		// 这是正常的用户信息更新，不是账号统一场景
 		existingUser := &model.User{}
 		model.DB.Where("external_user_id = ?", req.ExternalUserId).First(existingUser)
 		// 用户已存在，更新用户信息
@@ -123,13 +126,27 @@ func SyncExternalUser(c *gin.Context) {
 				UserId         int    `json:"user_id"`
 				ExternalUserId string `json:"external_user_id"`
 				IsNewUser      bool   `json:"is_new_user"`
+				IsUnified      bool   `json:"is_unified,omitempty"`
+				WechatOpenId   string `json:"wechat_openid,omitempty"`
 			}{
 				UserId:         existingUser.Id,
 				ExternalUserId: existingUser.ExternalUserId,
 				IsNewUser:      false,
+				IsUnified:      false,
+				WechatOpenId:   existingUser.WechatOpenId,
 			},
 		})
 		return
+	}
+
+	// 【新增】微信OpenID优先匹配逻辑 - 仅在external_user_id不存在时检查
+	if req.WechatOpenId != "" {
+		existingUser := model.GetUserByWechatOpenId(req.WechatOpenId)
+		if existingUser != nil {
+			// 找到已存在的微信用户，进行账号统一
+			handleExistingWechatUser(c, existingUser, req)
+			return
+		}
 	}
 
 	// 检查用户名是否已存在（仅对非外部用户）
@@ -211,15 +228,23 @@ func SyncExternalUser(c *gin.Context) {
 	common.SysLog(fmt.Sprintf("外部用户创建成功: %s (ID: %d)", req.ExternalUserId, user.Id))
 
 	// 构造响应
-	response := SyncExternalUserResponse{
+	c.JSON(http.StatusOK, SyncExternalUserResponse{
 		Success: true,
 		Message: "用户创建成功",
-	}
-	response.Data.UserId = user.Id
-	response.Data.ExternalUserId = user.ExternalUserId
-	response.Data.IsNewUser = true
-
-	c.JSON(http.StatusOK, response)
+		Data: struct {
+			UserId         int    `json:"user_id"`
+			ExternalUserId string `json:"external_user_id"`
+			IsNewUser      bool   `json:"is_new_user"`
+			IsUnified      bool   `json:"is_unified,omitempty"`
+			WechatOpenId   string `json:"wechat_openid,omitempty"`
+		}{
+			UserId:         user.Id,
+			ExternalUserId: user.ExternalUserId,
+			IsNewUser:      true,
+			IsUnified:      false,
+			WechatOpenId:   user.WechatOpenId,
+		},
+	})
 }
 
 // 为外部用户充值
@@ -882,4 +907,62 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 	}
 
 	return capacity
+}
+
+// handleExistingWechatUser 处理已存在的微信用户（账号统一逻辑）
+func handleExistingWechatUser(c *gin.Context, existingUser *model.User, req SyncExternalUserRequest) {
+	// 更新用户信息（可选字段）
+	updated := false
+
+	if req.DisplayName != "" && req.DisplayName != existingUser.DisplayName {
+		existingUser.DisplayName = req.DisplayName
+		updated = true
+	}
+
+	if req.Phone != "" && req.Phone != existingUser.Phone {
+		existingUser.Phone = req.Phone
+		updated = true
+	}
+
+	// UnionID可以从空更新为有值
+	if req.WechatUnionId != "" && existingUser.WechatUnionId == "" {
+		existingUser.WechatUnionId = req.WechatUnionId
+		updated = true
+	}
+
+	// 更新扩展数据
+	if req.ExternalData != "" {
+		existingUser.ExternalData = req.ExternalData
+		updated = true
+	}
+
+	if updated {
+		if err := model.DB.Save(existingUser).Error; err != nil {
+			common.SysError("更新微信用户信息失败: " + err.Error())
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "更新用户信息失败",
+			})
+			return
+		}
+	}
+
+	// 返回统一账号信息 - 使用原有的external_user_id
+	c.JSON(http.StatusOK, SyncExternalUserResponse{
+		Success: true,
+		Message: "账号统一成功",
+		Data: struct {
+			UserId         int    `json:"user_id"`
+			ExternalUserId string `json:"external_user_id"`
+			IsNewUser      bool   `json:"is_new_user"`
+			IsUnified      bool   `json:"is_unified,omitempty"`
+			WechatOpenId   string `json:"wechat_openid,omitempty"`
+		}{
+			UserId:         existingUser.Id,
+			ExternalUserId: existingUser.ExternalUserId,        // 返回原有ID，而不是请求ID
+			IsNewUser:      false,
+			IsUnified:      true,                               // 标识为统一账号
+			WechatOpenId:   existingUser.WechatOpenId,         // 返回微信OpenID
+		},
+	})
 }

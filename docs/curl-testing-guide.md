@@ -675,7 +675,175 @@ curl -X POST http://localhost:3000/api/user/external/topup \
 # - current_balance: 25.50
 ```
 
-## LLM API 调用测试
+## 6. 微信小程序用户测试用例
+
+### 6.1 创建微信小程序用户
+```bash
+curl -X POST http://localhost:3000/api/user/external/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "wx_mini_oNeBc5Gh3iXXXXXX",
+    "username": "wx_user_3iXXXXXX",
+    "display_name": "张小明",
+    "phone": "13800138000",
+    "wechat_openid": "oNeBc5Gh3iXXXXXX",
+    "wechat_unionid": "oNeBc5Gh3iXXXXXX_unionid",
+    "login_type": "wechat",
+    "external_data": "{\"miniprogram_info\": {\"avatar_url\": \"https://thirdwx.qlogo.cn/mmopen/vi_32/Q0j4TwGTfTKVUskibDnhHt6CVjEM8VrGsOPSLyFobCxn3SiaN5rOxicBMZzO5n0JCwZ7n3ao4Jmr3B2r6v7KOHMmw/132\", \"gender\": 1, \"country\": \"中国\", \"province\": \"广东\", \"city\": \"深圳\", \"language\": \"zh_CN\"}}"
+  }'
+```
+
+**期望响应：**
+```json
+{
+  "success": true,
+  "message": "用户创建成功",
+  "data": {
+    "user_id": 100,
+    "external_user_id": "wx_mini_oNeBc5Gh3iXXXXXX",
+    "is_new_user": true
+  }
+}
+```
+
+### 6.2 更新微信小程序用户信息
+```bash
+curl -X POST http://localhost:3000/api/user/external/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "wx_mini_oNeBc5Gh3iXXXXXX",
+    "username": "wx_user_3iXXXXXX",
+    "display_name": "张小明（更新）",
+    "phone": "13800138001",
+    "wechat_openid": "oNeBc5Gh3iXXXXXX",
+    "wechat_unionid": "oNeBc5Gh3iXXXXXX_unionid",
+    "login_type": "wechat",
+    "external_data": "{\"miniprogram_info\": {\"avatar_url\": \"https://thirdwx.qlogo.cn/mmopen/vi_32/updated_avatar.jpg\", \"gender\": 1, \"country\": \"中国\", \"province\": \"广东\", \"city\": \"广州\", \"language\": \"zh_CN\"}}"
+  }'
+```
+
+### 6.3 微信小程序用户充值（微信支付）
+```bash
+curl -X POST http://localhost:3000/api/user/external/topup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "wx_mini_oNeBc5Gh3iXXXXXX",
+    "amount_usd": 6.88,
+    "payment_id": "wechat_4200001234202409160123456789"
+  }'
+```
+
+### 6.4 为微信小程序用户创建Token
+```bash
+curl -X POST http://localhost:3000/api/user/external/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "wx_mini_oNeBc5Gh3iXXXXXX",
+    "token_name": "微信小程序API",
+    "expires_in_days": 30
+  }'
+```
+
+### 6.5 查询微信小程序用户统计
+```bash
+curl -X GET "http://localhost:3000/api/user/external/wx_mini_oNeBc5Gh3iXXXXXX/stats"
+```
+
+### 6.6 微信用户特殊场景测试
+
+#### 测试重复OpenID处理
+```bash
+# 尝试使用相同的openid但不同的external_user_id（应该失败或被识别）
+curl -X POST http://localhost:3000/api/user/external/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "wx_mini_different_id",
+    "username": "wx_user_different",
+    "display_name": "不同用户",
+    "wechat_openid": "oNeBc5Gh3iXXXXXX",
+    "login_type": "wechat"
+  }'
+```
+
+#### 测试微信UnionID更新
+```bash
+# 为已存在用户添加UnionID
+curl -X POST http://localhost:3000/api/user/external/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "wx_mini_oNeBc5Gh3iXXXXXX",
+    "username": "wx_user_3iXXXXXX",
+    "display_name": "张小明",
+    "wechat_openid": "oNeBc5Gh3iXXXXXX",
+    "wechat_unionid": "unionid_12345abcdef",
+    "login_type": "wechat"
+  }'
+```
+
+### 6.7 账号统一场景测试
+
+#### 场景：前端平台用户 + 微信小程序统一
+```bash
+# 步骤1: 创建前端平台微信用户
+curl -X POST http://localhost:3000/api/user/external/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "frontend_user_demo",
+    "username": "demo_user",
+    "display_name": "演示用户",
+    "email": "demo@frontend.com",
+    "wechat_openid": "demo_openid_12345",
+    "login_type": "wechat"
+  }'
+
+# 步骤2: 为前端用户充值
+curl -X POST http://localhost:3000/api/user/external/topup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "frontend_user_demo",
+    "amount_usd": 10.0,
+    "payment_id": "demo_payment_001"
+  }'
+
+# 步骤3: 微信小程序登录（相同OpenID）
+curl -X POST http://localhost:3000/api/user/external/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "wx_mini_demo_openid_12345",
+    "username": "wx_user_demo",
+    "display_name": "演示用户（小程序）",
+    "wechat_openid": "demo_openid_12345",
+    "login_type": "wechat"
+  }'
+```
+
+**期望响应（步骤3）**:
+```json
+{
+  "success": true,
+  "message": "账号统一成功",
+  "data": {
+    "user_id": 100,
+    "external_user_id": "frontend_user_demo",  // 返回原有ID，而不是wx_mini_xxx
+    "is_new_user": false,
+    "is_unified": true,                        // 标识为统一账号
+    "wechat_openid": "demo_openid_12345"      // 包含微信OpenID
+  }
+}
+```
+
+#### 验证统一效果
+```bash
+# 使用返回的external_user_id查询用户信息
+curl -X GET "http://localhost:3000/api/user/external/frontend_user_demo/stats"
+
+# 期望看到：
+# - 用户有$10充值余额
+# - 显示名称已更新为"演示用户（小程序）"
+# - wechat_openid字段存在
+```
+
+## 7. LLM API 调用测试
 
 在创建用户、充值、生成Token后，可以测试实际的LLM模型调用功能。
 
@@ -975,6 +1143,16 @@ docker logs redis-dev
 - [ ] 消费记录API - 按日期筛选
 - [ ] 消费记录API - 按模型筛选
 - [ ] 消费记录API - 分页查询
+
+### 微信小程序专项测试 ✅
+- [ ] 微信用户同步（新用户）
+- [ ] 微信用户信息更新
+- [ ] 微信支付充值
+- [ ] 微信用户Token管理
+- [ ] OpenID唯一性验证
+- [ ] UnionID更新处理
+- [ ] 微信用户数据格式验证
+- [ ] 微信用户特殊场景测试
 
 ### LLM API 集成测试 ✅
 - [ ] Chat Completions - qwen-turbo 模型

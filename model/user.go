@@ -917,6 +917,31 @@ func IsExternalUserIdAlreadyTaken(externalUserId string) bool {
 	return !errors.Is(err, gorm.ErrRecordNotFound)
 }
 
+// GetUserByWechatOpenId 根据微信OpenID查找用户
+func GetUserByWechatOpenId(openId string) *User {
+	if openId == "" {
+		return nil
+	}
+
+	var user User
+	err := DB.Where("wechat_openid = ? AND wechat_openid != ''", openId).First(&user).Error
+	if err != nil {
+		return nil
+	}
+	return &user
+}
+
+// IsWechatOpenIdTaken 检查微信OpenID是否已被使用
+func IsWechatOpenIdTaken(openId string) bool {
+	if openId == "" {
+		return false
+	}
+
+	var count int64
+	DB.Model(&User{}).Where("wechat_openid = ? AND wechat_openid != ''", openId).Count(&count)
+	return count > 0
+}
+
 func (user *User) FillUserByLinuxDOId() error {
 	if user.LinuxDOId == "" {
 		return errors.New("linux do id is empty")

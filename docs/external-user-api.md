@@ -11,6 +11,11 @@
 - **New API 后端**：作为 LLM 网关和计费系统
 - **映射机制**：通过 `external_user_id` 建立前端用户与 New API 用户的关联
 
+### 支持的用户类型
+1. **通用前端平台用户**：使用自定义的 `external_user_id` 格式
+2. **微信小程序用户**：使用标准化的微信用户映射策略（详见 [微信小程序集成方案](#微信小程序集成方案)）
+3. **其他第三方平台用户**：可根据需要扩展映射规则
+
 ### 计费策略
 - **货币统一**：前端收款任意货币 → 支付网关转换 → 后端只接收美元
 - **汇率处理**：完全由前端网站和支付网关负责，New API 不处理汇率转换
@@ -47,7 +52,7 @@ Content-Type: application/json
 {
   "external_user_id": "string, required, 外部用户唯一标识",
   "username": "string, required, 用户名",
-  "display_name": "string, optional, 显示名称", 
+  "display_name": "string, optional, 显示名称",
   "email": "string, optional, 邮箱地址（可为虚拟邮箱）",
   "phone": "string, optional, 手机号码",
   "wechat_openid": "string, optional, 微信OpenID",
@@ -59,6 +64,53 @@ Content-Type: application/json
 }
 ```
 
+**微信小程序用户示例**:
+```json
+{
+  "external_user_id": "wx_mini_oNeBc5Gh3iXXXXXX",
+  "username": "wx_user_3iXXXXXX",
+  "display_name": "微信用户昵称",
+  "phone": "13800138000",
+  "wechat_openid": "oNeBc5Gh3iXXXXXX",
+  "wechat_unionid": "oNeBc5Gh3iXXXXXX_unionid",
+  "login_type": "wechat",
+  "external_data": "{\"miniprogram_info\": {\"avatar_url\": \"https://thirdwx.qlogo.cn/mmopen/xxx\", \"gender\": 1, \"country\": \"中国\", \"province\": \"广东\", \"city\": \"深圳\", \"language\": \"zh_CN\"}}"
+}
+```
+
+**账号统一场景示例**:
+当用户在前端平台和微信小程序都登录时，系统会自动进行账号统一：
+
+```json
+// 场景：前端平台用户已存在
+// 1. 前端平台登录创建用户
+{
+  "external_user_id": "frontend_user_12345",
+  "wechat_openid": "oNeBc5Gh3iXXXXXX",
+  // ... 其他字段
+}
+
+// 2. 微信小程序登录（相同OpenID）
+{
+  "external_user_id": "wx_mini_oNeBc5Gh3iXXXXXX",
+  "wechat_openid": "oNeBc5Gh3iXXXXXX",  // 相同的OpenID
+  // ... 其他字段
+}
+
+// 3. 系统响应：返回原有账号信息
+{
+  "success": true,
+  "message": "账号统一成功",
+  "data": {
+    "user_id": 123,
+    "external_user_id": "frontend_user_12345",  // 返回原有ID
+    "is_new_user": false,
+    "is_unified": true,                         // 标识为统一账号
+    "wechat_openid": "oNeBc5Gh3iXXXXXX"        // 包含微信OpenID
+  }
+}
+```
+
 **响应示例**:
 ```json
 {
@@ -67,7 +119,8 @@ Content-Type: application/json
   "data": {
     "user_id": 123,
     "external_user_id": "test_user_001",
-    "is_new_user": true
+    "is_new_user": true,
+    "wechat_openid": "oNeBc5Gh3iXXXXXX"  // 如果提供了微信OpenID
   }
 }
 ```
@@ -578,6 +631,124 @@ CREATE UNIQUE INDEX idx_users_external_user_id ON users(external_user_id);
 - 使用四舍五入确保计费精度
 - 完全兼容 New API 的复杂计费体系
 
+## 微信小程序集成方案
+
+### 方案概述
+微信小程序用户集成采用标准化的用户映射策略，充分利用现有API接口，无需修改后端代码。
+
+### 用户ID映射规则
+- **external_user_id 格式**: `wx_mini_{openid}`
+- **username 格式**: `wx_user_{openid_suffix}`（取openid后8位）
+- **登录类型**: `wechat`
+- **唯一标识**: 基于微信OpenID确保唯一性
+
+### 账号统一机制 🔄
+基于微信OpenID的智能账号统一，确保用户在多平台间的一致体验：
+
+#### 核心逻辑
+1. **OpenID优先检查**: 当微信用户登录时，系统首先检查是否存在相同OpenID的用户
+2. **自动账号统一**: 如果找到已存在用户，自动统一到该账号
+3. **返回原有ID**: 统一后返回原有的`external_user_id`，而不是请求的ID
+4. **透明路由**: 前端使用返回的`external_user_id`进行后续API调用
+
+#### 统一策略
+- **首次优先**: 谁先注册，谁是主账号
+- **数据合并**: 自动更新显示名称、手机号等可变信息
+- **余额统一**: 所有平台共享同一账号的余额和Token
+
+### 微信用户字段映射
+| 微信小程序字段 | New API 字段 | 说明 |
+|---------------|-------------|------|
+| openid | wechat_openid | 小程序用户唯一标识 |
+| unionid | wechat_unionid | 跨应用用户标识（可选） |
+| nickName | display_name | 用户昵称 |
+| phone | phone | 手机号（需授权） |
+| avatarUrl, gender等 | external_data | 存储为JSON格式 |
+
+### 集成流程
+
+#### 1. 微信小程序登录
+```javascript
+// 微信小程序端代码示例
+wx.login({
+  success: (res) => {
+    if (res.code) {
+      // 获取用户信息
+      wx.getUserProfile({
+        desc: '用于完善用户资料',
+        success: (userInfo) => {
+          // 调用后端同步用户接口
+          syncUserToNewAPI(res.code, userInfo.userInfo);
+        }
+      });
+    }
+  }
+});
+```
+
+#### 2. 后端用户同步
+```javascript
+const syncUserToNewAPI = async (code, userInfo) => {
+  // 1. 通过code获取openid（后端调用微信API）
+  const wechatAuth = await getWechatOpenId(code);
+
+  // 2. 同步用户到New API
+  const response = await fetch('/api/user/external/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      external_user_id: `wx_mini_${wechatAuth.openid}`,
+      username: `wx_user_${wechatAuth.openid.slice(-8)}`,
+      display_name: userInfo.nickName || '微信用户',
+      wechat_openid: wechatAuth.openid,
+      wechat_unionid: wechatAuth.unionid || '',
+      login_type: 'wechat',
+      external_data: JSON.stringify({
+        miniprogram_info: {
+          avatar_url: userInfo.avatarUrl,
+          gender: userInfo.gender,
+          country: userInfo.country,
+          province: userInfo.province,
+          city: userInfo.city,
+          language: userInfo.language
+        }
+      })
+    })
+  });
+
+  return response.json();
+};
+```
+
+### 微信用户更新策略
+- **不可更新**: `external_user_id`, `wechat_openid`
+- **可更新**: `display_name`, `external_data`
+- **条件更新**: `wechat_unionid`（从空更新为有值）, `phone`（用户授权后）
+
+### 微信支付集成示例
+```javascript
+// 微信小程序支付完成后充值
+const topupAfterWechatPay = async (openid, paymentResult) => {
+  const response = await fetch('/api/user/external/topup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      external_user_id: `wx_mini_${openid}`,
+      amount_usd: paymentResult.amount_usd, // 已转换为美元
+      payment_id: `wechat_${paymentResult.transaction_id}`
+    })
+  });
+
+  return response.json();
+};
+```
+
+### 微信特有注意事项
+1. **OpenID获取**: 需要code换取，有效期限制
+2. **手机号授权**: 需要用户主动授权，建议设为可选
+3. **用户信息更新**: 建议每次启动时检查并更新
+4. **UnionID处理**: 如果应用在微信开放平台，可获取UnionID实现跨应用统一
+
 ## 推荐体系支持
 
 ### 推荐码功能
@@ -635,5 +806,6 @@ go test ./controller -v -timeout 60s -run "Test.*ExternalUser"
 ```
 
 ---
-*文档版本：v2.0*  
-*最后更新：2025-01-31*
+*文档版本：v2.1*
+*最后更新：2025-09-16*
+*新增内容：微信小程序集成方案*
