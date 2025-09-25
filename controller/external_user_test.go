@@ -908,3 +908,133 @@ func TestWechatAccountUnification(t *testing.T) {
 		})
 	}
 }
+
+// 测试使用 wechat_openid 参数的API功能
+func TestWechatOpenIdParameters(t *testing.T) {
+	router := setupTestRouter()
+
+	// 创建测试用户
+	testUser := &model.User{
+		Username:       "wechat_param_test",
+		Email:          "wechat_param@test.com",
+		ExternalUserId: "wx_mini_oNeBc5Gh3iXXXXXX",
+		WechatOpenId:   "oNeBc5Gh3iXXXXXX",
+		LoginType:      "wechat",
+		IsExternal:     true,
+		Quota:          1000000,
+	}
+	model.DB.Create(testUser)
+
+	t.Run("测试充值API使用wechat_openid", func(t *testing.T) {
+		requestBody := map[string]interface{}{
+			"wechat_openid": "oNeBc5Gh3iXXXXXX",
+			"amount_usd":    5.0,
+			"payment_id":    "wechat_topup_test",
+		}
+
+		jsonData, _ := json.Marshal(requestBody)
+		req, _ := http.NewRequest("POST", "/api/user/external/topup", bytes.NewBuffer(jsonData))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, 200, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Equal(t, true, response["success"])
+
+		// 验证用户余额增加
+		var updatedUser model.User
+		model.DB.First(&updatedUser, testUser.Id)
+		expectedQuota := 1000000 + int(5.0*float64(common.QuotaPerUnit))
+		assert.Equal(t, expectedQuota, updatedUser.Quota)
+	})
+
+	t.Run("测试Token创建API使用wechat_openid", func(t *testing.T) {
+		requestBody := map[string]interface{}{
+			"wechat_openid": "oNeBc5Gh3iXXXXXX",
+			"token_name":    "WeChat OpenID Token",
+			"expires_in_days": 365,
+		}
+
+		jsonData, _ := json.Marshal(requestBody)
+		req, _ := http.NewRequest("POST", "/api/user/external/token", bytes.NewBuffer(jsonData))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, 200, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Equal(t, true, response["success"])
+
+		data := response["data"].(map[string]interface{})
+		assert.Equal(t, "WeChat OpenID Token", data["token_name"])
+		assert.NotEmpty(t, data["access_key"])
+	})
+
+	t.Run("测试用户统计API使用wechat_openid作为路径参数", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/api/user/external/oNeBc5Gh3iXXXXXX/stats", nil)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, 200, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Equal(t, true, response["success"])
+
+		data := response["data"].(map[string]interface{})
+		userInfo := data["user_info"].(map[string]interface{})
+		assert.Equal(t, "wx_mini_oNeBc5Gh3iXXXXXX", userInfo["external_user_id"])
+		assert.Equal(t, "oNeBc5Gh3iXXXXXX", userInfo["wechat_openid"])
+	})
+
+	t.Run("测试消费记录API使用wechat_openid作为路径参数", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/api/user/external/oNeBc5Gh3iXXXXXX/logs", nil)
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, 200, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Equal(t, true, response["success"])
+	})
+
+	t.Run("测试参数验证-两个参数都缺失", func(t *testing.T) {
+		requestBody := map[string]interface{}{
+			"amount_usd": 5.0,
+			"payment_id": "test_payment",
+		}
+
+		jsonData, _ := json.Marshal(requestBody)
+		req, _ := http.NewRequest("POST", "/api/user/external/topup", bytes.NewBuffer(jsonData))
+		req.Header.Set("Content-Type", "application/json")
+
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, 400, w.Code)
+
+		var response map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
+		assert.Equal(t, false, response["success"])
+		assert.Contains(t, response["message"], "必须提供其中一个")
+	})
+
+	// 清理测试数据
+	model.DB.Delete(testUser)
+	model.DB.Where("user_id = ?", testUser.Id).Delete(&model.Token{})
+}

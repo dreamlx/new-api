@@ -13,6 +13,61 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// 外部用户Token删除请求结构
+type ExternalUserTokenDeleteRequest struct {
+	ExternalUserId string `json:"external_user_id" binding:"omitempty,min=1,max=100"`
+	WechatOpenId   string `json:"wechat_openid" binding:"omitempty,min=1,max=100"`
+	TokenId        int    `json:"token_id" binding:"required,min=1"`
+}
+
+// findUserByIdentifier 根据标识符查找用户（支持 external_user_id 或 wechat_openid）
+func findUserByIdentifier(externalUserId, wechatOpenId string) (*model.User, error) {
+	user := &model.User{}
+
+	// 优先使用 external_user_id
+	if externalUserId != "" {
+		if err := model.DB.Where("external_user_id = ?", externalUserId).First(user).Error; err != nil {
+			return nil, err
+		}
+		return user, nil
+	}
+
+	// 如果 external_user_id 为空，使用 wechat_openid
+	if wechatOpenId != "" {
+		if err := model.DB.Where("wechat_openid = ?", wechatOpenId).First(user).Error; err != nil {
+			return nil, err
+		}
+		return user, nil
+	}
+
+	return nil, fmt.Errorf("未提供有效的用户标识符")
+}
+
+// validateUserIdentifier 验证用户标识符参数
+func validateUserIdentifier(externalUserId, wechatOpenId string) error {
+	if externalUserId == "" && wechatOpenId == "" {
+		return fmt.Errorf("external_user_id 和 wechat_openid 必须提供其中一个")
+	}
+	return nil
+}
+
+// findUserByPathId 根据路径参数查找用户（智能识别 external_user_id 或 wechat_openid）
+func findUserByPathId(pathId string) (*model.User, error) {
+	user := &model.User{}
+
+	// 首先尝试按 external_user_id 查找
+	if err := model.DB.Where("external_user_id = ?", pathId).First(user).Error; err == nil {
+		return user, nil
+	}
+
+	// 如果没找到，尝试按 wechat_openid 查找
+	if err := model.DB.Where("wechat_openid = ?", pathId).First(user).Error; err == nil {
+		return user, nil
+	}
+
+	return nil, fmt.Errorf("用户不存在")
+}
+
 // 外部用户同步请求结构
 type SyncExternalUserRequest struct {
 	ExternalUserId string `json:"external_user_id" binding:"required,min=1,max=100"`
@@ -43,7 +98,8 @@ type SyncExternalUserResponse struct {
 
 // 外部用户充值请求结构
 type ExternalUserTopUpRequest struct {
-	ExternalUserId string  `json:"external_user_id" binding:"required,min=1,max=100"`
+	ExternalUserId string  `json:"external_user_id" binding:"omitempty,min=1,max=100"`
+	WechatOpenId   string  `json:"wechat_openid" binding:"omitempty,min=1,max=100"`
 	AmountUSD      float64 `json:"amount_usd" binding:"required,min=0.01"`
 	PaymentId      string  `json:"payment_id" binding:"required,min=1,max=200"`
 }
@@ -63,7 +119,8 @@ type ExternalUserTopUpResponse struct {
 
 // 外部用户Token创建请求结构
 type ExternalUserTokenRequest struct {
-	ExternalUserId string `json:"external_user_id" binding:"required,min=1,max=100"`
+	ExternalUserId string `json:"external_user_id" binding:"omitempty,min=1,max=100"`
+	WechatOpenId   string `json:"wechat_openid" binding:"omitempty,min=1,max=100"`
 	TokenName      string `json:"token_name" binding:"required,min=1,max=100"`
 	ExpiresInDays  int    `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
 }
@@ -258,9 +315,18 @@ func ExternalUserTopUp(c *gin.Context) {
 		return
 	}
 
-	// 查找外部用户
-	user := &model.User{}
-	if err := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(user).Error; err != nil {
+	// 验证用户标识符参数
+	if err := validateUserIdentifier(req.ExternalUserId, req.WechatOpenId); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 查找用户
+	user, err := findUserByIdentifier(req.ExternalUserId, req.WechatOpenId)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -300,8 +366,13 @@ func ExternalUserTopUp(c *gin.Context) {
 	// 重新获取用户信息
 	model.DB.First(user, user.Id)
 
+	// 记录日志，优先显示 external_user_id
+	userIdentifier := req.ExternalUserId
+	if userIdentifier == "" {
+		userIdentifier = "wechat:" + req.WechatOpenId
+	}
 	common.SysLog(fmt.Sprintf("外部用户充值成功: %s, 金额: $%.2f, 增加quota: %d",
-		req.ExternalUserId, req.AmountUSD, quotaToAdd))
+		userIdentifier, req.AmountUSD, quotaToAdd))
 
 	// 构造响应
 	response := ExternalUserTopUpResponse{
@@ -328,9 +399,18 @@ func CreateExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	// 查找外部用户
-	user := &model.User{}
-	if err := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(user).Error; err != nil {
+	// 验证用户标识符参数
+	if err := validateUserIdentifier(req.ExternalUserId, req.WechatOpenId); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 查找用户
+	user, err := findUserByIdentifier(req.ExternalUserId, req.WechatOpenId)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -366,8 +446,13 @@ func CreateExternalUserToken(c *gin.Context) {
 		return
 	}
 
+	// 记录日志，优先显示 external_user_id
+	userIdentifier := req.ExternalUserId
+	if userIdentifier == "" {
+		userIdentifier = "wechat:" + req.WechatOpenId
+	}
 	common.SysLog(fmt.Sprintf("为外部用户创建Token成功: %s, Token名称: %s",
-		req.ExternalUserId, req.TokenName))
+		userIdentifier, req.TokenName))
 
 	// 构造响应
 	response := ExternalUserTokenResponse{
@@ -383,9 +468,10 @@ func CreateExternalUserToken(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// 删除外部用户Token请求结构
-type DeleteExternalUserTokenRequest struct {
-	ExternalUserId string `json:"external_user_id" binding:"required"`
+// 删除外部用户Token请求结构新版（支持wechat_openid）
+type DeleteExternalUserTokenRequestNew struct {
+	ExternalUserId string `json:"external_user_id" binding:"omitempty,min=1,max=100"`
+	WechatOpenId   string `json:"wechat_openid" binding:"omitempty,min=1,max=100"`
 	TokenId        int    `json:"token_id" binding:"required"`
 }
 
@@ -401,7 +487,7 @@ type DeleteExternalUserTokenResponse struct {
 
 // 删除外部用户Token
 func DeleteExternalUserToken(c *gin.Context) {
-	var req DeleteExternalUserTokenRequest
+	var req ExternalUserTokenDeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -410,9 +496,18 @@ func DeleteExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	// 查找外部用户
-	user := &model.User{}
-	if err := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(user).Error; err != nil {
+	// 验证用户标识符参数
+	if err := validateUserIdentifier(req.ExternalUserId, req.WechatOpenId); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 查找用户
+	user, err := findUserByIdentifier(req.ExternalUserId, req.WechatOpenId)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -440,8 +535,13 @@ func DeleteExternalUserToken(c *gin.Context) {
 		return
 	}
 
+	// 记录日志，优先显示 external_user_id
+	userIdentifier := req.ExternalUserId
+	if userIdentifier == "" {
+		userIdentifier = "wechat:" + req.WechatOpenId
+	}
 	common.SysLog(fmt.Sprintf("外部用户删除Token成功: %s, Token ID: %d, Token名称: %s",
-		req.ExternalUserId, req.TokenId, token.Name))
+		userIdentifier, req.TokenId, token.Name))
 
 	// 构造响应
 	response := DeleteExternalUserTokenResponse{
@@ -449,7 +549,7 @@ func DeleteExternalUserToken(c *gin.Context) {
 		Message: "Token删除成功",
 	}
 	response.Data.TokenId = req.TokenId
-	response.Data.ExternalUserId = req.ExternalUserId
+	response.Data.ExternalUserId = user.ExternalUserId
 
 	c.JSON(http.StatusOK, response)
 }
@@ -491,18 +591,18 @@ type ExternalUserLogsResponse struct {
 
 // 获取外部用户消费记录
 func GetExternalUserLogs(c *gin.Context) {
-	externalUserId := c.Param("external_user_id")
-	if externalUserId == "" {
+	pathId := c.Param("external_user_id")
+	if pathId == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "external_user_id参数缺失",
+			"message": "用户ID参数缺失",
 		})
 		return
 	}
 
-	// 查找外部用户
-	user := &model.User{}
-	if err := model.DB.Where("external_user_id = ?", externalUserId).First(user).Error; err != nil {
+	// 查找用户（支持 external_user_id 或 wechat_openid）
+	user, err := findUserByPathId(pathId)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -651,18 +751,18 @@ func GetExternalUserLogs(c *gin.Context) {
 
 // 获取外部用户统计信息
 func GetExternalUserStats(c *gin.Context) {
-	externalUserId := c.Param("external_user_id")
-	if externalUserId == "" {
+	pathId := c.Param("external_user_id")
+	if pathId == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "external_user_id参数缺失",
+			"message": "用户ID参数缺失",
 		})
 		return
 	}
 
-	// 查找外部用户
-	user := &model.User{}
-	if err := model.DB.Where("external_user_id = ?", externalUserId).First(user).Error; err != nil {
+	// 查找用户（支持 external_user_id 或 wechat_openid）
+	user, err := findUserByPathId(pathId)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -696,6 +796,7 @@ func GetExternalUserStats(c *gin.Context) {
 		"data": gin.H{
 			"user_info": gin.H{
 				"external_user_id": user.ExternalUserId,
+				"wechat_openid":    user.WechatOpenId,
 				"username":         user.Username,
 				"display_name":     user.DisplayName,
 				"current_quota":    user.Quota,
