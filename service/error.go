@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"one-api/common"
 	"one-api/dto"
+	"one-api/logger"
 	"one-api/types"
 	"strconv"
 	"strings"
@@ -78,7 +80,7 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 	return claudeErr
 }
 
-func RelayErrorHandler(resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
+func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 
 	responseBody, err := io.ReadAll(resp.Body)
@@ -97,7 +99,7 @@ func RelayErrorHandler(resp *http.Response, showBodyWhenFail bool) (newApiErr *t
 			errMsg = fmt.Errorf("bad response status code %d, body: %s", resp.StatusCode, string(responseBody))
 		} else {
 			if common.DebugEnabled {
-				println(fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, string(responseBody)))
+				logger.LogInfo(ctx, fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, string(responseBody)))
 			}
 			errMsg = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
