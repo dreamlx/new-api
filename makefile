@@ -25,7 +25,7 @@ help: ## 显示所有可用命令
 
 dev: dev-db start ## 快速启动开发环境（推荐）
 
-start: ## 启动后端服务（需先启动数据库）
+start: ## 启动后端服务（前台运行，需先执行 make dev-db）
 	@echo "🚀 启动后端服务..."
 	@cd $(BACKEND_DIR) && \
 	export SQL_DSN=root:dev123456@tcp\(localhost:3307\)/new_api_dev && \
@@ -47,8 +47,10 @@ dev-db: ## 启动数据库服务（MySQL + Redis）
 
 stop: ## 停止所有服务
 	@echo "🛑 停止所有服务..."
-	@pkill -f "go run main.go" 2>/dev/null || echo "后端服务已停止"
+	@pkill -f "go run main.go" 2>/dev/null || true
+	@lsof -ti:3000 2>/dev/null | xargs kill -9 2>/dev/null || true
 	@docker compose -f docker-compose.db-only.yml down
+	@echo "✅ 所有服务已停止"
 
 status: ## 查看服务运行状态
 	@echo "📊 服务状态:"

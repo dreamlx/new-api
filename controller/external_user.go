@@ -282,7 +282,21 @@ func ExternalUserTopUp(c *gin.Context) {
 	// 重新获取用户信息
 	model.DB.First(user, user.Id)
 
-	// 记录日志
+	// 记录充值日志到logs表（包含quota信息，这样才能在 /console/log 页面正确显示金额）
+	topupLog := &model.Log{
+		UserId:    user.Id,
+		Username:  user.Username,
+		CreatedAt: common.GetTimestamp(),
+		Type:      model.LogTypeTopup,
+		Content: fmt.Sprintf("外部用户充值成功，充值金额: $%.2f，增加额度: %d quota，支付ID: %s",
+			req.AmountUSD, quotaToAdd, req.PaymentId),
+		Quota: quotaToAdd, // 关键：记录quota数值，用于统计和显示
+	}
+	if err := model.LOG_DB.Create(topupLog).Error; err != nil {
+		common.SysError("创建充值日志失败: " + err.Error())
+	}
+
+	// 记录系统日志
 	common.SysLog(fmt.Sprintf("外部用户充值成功: %s, 金额: $%.2f, 增加quota: %d",
 		req.ExternalUserId, req.AmountUSD, quotaToAdd))
 
