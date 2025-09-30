@@ -2,7 +2,7 @@ FRONTEND_DIR = ./web
 BACKEND_DIR = .
 
 .PHONY: help dev dev-db stop start start-backend start-daemon status logs \
-	build-frontend build-docker \
+	build build-backend build-frontend build-docker prod \
 	test test-api test-user-story \
 	db-init db-backup db-reset \
 	sync clean
@@ -94,6 +94,28 @@ logs: ## 查看数据库日志
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 🏗️  构建相关
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+build: build-backend build-frontend ## 完整构建（后端+前端）
+
+build-backend: ## 编译后端二进制文件（生产部署用）
+	@echo "🔨 编译后端..."
+	@go build -ldflags="-s -w" -o one-api main.go
+	@echo "✅ 编译完成: ./one-api"
+	@ls -lh one-api
+
+prod: build-backend ## 生产环境启动（使用编译后的二进制）
+	@echo "🚀 启动生产服务..."
+	@if [ ! -f one-api ]; then \
+		echo "❌ 二进制文件不存在，请先运行: make build-backend"; \
+		exit 1; \
+	fi
+	@if [ -f .env.prod ]; then \
+		echo "📋 使用 .env.prod 配置文件"; \
+		export $$(cat .env.prod | xargs) && ./one-api; \
+	else \
+		echo "⚠️  .env.prod 不存在，使用环境变量"; \
+		./one-api; \
+	fi
 
 build-frontend: ## 构建前端（生产部署用）
 	@echo "🏗️  构建前端..."
