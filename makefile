@@ -1,7 +1,7 @@
 FRONTEND_DIR = ./web
 BACKEND_DIR = .
 
-.PHONY: help dev dev-db stop start start-backend status logs \
+.PHONY: help dev dev-db stop start start-backend start-daemon status logs \
 	build-frontend build-docker \
 	test test-api test-user-story \
 	db-init db-backup db-reset \
@@ -42,6 +42,28 @@ start: ## 启动后端服务（前台运行，需先执行 make dev-db）
 	fi
 
 start-backend: start ## 启动后端服务（兼容旧版本命令）
+
+start-daemon: ## 后台启动后端服务（服务器部署用）
+	@echo "🚀 后台启动服务..."
+	@mkdir -p logs
+	@if [ -f .env.dev ]; then \
+		echo "📋 使用 .env.dev 配置文件"; \
+		cd $(BACKEND_DIR) && export $$(cat .env.dev | xargs) && \
+		nohup go run main.go > logs/app.log 2>&1 & echo $$! > .pid && \
+		echo "✅ 服务已在后台启动，PID: $$(cat .pid)"; \
+	else \
+		echo "⚠️  .env.dev 不存在，使用默认配置"; \
+		cd $(BACKEND_DIR) && \
+		nohup sh -c 'export SQL_DSN=root:dev123456@tcp\(localhost:3307\)/new_api_dev && \
+		export REDIS_CONN_STRING=redis://localhost:6379 && \
+		export GIN_MODE=debug && \
+		export TZ=Asia/Shanghai && \
+		export ERROR_LOG_ENABLED=true && \
+		go run main.go' > logs/app.log 2>&1 & echo $$! > .pid && \
+		echo "✅ 服务已在后台启动，PID: $$(cat .pid)"; \
+	fi
+	@echo "📋 查看日志: tail -f logs/app.log"
+	@echo "🛑 停止服务: make stop"
 
 dev-db: ## 启动数据库服务（MySQL + Redis）
 	@echo "🗄️  启动数据库服务..."

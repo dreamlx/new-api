@@ -90,17 +90,19 @@ make db-init     # 初始化外部用户系统数据库
 
 ```bash
 make              # 显示帮助信息
-make dev          # 一键启动开发环境（推荐）
-make start        # 启动后端服务（使用 .env.dev 配置）
+make dev          # 一键启动开发环境（推荐，前台运行）
+make start        # 启动后端服务（前台运行，使用 .env.dev 配置）
 make start-backend # 启动后端服务（兼容旧版本，等同于 make start）
+make start-daemon # 后台启动后端服务（服务器部署用）
 make stop         # 停止所有服务（后端进程 + 数据库容器）
 make status       # 查看服务状态
 ```
 
 **命令说明**：
-- `make dev`：最便捷的方式，自动启动数据库和后端
-- `make start`：只启动后端，需要先运行 `make dev-db` 启动数据库
+- `make dev`：最便捷的方式，自动启动数据库和后端（前台运行）
+- `make start`：只启动后端，需要先运行 `make dev-db` 启动数据库（前台运行）
 - `make start-backend`：旧版本命令别名，与 `make start` 完全相同
+- `make start-daemon`：后台启动后端，适合服务器部署，日志保存到 `logs/app.log`
 - `make stop`：会停止后端Go进程和数据库Docker容器，释放端口3000
 
 ### 开发环境管理
@@ -559,6 +561,186 @@ git push origin feature/new-api-endpoint
 
 ---
 
+## 🖥️ 服务器后台运行
+
+在服务器环境，`make dev` 和 `make start` 会前台运行，关闭终端会导致服务停止。以下是两种推荐的后台运行方案。
+
+### 方案1：使用 make start-daemon（推荐）
+
+**适用场景**：快速部署、开发测试服务器
+
+```bash
+# 1. 启动数据库
+make dev-db
+
+# 2. 后台启动后端
+make start-daemon
+
+# 输出：
+# 🚀 后台启动服务...
+# 📋 使用 .env.dev 配置文件
+# ✅ 服务已在后台启动，PID: 12345
+# 📋 查看日志: tail -f logs/app.log
+# 🛑 停止服务: make stop
+
+# 3. 查看日志
+tail -f logs/app.log
+
+# 4. 停止服务
+make stop
+```
+
+**特点**：
+- ✅ 自动使用 `.env.dev` 配置
+- ✅ 日志输出到 `logs/app.log`
+- ✅ PID 保存到 `.pid` 文件
+- ✅ 使用 `make stop` 可正确停止
+
+**查看进程状态**：
+```bash
+# 查看 PID
+cat .pid
+
+# 检查进程是否运行
+ps -p $(cat .pid)
+
+# 查看服务状态
+make status
+```
+
+---
+
+### 方案2：使用 tmux
+
+**适用场景**：需要随时查看日志、临时部署
+
+#### 安装 tmux
+
+```bash
+# Ubuntu/Debian
+sudo apt install tmux
+
+# CentOS/RHEL
+sudo yum install tmux
+
+# macOS
+brew install tmux
+```
+
+#### 使用步骤
+
+```bash
+# 1. 创建命名会话
+tmux new -s new-api
+
+# 2. 在会话中启动服务
+make dev-db
+make start
+
+# 3. 断开会话（服务继续运行）
+# 按键：Ctrl+B，然后按 D
+
+# 4. 重新连接会话
+tmux attach -t new-api
+
+# 或简写
+tmux a -t new-api
+
+# 5. 查看所有会话
+tmux ls
+
+# 6. 停止服务并退出会话
+# 在会话中按 Ctrl+C 停止服务
+# 然后输入 exit 退出
+
+# 7. 强制删除会话
+tmux kill-session -t new-api
+```
+
+#### tmux 快捷键
+
+| 快捷键 | 功能 |
+|--------|------|
+| `Ctrl+B` `D` | 断开会话 |
+| `Ctrl+B` `C` | 创建新窗口 |
+| `Ctrl+B` `N` | 下一个窗口 |
+| `Ctrl+B` `P` | 上一个窗口 |
+| `Ctrl+B` `%` | 垂直分屏 |
+| `Ctrl+B` `"` | 水平分屏 |
+| `Ctrl+B` `方向键` | 切换分屏 |
+
+**常用工作流**：
+```bash
+# 启动多个窗口管理不同服务
+tmux new -s new-api
+
+# 窗口0：数据库
+make dev-db
+# 按 Ctrl+B C 创建新窗口
+
+# 窗口1：后端
+make start
+# 按 Ctrl+B C 创建新窗口
+
+# 窗口2：查看日志
+tail -f logs/app.log
+
+# 切换窗口：Ctrl+B N (下一个) 或 Ctrl+B P (上一个)
+```
+
+---
+
+### 方案对比
+
+| 对比项 | make start-daemon | tmux |
+|--------|-------------------|------|
+| **安装要求** | 无需额外安装 | 需要安装 tmux |
+| **易用性** | ⭐⭐⭐⭐⭐ 最简单 | ⭐⭐⭐ 需要学习快捷键 |
+| **日志查看** | 文件日志，需要 tail | 实时日志，随时查看 |
+| **重启服务** | make stop && make start-daemon | Ctrl+C 后重新启动 |
+| **进程管理** | 通过 .pid 文件 | 通过 tmux 会话 |
+| **适用场景** | 生产/测试服务器 | 开发/临时部署 |
+
+---
+
+### 其他方案参考
+
+#### screen（类似 tmux）
+
+```bash
+# 创建会话
+screen -S new-api
+
+# 启动服务
+make dev
+
+# 断开：Ctrl+A D
+# 重连：screen -r new-api
+# 查看：screen -ls
+```
+
+#### systemd（生产环境推荐）
+
+参考项目根目录的 `one-api.service` 文件，需要先编译程序：
+
+```bash
+# 1. 编译
+go build -o one-api main.go
+
+# 2. 配置 systemd 服务
+sudo cp one-api.service /etc/systemd/system/
+sudo nano /etc/systemd/system/one-api.service
+# 修改路径和用户名
+
+# 3. 启动
+sudo systemctl daemon-reload
+sudo systemctl start one-api
+sudo systemctl enable one-api
+sudo systemctl status one-api
+```
+
+---
+
 ## 🚢 生产部署
 
 ### 构建生产镜像
@@ -650,9 +832,16 @@ golangci-lint run
 
 ---
 
-**开发指南版本：v3.1**
+**开发指南版本：v3.2**
 **最后更新：2025-09-30**
 **基于 Make + Docker Compose 工作流**
+
+**v3.2 更新内容**：
+- ✅ 新增"服务器后台运行"章节
+- ✅ 添加 `make start-daemon` 后台启动命令
+- ✅ 详细说明 tmux 使用方法和快捷键
+- ✅ 提供方案对比表格（make daemon vs tmux）
+- ✅ 补充 screen 和 systemd 参考方案
 
 **v3.1 更新内容**：
 - ✅ 添加环境变量配置说明（`.env.dev`）

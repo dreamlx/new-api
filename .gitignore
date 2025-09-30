@@ -12,3 +12,6 @@ one-api
 .DS_Store
 tiktoken_cache
 .eslintcache
+# 后台运行日志
+logs/
+.pid
