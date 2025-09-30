@@ -27,13 +27,19 @@ dev: dev-db start ## 快速启动开发环境（推荐）
 
 start: ## 启动后端服务（前台运行，需先执行 make dev-db）
 	@echo "🚀 启动后端服务..."
-	@cd $(BACKEND_DIR) && \
-	export SQL_DSN=root:dev123456@tcp\(localhost:3307\)/new_api_dev && \
-	export REDIS_CONN_STRING=redis://localhost:6379 && \
-	export GIN_MODE=debug && \
-	export TZ=Asia/Shanghai && \
-	export ERROR_LOG_ENABLED=true && \
-	go run main.go
+	@if [ -f .env.dev ]; then \
+		echo "📋 使用 .env.dev 配置文件"; \
+		cd $(BACKEND_DIR) && export $$(cat .env.dev | xargs) && go run main.go; \
+	else \
+		echo "⚠️  .env.dev 不存在，使用默认配置"; \
+		cd $(BACKEND_DIR) && \
+		export SQL_DSN=root:dev123456@tcp\(localhost:3307\)/new_api_dev && \
+		export REDIS_CONN_STRING=redis://localhost:6379 && \
+		export GIN_MODE=debug && \
+		export TZ=Asia/Shanghai && \
+		export ERROR_LOG_ENABLED=true && \
+		go run main.go; \
+	fi
 
 start-backend: start ## 启动后端服务（兼容旧版本命令）
 
