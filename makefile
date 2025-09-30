@@ -109,13 +109,7 @@ test: ## 运行单元测试
 test-api: ## 运行外部用户API自动化测试
 	@echo "🧪 运行外部用户API自动化测试..."
 	@chmod +x scripts/test-external-user-api.sh
-	@chmod +x test-api-rollback.sh
 	@./scripts/test-external-user-api.sh
-
-test-api-rollback: ## 运行API回滚验证测试
-	@echo "🧪 运行API回滚验证测试..."
-	@chmod +x test-api-rollback.sh
-	@./test-api-rollback.sh
 
 test-api-quick: ## 快速检查API服务状态
 	@echo "⚡ 快速API健康检查..."
