@@ -57,13 +57,18 @@ make help
 ### 2. 启动开发环境
 
 ```bash
-# 方式1：推荐 - 分步启动
-make dev-db      # 启动数据库（MySQL + Redis）
-make start       # 启动后端服务（前台运行，Ctrl+C 停止）
+# 方式1：一键启动（推荐）
+make dev         # 启动数据库 + 后端（自动使用 .env.dev 配置）
 
-# 方式2：一键启动
-make dev         # 启动数据库 + 后端
+# 方式2：分步启动
+make dev-db      # 1. 启动数据库（MySQL + Redis）
+make start       # 2. 启动后端服务（前台运行，Ctrl+C 停止）
 ```
+
+**提示**：
+- 首次启动会自动从 `.env.dev` 加载配置
+- 可以通过修改 `.env.dev` 自定义数据库连接等配置
+- 使用 `Ctrl+C` 停止前台运行的后端服务
 
 ### 3. 初始化数据库（首次运行）
 
@@ -85,11 +90,18 @@ make db-init     # 初始化外部用户系统数据库
 
 ```bash
 make              # 显示帮助信息
-make dev          # 一键启动开发环境
-make start        # 启动后端服务
-make stop         # 停止所有服务
+make dev          # 一键启动开发环境（推荐）
+make start        # 启动后端服务（使用 .env.dev 配置）
+make start-backend # 启动后端服务（兼容旧版本，等同于 make start）
+make stop         # 停止所有服务（后端进程 + 数据库容器）
 make status       # 查看服务状态
 ```
+
+**命令说明**：
+- `make dev`：最便捷的方式，自动启动数据库和后端
+- `make start`：只启动后端，需要先运行 `make dev-db` 启动数据库
+- `make start-backend`：旧版本命令别名，与 `make start` 完全相同
+- `make stop`：会停止后端Go进程和数据库Docker容器，释放端口3000
 
 ### 开发环境管理
 
@@ -129,6 +141,56 @@ make db-reset     # 重置数据库（危险操作，需确认）
 make sync         # 同步上游代码
 make clean        # 清理Docker资源
 ```
+
+---
+
+## ⚙️ 环境变量配置
+
+### 配置文件 `.env.dev`
+
+开发环境使用 `.env.dev` 文件管理环境变量。`make start` 和 `make dev` 会自动加载此文件。
+
+**默认配置**（`.env.dev`）：
+```bash
+SQL_DSN=root:dev123456@tcp(localhost:3307)/new_api_dev
+REDIS_CONN_STRING=redis://localhost:6379
+GIN_MODE=debug
+TZ=Asia/Shanghai
+ERROR_LOG_ENABLED=true
+```
+
+### 配置加载优先级
+
+```bash
+make start
+└─> 检查 .env.dev 是否存在
+    ├─> 存在：使用 .env.dev 配置 ✅
+    └─> 不存在：使用 Makefile 硬编码默认值 ⚠️
+```
+
+### 自定义配置
+
+如果需要修改配置（如数据库端口、Redis地址等）：
+
+```bash
+# 方式1：直接编辑 .env.dev（推荐）
+vim .env.dev
+
+# 方式2：创建本地副本（避免提交）
+cp .env.dev .env.local
+vim .env.local
+# 注意：需要修改 Makefile 支持 .env.local
+```
+
+### 配置项说明
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `SQL_DSN` | MySQL连接字符串 | `root:dev123456@tcp(localhost:3307)/new_api_dev` |
+| `REDIS_CONN_STRING` | Redis连接地址 | `redis://localhost:6379` |
+| `GIN_MODE` | Gin运行模式 | `debug` (开发环境) |
+| `TZ` | 时区设置 | `Asia/Shanghai` |
+| `ERROR_LOG_ENABLED` | 是否启用错误日志 | `true` |
 
 ---
 
@@ -287,23 +349,32 @@ docker exec mysql-dev mysql -uroot -pdev123456 -e "SELECT VERSION();"
 
 ### 常见问题
 
-#### 1. 端口被占用
+#### 1. 端口被占用（最常见）
 
-**症状：** `bind: address already in use`
+**症状：** `bind: address already in use` 或 `Error starting userland proxy: listen tcp4 0.0.0.0:3000: bind: address already in use`
+
+**原因：** `make stop` 没有正确停止后端 Go 进程
 
 **解决：**
 ```bash
-# 停止所有服务
+# 使用增强的 make stop（推荐）
 make stop
 
-# 如果还有问题，手动查找占用进程
-lsof -i :3000   # 后端
-lsof -i :3307   # MySQL
-lsof -i :6379   # Redis
+# 如果还有问题，手动查找并停止占用进程
+lsof -i :3000   # 查找占用3000端口的进程
+lsof -i :3307   # 查找占用3307端口的进程（MySQL）
+lsof -i :6379   # 查找占用6379端口的进程（Redis）
 
-# 强制停止
+# 强制停止后端进程
 pkill -f "go run main.go"
+
+# 或强制停止指定端口
+lsof -ti:3000 | xargs kill -9
 ```
+
+**预防：**
+- 使用 `Ctrl+C` 停止前台运行的后端
+- 使用 `make stop` 而不是直接关闭终端
 
 #### 2. 数据库连接失败
 
@@ -331,7 +402,55 @@ export GOPROXY=https://goproxy.cn,direct
 go mod download
 ```
 
-#### 4. 前端构建失败
+#### 4. 环境变量未生效
+
+**症状：** 修改了 `.env.dev` 但配置没有生效
+
+**原因：** 需要重启后端服务才能加载新配置
+
+**解决：**
+```bash
+# 停止后端（Ctrl+C 或 make stop）
+Ctrl+C
+
+# 重新启动
+make start  # 会重新加载 .env.dev
+```
+
+**验证配置：**
+```bash
+# 查看 .env.dev 内容
+cat .env.dev
+
+# 启动时会显示
+# 📋 使用 .env.dev 配置文件  ← 确认使用了配置文件
+# ⚠️  .env.dev 不存在，使用默认配置  ← 提示文件不存在
+```
+
+#### 5. 充值记录显示金额为0
+
+**症状：** 在 `/console/log` 页面充值记录金额显示为 $0
+
+**原因：** 旧版本代码 bug，已在最新版本修复
+
+**解决：**
+```bash
+# 确保使用最新代码
+git pull origin main
+
+# 重启服务
+make stop
+make dev
+
+# 重新充值测试
+bash scripts/test-user-story.sh
+```
+
+**验证修复：**
+- 充值日志应该显示正确的 `spend` 金额（负数表示充值）
+- 例如：充值 $20 应显示为 `spend: -20`
+
+#### 6. 前端构建失败
 
 **解决：**
 ```bash
@@ -531,6 +650,13 @@ golangci-lint run
 
 ---
 
-**开发指南版本：v3.0**
+**开发指南版本：v3.1**
 **最后更新：2025-09-30**
 **基于 Make + Docker Compose 工作流**
+
+**v3.1 更新内容**：
+- ✅ 添加环境变量配置说明（`.env.dev`）
+- ✅ 更新 `make start` 命令说明（优先使用 `.env.dev`）
+- ✅ 添加 `make start-backend` 兼容性说明
+- ✅ 增强故障排除指南（端口占用、配置未生效、充值日志问题）
+- ✅ 更新 `make stop` 命令说明（正确停止所有进程）
