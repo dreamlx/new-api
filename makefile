@@ -1,7 +1,7 @@
 FRONTEND_DIR = ./web
 BACKEND_DIR = .
 
-.PHONY: help dev dev-db stop start status logs \
+.PHONY: help dev dev-db stop start start-backend status logs \
 	build-frontend build-docker \
 	test test-api test-user-story \
 	db-init db-backup db-reset \
@@ -34,6 +34,8 @@ start: ## 启动后端服务（前台运行，需先执行 make dev-db）
 	export TZ=Asia/Shanghai && \
 	export ERROR_LOG_ENABLED=true && \
 	go run main.go
+
+start-backend: start ## 启动后端服务（兼容旧版本命令）
 
 dev-db: ## 启动数据库服务（MySQL + Redis）
 	@echo "🗄️  启动数据库服务..."
