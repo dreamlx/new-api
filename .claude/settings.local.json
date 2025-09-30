@@ -19,7 +19,10 @@
       "Bash(make test-api:*)",
       "Bash(make test:*)",
       "Bash(git commit:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(go mod:*)",
+      "Bash(make:*)",
+      "Bash(awk:*)"
     ],
     "deny": []
   }
