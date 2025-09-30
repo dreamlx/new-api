@@ -22,7 +22,8 @@
       "Bash(git rm:*)",
       "Bash(go mod:*)",
       "Bash(make:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }
