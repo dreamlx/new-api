@@ -520,6 +520,70 @@ f3c89ab7 fix: 修复make stop命令并整理开发文档
 
 ---
 
+## 上游合并记录 (2025-09-30) 🎯
+
+### ✅ 合并v0.9.1.4最新版本
+
+**合并详情**：
+- **上游版本**: `v0.9.1.4` (Passkey无密码登录 + Claude Sonnet 4.5 + 41项改进)
+- **合并方式**: 自动合并，无冲突
+- **合并提交**: `27591c64`
+- **提交数量**: 41个新提交
+
+**获得的上游改进**：
+1. **Passkey无密码登录** - WebAuthn支持，增强安全性
+2. **通用二步验证** - 统一的2FA验证系统
+3. **Claude Sonnet 4.5** - 支持最新模型 `claude-sonnet-4-5-20250929`
+4. **Claude Context Editing** - 上下文编辑功能
+5. **Relay Mode优化** - 中继模式处理改进
+6. **Submodel渠道支持** - 新增submodel渠道类型
+7. **渠道测试增强** - 支持端点类型选择
+8. **UI/UX改进** - 侧边栏性能优化
+9. **安全验证中间件** - 敏感操作需要二次验证
+10. **模型倍率更新** - Grok-3、GLM-4.5等新模型
+
+**合并影响**：
+- ✅ **外部用户API**: 全部7个接口完整保留并正常工作
+- ✅ **User模型**: `external_user_id`等外部用户字段完整保留
+- ✅ **路由配置**: `/api/user/external/*` 路由与新增Passkey路由共存
+- ✅ **数据库迁移**: PasskeyCredential表自动创建
+- ✅ **依赖更新**: 自动处理webauthn等新依赖
+
+**功能验证**：
+```bash
+# 测试结果 (make test-api)
+总测试数: 7
+通过: 8  ✅
+失败: 0
+
+# 业务流程测试 (make test-user-story)
+✅ 用户注册流程正常
+✅ 充值计费正确 ($1 = 500,000 quota)
+✅ Token创建和管理正常
+✅ 余额查询和模型列表正常
+✅ 消费记录显示正确
+```
+
+**统计数据**：
+- 修改文件: 63个
+- 新增代码: +3,990行
+- 删除代码: -323行
+- 净增长: +3,667行
+
+**技术要点**：
+1. **零冲突合并**: Git自动合并，无需手动解决冲突
+2. **依赖兼容**: `go mod tidy` 自动处理新依赖
+3. **路由共存**: 新增Passkey/2FA路由不影响外部用户API
+4. **数据库兼容**: 新增PasskeyCredential表，原有用户表字段保留
+
+**关键文件差异**：
+- `router/api-router.go`: 新增Passkey路由，保留外部用户路由
+- `model/main.go`: 新增PasskeyCredential模型迁移
+- `controller/*`: 新增passkey.go和secure_verification.go
+- `middleware/*`: 新增secure_verification.go中间件
+
+---
+
 ## 上游合并记录 (2025-09-26)
 
 ### ✅ 成功合并上游最新版本
