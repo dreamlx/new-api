@@ -298,8 +298,105 @@ GET /api/user/external/{external_user_id}
 
 **影响文件**:
 - `model/user.go`
-- `controller/external_user.go`  
+- `controller/external_user.go`
 - `scripts/init-external-user-db.sql`
+
+---
+
+### 2025-09-30: 开发环境优化和文档整合 🔧✅
+
+**问题背景**:
+开发过程中发现 `make stop` 命令只停止 Docker 容器，不停止后端 Go 进程，导致端口 3000 持续被占用，引发 "address already in use" 错误。同时存在多个开发文档（`dev-env-setup.md`、`development-guide.md`），内容重复且部分过时。
+
+**核心问题**:
+1. **端口冲突根源**: `make stop` 只执行 `docker compose down`，未停止 `go run main.go` 进程
+2. **文档混乱**: 三个开发文档内容重叠，命令不一致，容易误导开发者
+
+**修复方案**:
+
+#### 1. Makefile 优化 (`makefile`)
+```makefile
+# 修复前
+stop: ## 停止所有服务
+	@docker compose -f docker-compose.db-only.yml down
+
+# 修复后
+stop: ## 停止所有服务
+	@echo "🛑 停止所有服务..."
+	@pkill -f "go run main.go" 2>/dev/null || echo "后端服务已停止"
+	@docker compose -f docker-compose.db-only.yml down
+```
+
+**其他优化**:
+- 简化命令：`make start` 替代 `start-backend-only`
+- 命令分组：按功能分类（开发环境、构建、测试、数据库、清理）
+- 完善 `.PHONY` 声明
+- 添加可视化分隔符
+
+#### 2. 文档整合
+**操作**:
+- ✅ 重写 `development-guide.md` v3.0
+  - 整合最新开发工作流
+  - 9大章节结构清晰
+  - 完整的故障排除指南
+- ✅ 删除 `dev-env-setup.md`（内容过时）
+- ✅ 保留上游文档 `本地开发部署指南.md`（不修改）
+
+**新文档结构**:
+```
+docs/
+├── development-guide.md          ← 主开发文档（v3.0）
+├── 本地开发部署指南.md             ← 上游参考
+├── external-user-api.md          ← API文档
+├── curl-testing-guide.md         ← 测试指南
+└── wechat-miniprogram-integration.md
+```
+
+#### 3. 标准开发工作流
+
+**正确流程**:
+```bash
+# 1. 启动数据库
+make dev-db
+
+# 2. 启动后端（前台运行，Ctrl+C 停止）
+make start
+
+# 3. 停止所有服务（现在会正确停止后端进程）
+make stop
+```
+
+**新增测试脚本**:
+- `scripts/test-user-story.sh` - 完整业务流程测试（7个场景）
+
+**技术要点**:
+- 后端进程必须前台运行，便于查看日志和 Ctrl+C 停止
+- `make stop` 确保清理所有资源（Go进程 + Docker容器）
+- 避免使用 `&` 后台运行 `make start`（会导致进程管理混乱）
+
+**影响文件**:
+- `makefile` - Make 命令优化
+- `docs/development-guide.md` - 完全重写（753行）
+- `scripts/test-user-story.sh` - 新增测试脚本
+- `docs/dev-env-setup.md` - 已删除
+
+**测试验证**:
+- ✅ `make stop` 正确停止后端和数据库
+- ✅ `make start` 启动无端口冲突
+- ✅ `make status` 准确显示服务状态
+- ✅ `make test-user-story` 测试通过
+- ✅ 开发文档结构清晰统一
+
+**提交记录**:
+- `f3c89ab7` - fix: 修复make stop命令并整理开发文档
+
+**经验总结**:
+1. **进程管理重要性**: 容器化开发仍需注意本地进程清理
+2. **文档单一来源**: 一个权威文档胜过多个重复文档
+3. **工作流标准化**: 清晰的命令流程减少新手困惑
+4. **前台优于后台**: 开发环境优先前台运行，便于调试
+
+---
 
 ## 上游合并记录 (2025-09-26)
 
