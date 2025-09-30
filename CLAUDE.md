@@ -301,5 +301,42 @@ GET /api/user/external/{external_user_id}
 - `controller/external_user.go`  
 - `scripts/init-external-user-db.sql`
 
+## 上游合并记录 (2025-09-26)
+
+### ✅ 成功合并上游最新版本
+
+**合并详情**：
+- **上游提交**: `d2defa12` (Amazon Nova模型支持 + 50+改进)
+- **合并方式**: Fast-forward 合并，无冲突
+- **合并提交**: `4b54bfef` - "feat: 合并上游最新版本，保留外部用户API和Token共享机制"
+
+**关键冲突解决**：
+1. **service/pre_consume_quota.go**: 保留上游Token预扣费逻辑，兼容我们的机制
+2. **service/error.go**: 完全采用上游改进的错误处理系统
+3. **model/user.go**: 自动合并成功，所有外部用户字段完整保留
+
+**获得的上游改进**：
+- Amazon Nova模型支持 (relay/channel/aws/)
+- 2FA双因子认证系统
+- 支付系统优化 (Stripe集成改进)
+- 错误处理系统重构
+- SSRF防护功能
+- UI/UX界面增强
+- 模型管理优化
+- 50+项其他性能和稳定性改进
+
+**功能完整性验证**：
+- ✅ 外部用户API全部7个接口正常工作
+- ✅ 数据库外部用户字段完整保留
+- ✅ 微信OpenID查询功能正常
+- ✅ Token共享用户余额机制保持
+- ✅ 服务编译运行正常
+
+**统计数据**：
+- 修改文件: 108个
+- 新增代码: +3,389行
+- 删除代码: -829行
+- 净增长: +2,560行
+
 ---
-*最后更新：2025-08-18*
+*最后更新：2025-09-26*

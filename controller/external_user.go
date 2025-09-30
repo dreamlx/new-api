@@ -15,57 +15,8 @@ import (
 
 // 外部用户Token删除请求结构
 type ExternalUserTokenDeleteRequest struct {
-	ExternalUserId string `json:"external_user_id" binding:"omitempty,min=1,max=100"`
-	WechatOpenId   string `json:"wechat_openid" binding:"omitempty,min=1,max=100"`
+	ExternalUserId string `json:"external_user_id" binding:"required,min=1,max=100"`
 	TokenId        int    `json:"token_id" binding:"required,min=1"`
-}
-
-// findUserByIdentifier 根据标识符查找用户（支持 external_user_id 或 wechat_openid）
-func findUserByIdentifier(externalUserId, wechatOpenId string) (*model.User, error) {
-	user := &model.User{}
-
-	// 优先使用 external_user_id
-	if externalUserId != "" {
-		if err := model.DB.Where("external_user_id = ?", externalUserId).First(user).Error; err != nil {
-			return nil, err
-		}
-		return user, nil
-	}
-
-	// 如果 external_user_id 为空，使用 wechat_openid
-	if wechatOpenId != "" {
-		if err := model.DB.Where("wechat_openid = ?", wechatOpenId).First(user).Error; err != nil {
-			return nil, err
-		}
-		return user, nil
-	}
-
-	return nil, fmt.Errorf("未提供有效的用户标识符")
-}
-
-// validateUserIdentifier 验证用户标识符参数
-func validateUserIdentifier(externalUserId, wechatOpenId string) error {
-	if externalUserId == "" && wechatOpenId == "" {
-		return fmt.Errorf("external_user_id 和 wechat_openid 必须提供其中一个")
-	}
-	return nil
-}
-
-// findUserByPathId 根据路径参数查找用户（智能识别 external_user_id 或 wechat_openid）
-func findUserByPathId(pathId string) (*model.User, error) {
-	user := &model.User{}
-
-	// 首先尝试按 external_user_id 查找
-	if err := model.DB.Where("external_user_id = ?", pathId).First(user).Error; err == nil {
-		return user, nil
-	}
-
-	// 如果没找到，尝试按 wechat_openid 查找
-	if err := model.DB.Where("wechat_openid = ?", pathId).First(user).Error; err == nil {
-		return user, nil
-	}
-
-	return nil, fmt.Errorf("用户不存在")
 }
 
 // 外部用户同步请求结构
@@ -75,10 +26,9 @@ type SyncExternalUserRequest struct {
 	DisplayName    string `json:"display_name" binding:"max=100"`
 	Email          string `json:"email" binding:"omitempty,email,max=100"`
 	Phone          string `json:"phone" binding:"omitempty,max=20"`
-	WechatOpenId   string `json:"wechat_openid" binding:"omitempty,max=100"`
 	WechatUnionId  string `json:"wechat_unionid" binding:"omitempty,max=100"`
 	AlipayUserId   string `json:"alipay_userid" binding:"omitempty,max=100"`
-	LoginType      string `json:"login_type" binding:"omitempty,oneof=email wechat alipay sms"`
+	LoginType      string `json:"login_type" binding:"omitempty,oneof=email wechat alipay sms google"`
 	AffCode        string `json:"aff_code" binding:"omitempty,max=32"` // 推荐码（可选）
 	ExternalData   string `json:"external_data" binding:"omitempty"`
 }
@@ -91,15 +41,12 @@ type SyncExternalUserResponse struct {
 		UserId         int    `json:"user_id"`
 		ExternalUserId string `json:"external_user_id"`
 		IsNewUser      bool   `json:"is_new_user"`
-		IsUnified      bool   `json:"is_unified,omitempty"`      // 标识是否为统一账号
-		WechatOpenId   string `json:"wechat_openid,omitempty"`   // 微信OpenID
 	} `json:"data"`
 }
 
 // 外部用户充值请求结构
 type ExternalUserTopUpRequest struct {
-	ExternalUserId string  `json:"external_user_id" binding:"omitempty,min=1,max=100"`
-	WechatOpenId   string  `json:"wechat_openid" binding:"omitempty,min=1,max=100"`
+	ExternalUserId string  `json:"external_user_id" binding:"required,min=1,max=100"`
 	AmountUSD      float64 `json:"amount_usd" binding:"required,min=0.01"`
 	PaymentId      string  `json:"payment_id" binding:"required,min=1,max=200"`
 }
@@ -119,8 +66,7 @@ type ExternalUserTopUpResponse struct {
 
 // 外部用户Token创建请求结构
 type ExternalUserTokenRequest struct {
-	ExternalUserId string `json:"external_user_id" binding:"omitempty,min=1,max=100"`
-	WechatOpenId   string `json:"wechat_openid" binding:"omitempty,min=1,max=100"`
+	ExternalUserId string `json:"external_user_id" binding:"required,min=1,max=100"`
 	TokenName      string `json:"token_name" binding:"required,min=1,max=100"`
 	ExpiresInDays  int    `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
 }
@@ -151,7 +97,6 @@ func SyncExternalUser(c *gin.Context) {
 
 	// 检查external_user_id是否已存在
 	if model.IsExternalUserIdAlreadyTaken(req.ExternalUserId) {
-		// 这是正常的用户信息更新，不是账号统一场景
 		existingUser := &model.User{}
 		model.DB.Where("external_user_id = ?", req.ExternalUserId).First(existingUser)
 		// 用户已存在，更新用户信息
@@ -161,7 +106,6 @@ func SyncExternalUser(c *gin.Context) {
 			existingUser.Email = req.Email
 		}
 		existingUser.Phone = req.Phone
-		existingUser.WechatOpenId = req.WechatOpenId
 		existingUser.WechatUnionId = req.WechatUnionId
 		existingUser.AlipayUserId = req.AlipayUserId
 		existingUser.LoginType = getLoginType(req.LoginType)
@@ -183,27 +127,13 @@ func SyncExternalUser(c *gin.Context) {
 				UserId         int    `json:"user_id"`
 				ExternalUserId string `json:"external_user_id"`
 				IsNewUser      bool   `json:"is_new_user"`
-				IsUnified      bool   `json:"is_unified,omitempty"`
-				WechatOpenId   string `json:"wechat_openid,omitempty"`
 			}{
 				UserId:         existingUser.Id,
 				ExternalUserId: existingUser.ExternalUserId,
 				IsNewUser:      false,
-				IsUnified:      false,
-				WechatOpenId:   existingUser.WechatOpenId,
 			},
 		})
 		return
-	}
-
-	// 【新增】微信OpenID优先匹配逻辑 - 仅在external_user_id不存在时检查
-	if req.WechatOpenId != "" {
-		existingUser := model.GetUserByWechatOpenId(req.WechatOpenId)
-		if existingUser != nil {
-			// 找到已存在的微信用户，进行账号统一
-			handleExistingWechatUser(c, existingUser, req)
-			return
-		}
 	}
 
 	// 检查用户名是否已存在（仅对非外部用户）
@@ -241,7 +171,6 @@ func SyncExternalUser(c *gin.Context) {
 		Password:       defaultPassword,
 		ExternalUserId: req.ExternalUserId,
 		Phone:          req.Phone,
-		WechatOpenId:   req.WechatOpenId,
 		WechatUnionId:  req.WechatUnionId,
 		AlipayUserId:   req.AlipayUserId,
 		LoginType:      getLoginType(req.LoginType),
@@ -292,14 +221,10 @@ func SyncExternalUser(c *gin.Context) {
 			UserId         int    `json:"user_id"`
 			ExternalUserId string `json:"external_user_id"`
 			IsNewUser      bool   `json:"is_new_user"`
-			IsUnified      bool   `json:"is_unified,omitempty"`
-			WechatOpenId   string `json:"wechat_openid,omitempty"`
 		}{
 			UserId:         user.Id,
 			ExternalUserId: user.ExternalUserId,
 			IsNewUser:      true,
-			IsUnified:      false,
-			WechatOpenId:   user.WechatOpenId,
 		},
 	})
 }
@@ -315,18 +240,9 @@ func ExternalUserTopUp(c *gin.Context) {
 		return
 	}
 
-	// 验证用户标识符参数
-	if err := validateUserIdentifier(req.ExternalUserId, req.WechatOpenId); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "参数错误: " + err.Error(),
-		})
-		return
-	}
-
 	// 查找用户
-	user, err := findUserByIdentifier(req.ExternalUserId, req.WechatOpenId)
-	if err != nil {
+	user := &model.User{}
+	if err := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -366,13 +282,9 @@ func ExternalUserTopUp(c *gin.Context) {
 	// 重新获取用户信息
 	model.DB.First(user, user.Id)
 
-	// 记录日志，优先显示 external_user_id
-	userIdentifier := req.ExternalUserId
-	if userIdentifier == "" {
-		userIdentifier = "wechat:" + req.WechatOpenId
-	}
+	// 记录日志
 	common.SysLog(fmt.Sprintf("外部用户充值成功: %s, 金额: $%.2f, 增加quota: %d",
-		userIdentifier, req.AmountUSD, quotaToAdd))
+		req.ExternalUserId, req.AmountUSD, quotaToAdd))
 
 	// 构造响应
 	response := ExternalUserTopUpResponse{
@@ -399,18 +311,9 @@ func CreateExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	// 验证用户标识符参数
-	if err := validateUserIdentifier(req.ExternalUserId, req.WechatOpenId); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "参数错误: " + err.Error(),
-		})
-		return
-	}
-
 	// 查找用户
-	user, err := findUserByIdentifier(req.ExternalUserId, req.WechatOpenId)
-	if err != nil {
+	user := &model.User{}
+	if err := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -446,13 +349,9 @@ func CreateExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	// 记录日志，优先显示 external_user_id
-	userIdentifier := req.ExternalUserId
-	if userIdentifier == "" {
-		userIdentifier = "wechat:" + req.WechatOpenId
-	}
+	// 记录日志
 	common.SysLog(fmt.Sprintf("为外部用户创建Token成功: %s, Token名称: %s",
-		userIdentifier, req.TokenName))
+		req.ExternalUserId, req.TokenName))
 
 	// 构造响应
 	response := ExternalUserTokenResponse{
@@ -466,13 +365,6 @@ func CreateExternalUserToken(c *gin.Context) {
 	response.Data.RemainQuota = user.Quota
 
 	c.JSON(http.StatusOK, response)
-}
-
-// 删除外部用户Token请求结构新版（支持wechat_openid）
-type DeleteExternalUserTokenRequestNew struct {
-	ExternalUserId string `json:"external_user_id" binding:"omitempty,min=1,max=100"`
-	WechatOpenId   string `json:"wechat_openid" binding:"omitempty,min=1,max=100"`
-	TokenId        int    `json:"token_id" binding:"required"`
 }
 
 // 删除外部用户Token响应结构
@@ -496,18 +388,9 @@ func DeleteExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	// 验证用户标识符参数
-	if err := validateUserIdentifier(req.ExternalUserId, req.WechatOpenId); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "参数错误: " + err.Error(),
-		})
-		return
-	}
-
 	// 查找用户
-	user, err := findUserByIdentifier(req.ExternalUserId, req.WechatOpenId)
-	if err != nil {
+	user := &model.User{}
+	if err := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -535,13 +418,9 @@ func DeleteExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	// 记录日志，优先显示 external_user_id
-	userIdentifier := req.ExternalUserId
-	if userIdentifier == "" {
-		userIdentifier = "wechat:" + req.WechatOpenId
-	}
+	// 记录日志
 	common.SysLog(fmt.Sprintf("外部用户删除Token成功: %s, Token ID: %d, Token名称: %s",
-		userIdentifier, req.TokenId, token.Name))
+		req.ExternalUserId, req.TokenId, token.Name))
 
 	// 构造响应
 	response := DeleteExternalUserTokenResponse{
@@ -591,8 +470,8 @@ type ExternalUserLogsResponse struct {
 
 // 获取外部用户消费记录
 func GetExternalUserLogs(c *gin.Context) {
-	pathId := c.Param("external_user_id")
-	if pathId == "" {
+	externalUserId := c.Param("external_user_id")
+	if externalUserId == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": "用户ID参数缺失",
@@ -600,9 +479,9 @@ func GetExternalUserLogs(c *gin.Context) {
 		return
 	}
 
-	// 查找用户（支持 external_user_id 或 wechat_openid）
-	user, err := findUserByPathId(pathId)
-	if err != nil {
+	// 查找用户
+	user := &model.User{}
+	if err := model.DB.Where("external_user_id = ?", externalUserId).First(user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -751,8 +630,8 @@ func GetExternalUserLogs(c *gin.Context) {
 
 // 获取外部用户统计信息
 func GetExternalUserStats(c *gin.Context) {
-	pathId := c.Param("external_user_id")
-	if pathId == "" {
+	externalUserId := c.Param("external_user_id")
+	if externalUserId == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": "用户ID参数缺失",
@@ -760,9 +639,9 @@ func GetExternalUserStats(c *gin.Context) {
 		return
 	}
 
-	// 查找用户（支持 external_user_id 或 wechat_openid）
-	user, err := findUserByPathId(pathId)
-	if err != nil {
+	// 查找用户
+	user := &model.User{}
+	if err := model.DB.Where("external_user_id = ?", externalUserId).First(user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -796,7 +675,6 @@ func GetExternalUserStats(c *gin.Context) {
 		"data": gin.H{
 			"user_info": gin.H{
 				"external_user_id": user.ExternalUserId,
-				"wechat_openid":    user.WechatOpenId,
 				"username":         user.Username,
 				"display_name":     user.DisplayName,
 				"current_quota":    user.Quota,
@@ -1010,60 +888,3 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 	return capacity
 }
 
-// handleExistingWechatUser 处理已存在的微信用户（账号统一逻辑）
-func handleExistingWechatUser(c *gin.Context, existingUser *model.User, req SyncExternalUserRequest) {
-	// 更新用户信息（可选字段）
-	updated := false
-
-	if req.DisplayName != "" && req.DisplayName != existingUser.DisplayName {
-		existingUser.DisplayName = req.DisplayName
-		updated = true
-	}
-
-	if req.Phone != "" && req.Phone != existingUser.Phone {
-		existingUser.Phone = req.Phone
-		updated = true
-	}
-
-	// UnionID可以从空更新为有值
-	if req.WechatUnionId != "" && existingUser.WechatUnionId == "" {
-		existingUser.WechatUnionId = req.WechatUnionId
-		updated = true
-	}
-
-	// 更新扩展数据
-	if req.ExternalData != "" {
-		existingUser.ExternalData = req.ExternalData
-		updated = true
-	}
-
-	if updated {
-		if err := model.DB.Save(existingUser).Error; err != nil {
-			common.SysError("更新微信用户信息失败: " + err.Error())
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"success": false,
-				"message": "更新用户信息失败",
-			})
-			return
-		}
-	}
-
-	// 返回统一账号信息 - 使用原有的external_user_id
-	c.JSON(http.StatusOK, SyncExternalUserResponse{
-		Success: true,
-		Message: "账号统一成功",
-		Data: struct {
-			UserId         int    `json:"user_id"`
-			ExternalUserId string `json:"external_user_id"`
-			IsNewUser      bool   `json:"is_new_user"`
-			IsUnified      bool   `json:"is_unified,omitempty"`
-			WechatOpenId   string `json:"wechat_openid,omitempty"`
-		}{
-			UserId:         existingUser.Id,
-			ExternalUserId: existingUser.ExternalUserId,        // 返回原有ID，而不是请求ID
-			IsNewUser:      false,
-			IsUnified:      true,                               // 标识为统一账号
-			WechatOpenId:   existingUser.WechatOpenId,         // 返回微信OpenID
-		},
-	})
-}

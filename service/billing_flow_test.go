@@ -92,14 +92,9 @@ func TestCompleteBillingFlow(t *testing.T) {
 		c.Request, _ = http.NewRequest("POST", "/test", nil)
 
 		// 预扣费500额度
-		preConsumedQuota, apiErr := PreConsumeQuota(c, 500, relayInfo)
+		apiErr := PreConsumeQuota(c, 500, relayInfo)
 		if apiErr != nil {
 			t.Fatalf("预扣费失败: %v", apiErr)
-		}
-
-		// 检查预扣费金额
-		if preConsumedQuota != 500 {
-			t.Errorf("预扣费金额不正确，期望500，实际%d", preConsumedQuota)
 		}
 
 		// 检查用户余额是否正确减少
@@ -151,7 +146,7 @@ func TestCompleteBillingFlow(t *testing.T) {
 		c.Request, _ = http.NewRequest("POST", "/test", nil)
 
 		// 尝试预扣费超过余额的金额（当前余额9700，尝试扣费10000）
-		_, apiErr := PreConsumeQuota(c, 10000, relayInfo)
+		apiErr := PreConsumeQuota(c, 10000, relayInfo)
 		if apiErr == nil {
 			t.Errorf("余额不足时应该返回错误")
 		}
@@ -221,12 +216,9 @@ func TestCompleteBillingFlow(t *testing.T) {
 
 		// 应该能够成功预扣费
 		relayInfo.UserQuota = 5000 // 更新RelayInfo中的用户余额
-		preConsumedQuota, apiErr := PreConsumeQuota(c, 1000, relayInfo)
+		apiErr := PreConsumeQuota(c, 1000, relayInfo)
 		if apiErr != nil {
 			t.Errorf("充值后预扣费失败: %v", apiErr)
-		}
-		if preConsumedQuota != 1000 {
-			t.Errorf("充值后预扣费金额不正确，期望1000，实际%d", preConsumedQuota)
 		}
 	})
 }

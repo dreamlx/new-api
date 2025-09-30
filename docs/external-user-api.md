@@ -11,11 +11,6 @@
 - **New API 后端**：作为 LLM 网关和计费系统
 - **映射机制**：通过 `external_user_id` 建立前端用户与 New API 用户的关联
 
-### 支持的用户类型
-1. **通用前端平台用户**：使用自定义的 `external_user_id` 格式
-2. **微信小程序用户**：使用标准化的微信用户映射策略（详见 [微信小程序集成方案](#微信小程序集成方案)）
-3. **其他第三方平台用户**：可根据需要扩展映射规则
-
 ### 计费策略
 - **货币统一**：前端收款任意货币 → 支付网关转换 → 后端只接收美元
 - **汇率处理**：完全由前端网站和支付网关负责，New API 不处理汇率转换
@@ -33,11 +28,11 @@
 
 ### 接口列表
 - `POST /api/user/external/sync` - 用户同步接口
-- `POST /api/user/external/topup` - 用户充值接口（支持 wechat_openid 参数）
-- `POST /api/user/external/token` - 创建 Access Key（支持 wechat_openid 参数）
-- `DELETE /api/user/external/token` - 删除 Access Key（支持 wechat_openid 参数）
-- `GET /api/user/external/{id}/stats` - 用户统计接口（支持 external_user_id 或 wechat_openid）
-- `GET /api/user/external/{id}/logs` - 消费记录查询接口（支持 external_user_id 或 wechat_openid）
+- `POST /api/user/external/topup` - 用户充值接口
+- `POST /api/user/external/token` - 创建 Access Key
+- `DELETE /api/user/external/token` - 删除 Access Key
+- `GET /api/user/external/{id}/stats` - 用户统计接口
+- `GET /api/user/external/{id}/logs` - 消费记录查询接口
 
 ### 1. 用户同步接口
 
@@ -52,7 +47,7 @@ Content-Type: application/json
 {
   "external_user_id": "string, required, 外部用户唯一标识",
   "username": "string, required, 用户名",
-  "display_name": "string, optional, 显示名称",
+  "display_name": "string, optional, 显示名称", 
   "email": "string, optional, 邮箱地址（可为虚拟邮箱）",
   "phone": "string, optional, 手机号码",
   "wechat_openid": "string, optional, 微信OpenID",
@@ -64,53 +59,6 @@ Content-Type: application/json
 }
 ```
 
-**微信小程序用户示例**:
-```json
-{
-  "external_user_id": "wx_mini_oNeBc5Gh3iXXXXXX",
-  "username": "wx_user_3iXXXXXX",
-  "display_name": "微信用户昵称",
-  "phone": "13800138000",
-  "wechat_openid": "oNeBc5Gh3iXXXXXX",
-  "wechat_unionid": "oNeBc5Gh3iXXXXXX_unionid",
-  "login_type": "wechat",
-  "external_data": "{\"miniprogram_info\": {\"avatar_url\": \"https://thirdwx.qlogo.cn/mmopen/xxx\", \"gender\": 1, \"country\": \"中国\", \"province\": \"广东\", \"city\": \"深圳\", \"language\": \"zh_CN\"}}"
-}
-```
-
-**账号统一场景示例**:
-当用户在前端平台和微信小程序都登录时，系统会自动进行账号统一：
-
-```json
-// 场景：前端平台用户已存在
-// 1. 前端平台登录创建用户
-{
-  "external_user_id": "frontend_user_12345",
-  "wechat_openid": "oNeBc5Gh3iXXXXXX",
-  // ... 其他字段
-}
-
-// 2. 微信小程序登录（相同OpenID）
-{
-  "external_user_id": "wx_mini_oNeBc5Gh3iXXXXXX",
-  "wechat_openid": "oNeBc5Gh3iXXXXXX",  // 相同的OpenID
-  // ... 其他字段
-}
-
-// 3. 系统响应：返回原有账号信息
-{
-  "success": true,
-  "message": "账号统一成功",
-  "data": {
-    "user_id": 123,
-    "external_user_id": "frontend_user_12345",  // 返回原有ID
-    "is_new_user": false,
-    "is_unified": true,                         // 标识为统一账号
-    "wechat_openid": "oNeBc5Gh3iXXXXXX"        // 包含微信OpenID
-  }
-}
-```
-
 **响应示例**:
 ```json
 {
@@ -119,8 +67,7 @@ Content-Type: application/json
   "data": {
     "user_id": 123,
     "external_user_id": "test_user_001",
-    "is_new_user": true,
-    "wechat_openid": "oNeBc5Gh3iXXXXXX"  // 如果提供了微信OpenID
+    "is_new_user": true
   }
 }
 ```
@@ -139,20 +86,14 @@ POST /api/user/external/topup
 Content-Type: application/json
 ```
 
-**请求参数** (两种方式任选其一):
+**请求参数**:
 ```json
 {
-  "external_user_id": "string, optional, 外部用户ID",
-  "wechat_openid": "string, optional, 微信OpenID（可替代external_user_id）",
-  "amount_usd": "number, required, 美元金额，最小0.01",
+  "external_user_id": "string, required, 外部用户ID",
+  "amount_usd": "number, required, 美元金额，最小0.01", 
   "payment_id": "string, required, 支付交易ID"
 }
 ```
-
-**参数说明**:
-- `external_user_id` 和 `wechat_openid` 两个参数必须提供其中一个
-- 如果同时提供，优先使用 `external_user_id`
-- `wechat_openid` 方便微信小程序开发者直接使用，无需维护ID映射
 
 **响应示例**:
 ```json
@@ -186,19 +127,14 @@ POST /api/user/external/token
 Content-Type: application/json
 ```
 
-**请求参数** (两种方式任选其一):
+**请求参数**:
 ```json
 {
-  "external_user_id": "string, optional, 外部用户ID",
-  "wechat_openid": "string, optional, 微信OpenID（可替代external_user_id）",
+  "external_user_id": "string, required, 外部用户ID",
   "token_name": "string, required, Token名称",
   "expires_in_days": "number, optional, 有效期天数，默认365"
 }
 ```
-
-**参数说明**:
-- `external_user_id` 和 `wechat_openid` 两个参数必须提供其中一个
-- 如果同时提供，优先使用 `external_user_id`
 
 **响应示例**:
 ```json
@@ -221,18 +157,13 @@ DELETE /api/user/external/token
 Content-Type: application/json
 ```
 
-**请求参数** (两种方式任选其一):
+**请求参数**:
 ```json
 {
-  "external_user_id": "string, optional, 外部用户ID",
-  "wechat_openid": "string, optional, 微信OpenID（可替代external_user_id）",
+  "external_user_id": "string, required, 外部用户ID",
   "token_id": "number, required, 要删除的Token ID"
 }
 ```
-
-**参数说明**:
-- `external_user_id` 和 `wechat_openid` 两个参数必须提供其中一个
-- 如果同时提供，优先使用 `external_user_id`
 
 **响应示例**:
 ```json
@@ -255,23 +186,7 @@ Content-Type: application/json
 
 #### 获取用户使用统计
 ```http
-GET /api/user/external/{id}/stats
-```
-
-**路径参数说明**:
-- `{id}` 可以是 `external_user_id` 或 `wechat_openid`
-- 系统会自动识别参数类型：
-  - 包含前缀（如 `wx_mini_`、`frontend_` 等）→ 按 external_user_id 查询
-  - 以 "o" 开头且长度28位 → 按 wechat_openid 查询
-  - 查不到则尝试另一种方式
-
-**使用示例**:
-```bash
-# 使用 external_user_id
-GET /api/user/external/wx_mini_oNeBc5Gh3iXXXXXX/stats
-
-# 使用 wechat_openid（微信小程序推荐）
-GET /api/user/external/oNeBc5Gh3iXXXXXX/stats
+GET /api/user/external/{external_user_id}/stats
 ```
 
 **响应示例**:
@@ -281,7 +196,6 @@ GET /api/user/external/oNeBc5Gh3iXXXXXX/stats
   "data": {
     "user_info": {
       "external_user_id": "test_user_001",
-      "wechat_openid": "oNeBc5Gh3iXXXXXX",
       "username": "testuser",
       "display_name": "测试用户",
       "current_quota": 15000000,
@@ -345,20 +259,7 @@ GET /api/user/external/oNeBc5Gh3iXXXXXX/stats
 
 #### 获取用户消费记录
 ```http
-GET /api/user/external/{id}/logs
-```
-
-**路径参数说明**:
-- `{id}` 可以是 `external_user_id` 或 `wechat_openid`
-- 系统会自动识别参数类型（同统计接口）
-
-**使用示例**:
-```bash
-# 使用 external_user_id
-GET /api/user/external/wx_mini_oNeBc5Gh3iXXXXXX/logs
-
-# 使用 wechat_openid（微信小程序推荐）
-GET /api/user/external/oNeBc5Gh3iXXXXXX/logs
+GET /api/user/external/{external_user_id}/logs
 ```
 
 **查询参数**:
@@ -425,23 +326,20 @@ GET /api/user/external/oNeBc5Gh3iXXXXXX/logs
 
 **使用示例**:
 ```bash
-# 查询所有记录（external_user_id）
+# 查询所有记录
 GET /api/user/external/test_user_001/logs
 
-# 查询所有记录（wechat_openid）
-GET /api/user/external/oNeBc5Gh3iXXXXXX/logs
-
 # 按日期范围查询
-GET /api/user/external/oNeBc5Gh3iXXXXXX/logs?start_date=2024-01-01&end_date=2024-01-31
+GET /api/user/external/test_user_001/logs?start_date=2024-01-01&end_date=2024-01-31
 
 # 按模型筛选
-GET /api/user/external/oNeBc5Gh3iXXXXXX/logs?model_name=qwen
+GET /api/user/external/test_user_001/logs?model_name=qwen
 
 # 分页查询
-GET /api/user/external/oNeBc5Gh3iXXXXXX/logs?page=2&page_size=10
+GET /api/user/external/test_user_001/logs?page=2&page_size=10
 
 # 组合查询
-GET /api/user/external/oNeBc5Gh3iXXXXXX/logs?start_date=2024-01-15&model_name=qwen&page=1&page_size=50
+GET /api/user/external/test_user_001/logs?start_date=2024-01-15&model_name=qwen&page=1&page_size=50
 ```
 
 ## LLM API 使用
@@ -517,31 +415,15 @@ await newApi.syncUser({
 });
 
 // 2. 用户充值 500元人民币（Stripe转换为$68.49）
-// 方式1：使用 external_user_id
 await newApi.topupUser({
   external_user_id: 'amos_wechat_123',
   amount_usd: 68.49,  // Stripe转换后的美元金额
   payment_id: 'stripe_pi_1234567890'
 });
 
-// 方式2：直接使用 wechat_openid（微信小程序推荐）
-await newApi.topupUser({
-  wechat_openid: 'wx_openid_12345',
-  amount_usd: 68.49,
-  payment_id: 'stripe_pi_1234567890'
-});
-
 // 3. 创建 Access Key
-// 方式1：使用 external_user_id
 const token = await newApi.createToken({
   external_user_id: 'amos_wechat_123',
-  token_name: 'My Chat App',
-  expires_in_days: 365
-});
-
-// 方式2：直接使用 wechat_openid（微信小程序推荐）
-const token2 = await newApi.createToken({
-  wechat_openid: 'wx_openid_12345',
   token_name: 'My Chat App',
   expires_in_days: 365
 });
@@ -581,15 +463,8 @@ console.log('总消费：$', logs.data.summary.total_spend);
 console.log('消费Token数：', logs.data.summary.total_tokens);
 
 // 8. 删除不需要的Token
-// 方式1：使用 external_user_id
 await newApi.deleteToken({
   external_user_id: 'amos_wechat_123',
-  token_id: token.data.token_id
-});
-
-// 方式2：直接使用 wechat_openid（微信小程序推荐）
-await newApi.deleteToken({
-  wechat_openid: 'wx_openid_12345',
   token_id: token.data.token_id
 });
 console.log('Token删除成功');
@@ -703,142 +578,6 @@ CREATE UNIQUE INDEX idx_users_external_user_id ON users(external_user_id);
 - 使用四舍五入确保计费精度
 - 完全兼容 New API 的复杂计费体系
 
-## 微信小程序集成方案
-
-### 方案概述
-微信小程序用户集成采用标准化的用户映射策略，充分利用现有API接口，无需修改后端代码。
-
-### 用户ID映射规则
-- **external_user_id 格式**: `wx_mini_{openid}`
-- **username 格式**: `wx_user_{openid_suffix}`（取openid后8位）
-- **登录类型**: `wechat`
-- **唯一标识**: 基于微信OpenID确保唯一性
-
-### 账号统一机制 🔄
-基于微信OpenID的智能账号统一，确保用户在多平台间的一致体验：
-
-#### 核心逻辑
-1. **OpenID优先检查**: 当微信用户登录时，系统首先检查是否存在相同OpenID的用户
-2. **自动账号统一**: 如果找到已存在用户，自动统一到该账号
-3. **返回原有ID**: 统一后返回原有的`external_user_id`，而不是请求的ID
-4. **透明路由**: 前端使用返回的`external_user_id`进行后续API调用
-
-#### 统一策略
-- **首次优先**: 谁先注册，谁是主账号
-- **数据合并**: 自动更新显示名称、手机号等可变信息
-- **余额统一**: 所有平台共享同一账号的余额和Token
-
-### 微信用户字段映射
-| 微信小程序字段 | New API 字段 | 说明 |
-|---------------|-------------|------|
-| openid | wechat_openid | 小程序用户唯一标识 |
-| unionid | wechat_unionid | 跨应用用户标识（可选） |
-| nickName | display_name | 用户昵称 |
-| phone | phone | 手机号（需授权） |
-| avatarUrl, gender等 | external_data | 存储为JSON格式 |
-
-### 集成流程
-
-#### 1. 微信小程序登录
-```javascript
-// 微信小程序端代码示例
-wx.login({
-  success: (res) => {
-    if (res.code) {
-      // 获取用户信息
-      wx.getUserProfile({
-        desc: '用于完善用户资料',
-        success: (userInfo) => {
-          // 调用后端同步用户接口
-          syncUserToNewAPI(res.code, userInfo.userInfo);
-        }
-      });
-    }
-  }
-});
-```
-
-#### 2. 后端用户同步
-```javascript
-const syncUserToNewAPI = async (code, userInfo) => {
-  // 1. 通过code获取openid（后端调用微信API）
-  const wechatAuth = await getWechatOpenId(code);
-
-  // 2. 同步用户到New API
-  const response = await fetch('/api/user/external/sync', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      external_user_id: `wx_mini_${wechatAuth.openid}`,
-      username: `wx_user_${wechatAuth.openid.slice(-8)}`,
-      display_name: userInfo.nickName || '微信用户',
-      wechat_openid: wechatAuth.openid,
-      wechat_unionid: wechatAuth.unionid || '',
-      login_type: 'wechat',
-      external_data: JSON.stringify({
-        miniprogram_info: {
-          avatar_url: userInfo.avatarUrl,
-          gender: userInfo.gender,
-          country: userInfo.country,
-          province: userInfo.province,
-          city: userInfo.city,
-          language: userInfo.language
-        }
-      })
-    })
-  });
-
-  return response.json();
-};
-```
-
-### 微信用户更新策略
-- **不可更新**: `external_user_id`, `wechat_openid`
-- **可更新**: `display_name`, `external_data`
-- **条件更新**: `wechat_unionid`（从空更新为有值）, `phone`（用户授权后）
-
-### 微信支付集成示例
-```javascript
-// 微信小程序支付完成后充值
-const topupAfterWechatPay = async (openid, paymentResult) => {
-  const response = await fetch('/api/user/external/topup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      // 方式1：使用 external_user_id（原有方式）
-      external_user_id: `wx_mini_${openid}`,
-      // 方式2：直接使用 wechat_openid（推荐，更简单）
-      // wechat_openid: openid,
-      amount_usd: paymentResult.amount_usd, // 已转换为美元
-      payment_id: `wechat_${paymentResult.transaction_id}`
-    })
-  });
-
-  return response.json();
-};
-
-// 推荐的简化版本（直接用 openid）
-const topupAfterWechatPaySimple = async (openid, paymentResult) => {
-  const response = await fetch('/api/user/external/topup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      wechat_openid: openid,  // 直接使用 openid，无需拼接前缀
-      amount_usd: paymentResult.amount_usd,
-      payment_id: `wechat_${paymentResult.transaction_id}`
-    })
-  });
-
-  return response.json();
-};
-```
-
-### 微信特有注意事项
-1. **OpenID获取**: 需要code换取，有效期限制
-2. **手机号授权**: 需要用户主动授权，建议设为可选
-3. **用户信息更新**: 建议每次启动时检查并更新
-4. **UnionID处理**: 如果应用在微信开放平台，可获取UnionID实现跨应用统一
-
 ## 推荐体系支持
 
 ### 推荐码功能
@@ -896,6 +635,5 @@ go test ./controller -v -timeout 60s -run "Test.*ExternalUser"
 ```
 
 ---
-*文档版本：v2.1*
-*最后更新：2025-09-16*
-*新增内容：微信小程序集成方案*
+*文档版本：v2.0*  
+*最后更新：2025-01-31*
