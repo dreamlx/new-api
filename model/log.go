@@ -406,3 +406,27 @@ func DeleteOldLog(ctx context.Context, targetTimestamp int64, limit int) (int64,
 
 	return total, nil
 }
+
+// GetPlatformConsumptionLogs 获取平台消费日志
+func GetPlatformConsumptionLogs(userId int, startTimestamp int64, endTimestamp int64, page int, pageSize int) (logs []*Log, total int64, err error) {
+	tx := LOG_DB.Table("logs").
+		Select("logs.*, tokens.key as token_key").
+		Joins("LEFT JOIN tokens ON logs.token_id = tokens.id").
+		Where("logs.user_id = ? AND logs.type = ? AND logs.created_at BETWEEN ? AND ?",
+			userId, LogTypeConsume, startTimestamp, endTimestamp)
+
+	// 计算总数
+	err = tx.Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 分页查询
+	offset := (page - 1) * pageSize
+	err = tx.Order("logs.id DESC").
+		Limit(pageSize).
+		Offset(offset).
+		Find(&logs).Error
+
+	return logs, total, err
+}

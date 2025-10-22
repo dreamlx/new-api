@@ -117,6 +117,13 @@ func SetApiRouter(router *gin.Engine) {
 				externalRoute.GET("/:external_user_id/logs", controller.GetExternalUserLogs)   // 获取消费记录
 				externalRoute.GET("/models", controller.GetExternalUserModels)
 			}
+
+			// v2 外部系统集成路由 (授权计费网关模式)
+			v2Route := apiRouter.Group("/v2/external")
+			{
+				v2Route.POST("/tokens/authorize", controller.V2TokenAuthorize)
+				v2Route.GET("/platforms/:platform_id/logs", controller.V2GetPlatformLogs)
+			}
 		}
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())

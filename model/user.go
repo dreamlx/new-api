@@ -934,3 +934,46 @@ func RootUserExists() bool {
 	}
 	return true
 }
+
+// GetUserByUsername 根据用户名获取用户
+func GetUserByUsername(username string) (*User, error) {
+	if username == "" {
+		return nil, errors.New("username cannot be empty")
+	}
+	var user User
+	err := DB.Where("username = ?", username).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// GetOrCreatePlatformUser 获取或创建平台用户
+func GetOrCreatePlatformUser(username string) (*User, error) {
+	// 先尝试获取现有用户
+	user, err := GetUserByUsername(username)
+	if err == nil && user != nil {
+		return user, nil
+	}
+
+	// 用户不存在，创建新用户
+	user = &User{
+		Username:    username,
+		DisplayName: fmt.Sprintf("Platform %s", strings.TrimPrefix(username, "platform_")),
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Quota:       0,
+		UsedQuota:   0,
+		RequestCount: 0,
+		Group:       "default",
+		AccessToken: nil,
+	}
+
+	err = DB.Create(user).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to create platform user: %w", err)
+	}
+
+	common.SysLog(fmt.Sprintf("created platform user: %s (id: %d)", username, user.Id))
+	return user, nil
+}
