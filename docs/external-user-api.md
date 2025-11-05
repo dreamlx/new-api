@@ -31,6 +31,8 @@
 - `POST /api/user/external/topup` - 用户充值接口
 - `POST /api/user/external/token` - 创建 Access Key
 - `DELETE /api/user/external/token` - 删除 Access Key
+- `GET /api/user/external/{id}/tokens` - 获取用户所有Token列表 🆕
+- `POST /api/user/external/token/verify` - 验证Token有效性 🆕
 - `GET /api/user/external/{id}/stats` - 用户统计接口
 - `GET /api/user/external/{id}/logs` - 消费记录查询接口
 
@@ -181,6 +183,160 @@ Content-Type: application/json
 - 只能删除属于指定外部用户的Token
 - Token删除后立即失效，无法恢复
 - 删除不存在的Token或无权限的Token会返回404错误
+
+#### 3.3 获取用户所有Token列表 🆕
+```http
+GET /api/user/external/{external_user_id}/tokens
+```
+
+**路径参数**:
+- `external_user_id` (string, required): 外部用户ID
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "message": "查询成功",
+  "data": {
+    "external_user_id": "test_user_001",
+    "total_tokens": 3,
+    "tokens": [
+      {
+        "token_id": 1,
+        "token_name": "生产环境Token",
+        "access_key": "sk-abc12345****xyz9",
+        "status": 1,
+        "status_text": "启用",
+        "remain_quota": 5000000,
+        "used_quota": 1000000,
+        "created_time": 1762310138,
+        "expired_time": 1793846138,
+        "accessed_time": 1762310200,
+        "is_expired": false
+      },
+      {
+        "token_id": 2,
+        "token_name": "测试Token",
+        "access_key": "sk-def67890****abc1",
+        "status": 2,
+        "status_text": "禁用",
+        "remain_quota": 2000000,
+        "used_quota": 500000,
+        "created_time": 1762310100,
+        "expired_time": 1764902100,
+        "accessed_time": 1762310150,
+        "is_expired": false
+      },
+      {
+        "token_id": 3,
+        "token_name": "已过期Token",
+        "access_key": "sk-ghi12345****def2",
+        "status": 1,
+        "status_text": "启用",
+        "remain_quota": 3000000,
+        "used_quota": 0,
+        "created_time": 1700000000,
+        "expired_time": 1730000000,
+        "accessed_time": 1730000000,
+        "is_expired": true
+      }
+    ]
+  }
+}
+```
+
+**响应字段说明**:
+- `total_tokens`: 该用户的Token总数
+- `tokens`: Token列表，按创建时间倒序排列
+  - `token_id`: Token唯一ID
+  - `token_name`: Token名称
+  - `access_key`: 脱敏后的访问密钥（只显示前8位和后4位）
+  - `status`: Token状态码（1=启用, 2=禁用, 3=额度耗尽, 4=已过期）
+  - `status_text`: Token状态文本
+  - `remain_quota`: 剩余额度
+  - `used_quota`: 已使用额度（估算值）
+  - `created_time`: 创建时间（Unix时间戳）
+  - `expired_time`: 过期时间（Unix时间戳，-1表示永不过期）
+  - `accessed_time`: 最后访问时间（Unix时间戳）
+  - `is_expired`: 是否已过期（根据当前时间计算）
+
+**说明**:
+- 返回指定用户的所有Token（包括已删除的不会返回）
+- Token密钥经过脱敏处理，保护安全性
+- 可用于前端展示用户的API密钥管理页面
+- 用户不存在会返回404错误
+
+#### 3.4 验证Token有效性 🆕
+```http
+POST /api/user/external/token/verify
+Content-Type: application/json
+```
+
+**请求参数**:
+```json
+{
+  "access_key": "string, required, 要验证的Token（包含sk-前缀）"
+}
+```
+
+**响应示例（有效Token）**:
+```json
+{
+  "success": true,
+  "message": "验证完成",
+  "data": {
+    "is_valid": true,
+    "token_id": 1,
+    "token_name": "生产环境Token",
+    "external_user_id": "test_user_001",
+    "status": 1,
+    "status_text": "启用",
+    "remain_quota": 5000000,
+    "expired_time": 1793846138,
+    "is_expired": false
+  }
+}
+```
+
+**响应示例（无效Token）**:
+```json
+{
+  "success": true,
+  "message": "验证完成",
+  "data": {
+    "is_valid": false,
+    "error_reason": "Token已过期（时间到期）"
+  }
+}
+```
+
+**响应字段说明**:
+- `is_valid`: Token是否有效（true/false）
+- 当Token有效时，返回以下字段：
+  - `token_id`: Token ID
+  - `token_name`: Token名称
+  - `external_user_id`: 关联的外部用户ID
+  - `status`: Token状态码
+  - `status_text`: Token状态文本
+  - `remain_quota`: 剩余额度
+  - `expired_time`: 过期时间
+  - `is_expired`: 是否已过期
+- 当Token无效时，返回以下字段：
+  - `error_reason`: 无效原因，可能的值：
+    - "Token不存在"
+    - "关联用户不存在"
+    - "Token已被禁用"
+    - "Token额度已耗尽"
+    - "Token已过期（状态标记）"
+    - "Token已过期（时间到期）"
+    - "Token剩余额度不足"
+
+**说明**:
+- 用于验证Token是否可以正常使用
+- 检查Token的存在性、状态、过期时间、额度等
+- 即使验证失败，接口也返回200状态码，通过`is_valid`字段判断
+- 可用于前端Token管理页面的实时验证功能
+- ⚠️ 注意：刚删除的Token可能因Redis缓存暂时仍显示有效，几分钟后会失效
 
 ### 4. 用户统计接口
 

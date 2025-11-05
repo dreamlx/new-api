@@ -902,3 +902,238 @@ func calculateBalanceCapacity(quota int) map[string]interface{} {
 	return capacity
 }
 
+// 获取外部用户所有Token列表响应结构
+type ExternalUserTokensResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		ExternalUserId string                  `json:"external_user_id"`
+		TotalTokens    int                     `json:"total_tokens"`
+		Tokens         []ExternalUserTokenInfo `json:"tokens"`
+	} `json:"data"`
+}
+
+type ExternalUserTokenInfo struct {
+	TokenId      int    `json:"token_id"`
+	TokenName    string `json:"token_name"`
+	AccessKey    string `json:"access_key"` // 只显示前8位和后4位
+	Status       int    `json:"status"`     // 1: enabled, 2: disabled
+	StatusText   string `json:"status_text"`
+	RemainQuota  int    `json:"remain_quota"`
+	UsedQuota    int    `json:"used_quota"`
+	CreatedTime  int64  `json:"created_time"`
+	ExpiredTime  int64  `json:"expired_time"`
+	AccessedTime int64  `json:"accessed_time"`
+	IsExpired    bool   `json:"is_expired"`
+}
+
+// 获取外部用户的所有Token列表
+func GetExternalUserTokens(c *gin.Context) {
+	externalUserId := c.Param("external_user_id")
+
+	if externalUserId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "external_user_id 不能为空",
+		})
+		return
+	}
+
+	// 查找用户
+	user := &model.User{}
+	if err := model.DB.Where("external_user_id = ?", externalUserId).First(user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "用户不存在",
+		})
+		return
+	}
+
+	// 获取用户的所有Token
+	var tokens []model.Token
+	if err := model.DB.Where("user_id = ?", user.Id).Order("created_time DESC").Find(&tokens).Error; err != nil {
+		common.SysError("查询用户Token失败: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "查询Token列表失败",
+		})
+		return
+	}
+
+	// 构造响应数据
+	response := ExternalUserTokensResponse{
+		Success: true,
+		Message: "查询成功",
+	}
+	response.Data.ExternalUserId = externalUserId
+	response.Data.TotalTokens = len(tokens)
+	response.Data.Tokens = make([]ExternalUserTokenInfo, 0, len(tokens))
+
+	currentTime := common.GetTimestamp()
+
+	for _, token := range tokens {
+		// 脱敏处理：只显示前8位和后4位
+		maskedKey := ""
+		if len(token.Key) >= 12 {
+			maskedKey = fmt.Sprintf("sk-%s****%s",
+				token.Key[:8],
+				token.Key[len(token.Key)-4:])
+		} else {
+			maskedKey = "sk-" + token.Key
+		}
+
+		statusText := "启用"
+		if token.Status == common.TokenStatusDisabled {
+			statusText = "禁用"
+		} else if token.Status == common.TokenStatusExhausted {
+			statusText = "额度耗尽"
+		} else if token.Status == common.TokenStatusExpired {
+			statusText = "已过期"
+		}
+
+		isExpired := false
+		if token.ExpiredTime != -1 && token.ExpiredTime < currentTime {
+			isExpired = true
+		}
+
+		// 计算已使用quota（用户总quota - token剩余quota）
+		usedQuota := 0
+		if user.Quota > token.RemainQuota {
+			usedQuota = user.Quota - token.RemainQuota
+		}
+
+		tokenInfo := ExternalUserTokenInfo{
+			TokenId:      token.Id,
+			TokenName:    token.Name,
+			AccessKey:    maskedKey,
+			Status:       token.Status,
+			StatusText:   statusText,
+			RemainQuota:  token.RemainQuota,
+			UsedQuota:    usedQuota,
+			CreatedTime:  token.CreatedTime,
+			ExpiredTime:  token.ExpiredTime,
+			AccessedTime: token.AccessedTime,
+			IsExpired:    isExpired,
+		}
+
+		response.Data.Tokens = append(response.Data.Tokens, tokenInfo)
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// Token验证请求结构
+type VerifyTokenRequest struct {
+	AccessKey string `json:"access_key" binding:"required"`
+}
+
+// Token验证响应结构
+type VerifyTokenResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		IsValid      bool   `json:"is_valid"`
+		TokenId      int    `json:"token_id,omitempty"`
+		TokenName    string `json:"token_name,omitempty"`
+		ExternalUserId string `json:"external_user_id,omitempty"`
+		Status       int    `json:"status,omitempty"`
+		StatusText   string `json:"status_text,omitempty"`
+		RemainQuota  int    `json:"remain_quota,omitempty"`
+		ExpiredTime  int64  `json:"expired_time,omitempty"`
+		IsExpired    bool   `json:"is_expired,omitempty"`
+		ErrorReason  string `json:"error_reason,omitempty"`
+	} `json:"data"`
+}
+
+// 验证Token是否有效
+func VerifyExternalUserToken(c *gin.Context) {
+	var req VerifyTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请求参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 移除 sk- 前缀
+	tokenKey := strings.TrimPrefix(req.AccessKey, "sk-")
+
+	// 查询Token (先尝试不带前缀的key)
+	token, err := model.GetTokenByKey(tokenKey, false)
+
+	// 如果没找到且原始key带有sk-前缀，尝试使用完整key查询
+	if err != nil && strings.HasPrefix(req.AccessKey, "sk-") {
+		token, err = model.GetTokenByKey(req.AccessKey, false)
+	}
+
+	response := VerifyTokenResponse{
+		Success: true,
+		Message: "验证完成",
+	}
+
+	if err != nil {
+		// Token不存在
+		response.Data.IsValid = false
+		response.Data.ErrorReason = "Token不存在"
+		c.JSON(http.StatusOK, response)
+		return
+	}
+
+	// 查询用户信息
+	user := &model.User{}
+	if err := model.DB.First(user, token.UserId).Error; err != nil {
+		response.Data.IsValid = false
+		response.Data.ErrorReason = "关联用户不存在"
+		c.JSON(http.StatusOK, response)
+		return
+	}
+
+	// 检查Token状态
+	currentTime := common.GetTimestamp()
+	isExpired := false
+	errorReason := ""
+
+	if token.Status == common.TokenStatusDisabled {
+		response.Data.IsValid = false
+		errorReason = "Token已被禁用"
+	} else if token.Status == common.TokenStatusExhausted {
+		response.Data.IsValid = false
+		errorReason = "Token额度已耗尽"
+	} else if token.Status == common.TokenStatusExpired {
+		response.Data.IsValid = false
+		errorReason = "Token已过期（状态标记）"
+	} else if token.ExpiredTime != -1 && token.ExpiredTime < currentTime {
+		response.Data.IsValid = false
+		isExpired = true
+		errorReason = "Token已过期（时间到期）"
+	} else if token.RemainQuota <= 0 {
+		response.Data.IsValid = false
+		errorReason = "Token剩余额度不足"
+	} else {
+		response.Data.IsValid = true
+	}
+
+	// 填充Token详细信息
+	statusText := "启用"
+	if token.Status == common.TokenStatusDisabled {
+		statusText = "禁用"
+	} else if token.Status == common.TokenStatusExhausted {
+		statusText = "额度耗尽"
+	} else if token.Status == common.TokenStatusExpired {
+		statusText = "已过期"
+	}
+
+	response.Data.TokenId = token.Id
+	response.Data.TokenName = token.Name
+	response.Data.ExternalUserId = user.ExternalUserId
+	response.Data.Status = token.Status
+	response.Data.StatusText = statusText
+	response.Data.RemainQuota = token.RemainQuota
+	response.Data.ExpiredTime = token.ExpiredTime
+	response.Data.IsExpired = isExpired
+	response.Data.ErrorReason = errorReason
+
+	c.JSON(http.StatusOK, response)
+}
+
