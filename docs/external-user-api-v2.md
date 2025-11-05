@@ -40,7 +40,7 @@ v2 接口采用了一种简化的设计原则，其核心原则是：
 ```json
 {
   "platform_id": "asd",
-  "token_key": "sk-platform-abc123def456",
+  "token_key": "sk-abc123def456789xyz",
   "initial_quota": 5000000,
   "metadata": {
     "platform_user_id": "user_123",
@@ -52,9 +52,17 @@ v2 接口采用了一种简化的设计原则，其核心原则是：
 
 **字段说明**:
 - `platform_id`: 必填，下游平台的唯一标识符，对应New API内部用户`username="platform_{platform_id}"`。
-- `token_key`: 必填，下游平台生成的API密钥，建议以`sk-`开头。
+- `token_key`: 必填，下游平台生成的API密钥，**必须以`sk-`开头**且长度不少于10个字符。系统会自动去掉`sk-`前缀后存储。
 - `initial_quota`: 必填，初始额度，单位为quota。`$1 USD = 500,000 quota`。
 - `metadata`: 可选，平台自定义的元数据，用于内部追踪。
+
+**⚠️ 重要说明**：
+- `token_key` 必须以 `sk-` 开头，格式为：`sk-{随机字符串}`
+- **随机字符串部分禁止包含 `-` 分隔符**，因为系统验证时会按 `-` 分割并只取第一部分
+- ✅ **正确示例**：`sk-a99416b67cb54e178e9ffe8a55c255ae`（推荐使用32-48位字母数字组合）
+- ❌ **错误示例**：`sk-2-a99416b67cb54e178e9ffe8a55c255ae`（包含额外的 `-`，会导致验证失败）
+- 系统会自动去掉 `sk-` 前缀后存储到数据库
+- 用户调用 API 时需要带完整 token，例如：`Authorization: Bearer sk-a99416b67cb54e178e9ffe8a55c255ae`
 
 **响应体 (`Response Body` - 成功)**:
 ```json
@@ -62,7 +70,7 @@ v2 接口采用了一种简化的设计原则，其核心原则是：
   "success": true,
   "message": "密钥授权成功",
   "data": {
-    "token_key": "sk-platform-abc123def456",
+    "token_key": "sk-abc123def456789xyz",
     "current_quota": 5000000,
     "quota_usd": 10.0,
     "status": "authorized",
@@ -78,7 +86,7 @@ v2 接口采用了一种简化的设计原则，其核心原则是：
   "success": true,
   "message": "密钥已存在，额度已更新",
   "data": {
-    "token_key": "sk-platform-abc123def456",
+    "token_key": "sk-abc123def456789xyz",
     "previous_quota": 3000000,
     "current_quota": 5000000,
     "quota_added": 2000000,
@@ -152,7 +160,7 @@ ORDER BY logs.id DESC
       {
         "log_id": "12345",
         "time": "2025-10-20T15:30:00Z",
-        "token_key": "sk-platform-abc123def456",
+        "token_key": "sk-abc123def456789xyz",
         "model_name": "claude-3-5-sonnet-20241022",
         "prompt_tokens": 150,
         "completion_tokens": 80,
@@ -162,7 +170,7 @@ ORDER BY logs.id DESC
       {
         "log_id": "12344",
         "time": "2025-10-20T16:45:12Z",
-        "token_key": "sk-platform-xyz789uvw012",
+        "token_key": "sk-xyz789uvw012345abc",
         "model_name": "gpt-4o",
         "prompt_tokens": 200,
         "completion_tokens": 120,
@@ -221,7 +229,7 @@ curl -X POST "http://your-new-api-domain.com/v2/external/tokens/authorize" \
   -H "Content-Type: application/json" \
   -d '{
     "platform_id": "asd",
-    "token_key": "sk-user123-key-20251021",
+    "token_key": "sk-user123key20251021abc",
     "initial_quota": 10000000,
     "metadata": {
       "platform_user_id": "user_123",
@@ -236,7 +244,7 @@ curl -X POST "http://your-new-api-domain.com/v2/external/tokens/authorize" \
   "success": true,
   "message": "密钥授权成功",
   "data": {
-    "token_key": "sk-user123-key-20251021",
+    "token_key": "sk-user123key20251021abc",
     "current_quota": 10000000,
     "quota_usd": 20.0,
     "status": "authorized",
@@ -252,7 +260,7 @@ curl -X POST "http://your-new-api-domain.com/v2/external/tokens/authorize" \
 
 ```bash
 curl -X POST "http://your-new-api-domain.com/v1/chat/completions" \
-  -H "Authorization: Bearer sk-user123-key-20251021" \
+  -H "Authorization: Bearer sk-user123key20251021abc" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "claude-3-5-sonnet-20241022",

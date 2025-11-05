@@ -121,8 +121,9 @@ func V2TokenAuthorize(c *gin.Context) {
 	}
 
 	// 需要导入 "one-api/common"
-	// 检查token是否已存在
-	existingToken, err := model.GetTokenByKey(req.TokenKey, true)
+	// 检查token是否已存在（去掉 sk- 前缀后查询）
+	tokenKeyToCheck := strings.TrimPrefix(req.TokenKey, "sk-")
+	existingToken, err := model.GetTokenByKey(tokenKeyToCheck, true)
 	if err == nil && existingToken != nil {
 		// Token已存在，检查是否属于同一平台
 		tokenUser, err := model.GetUserById(existingToken.UserId, true)
@@ -182,9 +183,11 @@ func V2TokenAuthorize(c *gin.Context) {
 	}
 
 	// 创建新token
+	// 重要：去掉 sk- 前缀后存储，因为 middleware/auth.go 验证时会去掉 sk- 前缀
+	tokenKey := strings.TrimPrefix(req.TokenKey, "sk-")
 	token := &model.Token{
 		UserId:      user.Id,
-		Key:         req.TokenKey,
+		Key:         tokenKey,
 		Name:        fmt.Sprintf("v2-platform-%s-token", req.PlatformId),
 		RemainQuota: req.InitialQuota,
 		UsedQuota:   0,
