@@ -344,12 +344,25 @@ func V2GetPlatformLogs(c *gin.Context) {
 
 	// 转换日志格式
 	for _, log := range logs {
-		tokenKey := log.TokenName
-		if tokenKey == "" {
-			// 如果没有TokenName，尝试通过TokenId获取
-			if token, err := model.GetTokenById(log.TokenId); err == nil && token != nil {
-				tokenKey = token.Key
+		// 获取实际的Token密钥（优先）
+		var tokenKey string
+		if token, err := model.GetTokenById(log.TokenId); err == nil && token != nil {
+			// 脱敏显示：sk-前8位****后4位
+			fullKey := token.Key
+			// 如果token.Key不包含sk-前缀，添加上
+			if !strings.HasPrefix(fullKey, "sk-") {
+				fullKey = "sk-" + fullKey
 			}
+			if len(fullKey) > 12 { // sk- + 至少9个字符
+				tokenKey = fullKey[:11] + "****" + fullKey[len(fullKey)-4:]
+			} else {
+				tokenKey = fullKey // 太短则不脱敏
+			}
+		} else if log.TokenName != "" {
+			// 备选：使用TokenName（但这不是理想情况）
+			tokenKey = log.TokenName
+		} else {
+			tokenKey = "unknown"
 		}
 
 		totalTokens := log.PromptTokens + log.CompletionTokens
