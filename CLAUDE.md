@@ -853,7 +853,138 @@ cat backup.sql | docker exec -i mysql-dev mysql -u root -pdev123456 new_api_dev
 
 ---
 
-**Git提交**：待提交（功能开发完成，测试通过）
+**Git提交**：
+- `a74ef25c` - fix(v2-api): 修复消费流水接口token_key显示错误
+
+---
+
+## V2消费流水Token显示修复 (2025-11-05) 🔧
+
+### ✅ 问题背景
+
+**用户反馈**：
+- V2消费流水接口返回的 `token_key` 显示 "v2-platform-asd-token"（Token名称）
+- 应该显示实际的Token密钥以便识别和追踪
+
+**影响**：
+- 无法识别具体使用的是哪个Token
+- 前端无法做Token级别的使用分析
+
+---
+
+### 📝 修复内容
+
+**修复位置**：`controller/v2_external_user.go:345-389`
+
+**逻辑优化**：
+
+修复前：
+```go
+tokenKey := log.TokenName  // 优先使用Token名称❌
+if tokenKey == "" {
+    // 才尝试获取实际密钥
+    token, _ := model.GetTokenById(log.TokenId)
+    tokenKey = token.Key
+}
+```
+
+修复后：
+```go
+// 优先获取实际Token密钥✅
+if token, err := model.GetTokenById(log.TokenId); err == nil {
+    fullKey := token.Key
+    if !strings.HasPrefix(fullKey, "sk-") {
+        fullKey = "sk-" + fullKey
+    }
+    // 脱敏显示：sk-前8位****后4位
+    tokenKey = fullKey[:11] + "****" + fullKey[len(fullKey)-4:]
+} else if log.TokenName != "" {
+    tokenKey = log.TokenName  // 降级为备选
+} else {
+    tokenKey = "unknown"
+}
+```
+
+**关键改进**：
+
+1. **优先级调整**：
+   - ✅ 第1优先：实际Token密钥
+   - ✅ 第2优先：Token名称（备选）
+   - ✅ 第3优先：显示 "unknown"
+
+2. **脱敏显示**：
+   - 格式：`sk-前8位****后4位`
+   - 示例：`sk-52cf690bb7054a92a91d85940cdd9c32` → `sk-52cf690b****9c32`
+   - 安全：不暴露完整密钥
+   - 实用：保留足够信息用于识别
+
+3. **兼容性**：
+   - ✅ 自动添加 `sk-` 前缀
+   - ✅ 处理Token不存在情况
+   - ✅ 处理Token太短情况
+
+---
+
+### 🎯 修复效果
+
+**修复前**：
+```json
+{
+  "log_id": "74393",
+  "token_key": "v2-platform-asd-token",  ❌ Token名称
+  "model_name": "deepseek-r1-0528"
+}
+```
+
+**修复后**：
+```json
+{
+  "log_id": "74393",
+  "token_key": "sk-52cf690b****9c32",  ✅ 脱敏的实际密钥
+  "model_name": "deepseek-r1-0528"
+}
+```
+
+---
+
+### 📦 影响文件
+
+**代码修改**：
+- `controller/v2_external_user.go` - Token密钥显示逻辑优化（+18 -5）
+
+**文档更新**：
+- `CLAUDE.md` - 记录修复过程和逻辑
+
+---
+
+### 💡 技术要点
+
+1. **优先级设计**：实际密钥 > Token名称 > unknown
+2. **安全性考虑**：脱敏显示保护完整密钥
+3. **可用性平衡**：保留足够信息便于识别
+4. **兼容性处理**：多种边界情况处理
+
+---
+
+### 🚀 部署验证
+
+**待服务器部署后验证**：
+```bash
+# 1. 查询消费流水
+curl -s "http://服务器IP:3000/api/v2/platform/asd/logs?start_date=2025-11-05&end_date=2025-11-05" | jq '.data.logs[0].token_key'
+
+# 2. 验证格式
+# 应该看到：
+# "sk-52cf690b****9c32"  ✅ 脱敏的实际密钥
+#
+# 而不是：
+# "v2-platform-asd-token" ❌ Token名称
+```
+
+---
+
+**Git提交**：
+- `a74ef25c` - fix(v2-api): 修复消费流水接口token_key显示错误
 
 ---
 *最后更新：2025-11-05*
