@@ -101,9 +101,11 @@ func V2TokenAuthorize(c *gin.Context) {
 	// 验证token_key格式
 	if !isValidTokenKey(req.TokenKey) {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"success":   false,
-			"message":   "密钥格式无效：必须以sk-开头且长度不少于10个字符",
-			"error_code": "INVALID_PARAMETER",
+			"success":     false,
+			"message":     "密钥格式无效：必须是sk-{连续字符串}格式，sk-后面不能包含短横线",
+			"error_code":  "INVALID_PARAMETER",
+			"valid_example": "sk-a99416b67cb54e178e9ffe8a55c255ae",
+			"invalid_example": "sk-2-a99416b67cb54e178e9ffe8a55c255ae",
 		})
 		return
 	}
@@ -400,6 +402,21 @@ func isValidPlatformId(platformId string) bool {
 }
 
 // 辅助函数：验证token_key格式
+// 要求：sk-{连续字符串}，不能有多个短横线
 func isValidTokenKey(tokenKey string) bool {
-	return len(tokenKey) >= 10 && strings.HasPrefix(tokenKey, "sk-")
+	if !strings.HasPrefix(tokenKey, "sk-") {
+		return false
+	}
+	// 去掉sk-前缀后，检查剩余部分
+	remaining := strings.TrimPrefix(tokenKey, "sk-")
+	if len(remaining) < 8 {
+		return false // 至少8个字符
+	}
+	// 禁止包含短横线（因为middleware会按-分割并只取第一部分）
+	if strings.Contains(remaining, "-") {
+		return false
+	}
+	// 建议：只包含字母数字，长度32-48位
+	// 但这里不做强制要求，只禁止短横线即可
+	return true
 }

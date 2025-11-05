@@ -18,3 +18,9 @@ logs/
 
 # Claude Code 本地配置
 .claude/settings.local.json
+
+# Claude AI 配置目录
+.aim/
+
+# 数据库备份文件
+backup_*.sql
