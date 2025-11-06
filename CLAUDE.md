@@ -936,11 +936,11 @@ if token, err := model.GetTokenById(log.TokenId); err == nil {
 }
 ```
 
-**修复后**：
+**修复后**（需求变更：完整密钥）：
 ```json
 {
   "log_id": "74393",
-  "token_key": "sk-52cf690b****9c32",  ✅ 脱敏的实际密钥
+  "token_key": "sk-52cf690bb7054a92a91d85940cdd9c32",  ✅ 完整的实际密钥
   "model_name": "deepseek-r1-0528"
 }
 ```
@@ -950,7 +950,7 @@ if token, err := model.GetTokenById(log.TokenId); err == nil {
 ### 📦 影响文件
 
 **代码修改**：
-- `controller/v2_external_user.go` - Token密钥显示逻辑优化（+18 -5）
+- `controller/v2_external_user.go` - Token密钥显示逻辑优化（+4 -9）
 
 **文档更新**：
 - `CLAUDE.md` - 记录修复过程和逻辑
@@ -960,9 +960,17 @@ if token, err := model.GetTokenById(log.TokenId); err == nil {
 ### 💡 技术要点
 
 1. **优先级设计**：实际密钥 > Token名称 > unknown
-2. **安全性考虑**：脱敏显示保护完整密钥
-3. **可用性平衡**：保留足够信息便于识别
+2. **完整密钥显示**：返回完整Token密钥（带sk-前缀），便于对方平台匹配识别
+3. **自动前缀**：如果数据库中不含sk-前缀，自动添加
 4. **兼容性处理**：多种边界情况处理
+
+---
+
+### 🔄 需求变更说明
+
+**初版**：使用脱敏显示（sk-前8位****后4位）
+**变更原因**：对方平台需要完整的Token密钥进行匹配识别
+**最终方案**：直接返回完整Token密钥（sk-52cf690bb7054a92a91d85940cdd9c32）
 
 ---
 
@@ -975,7 +983,7 @@ curl -s "http://服务器IP:3000/api/v2/platform/asd/logs?start_date=2025-11-05&
 
 # 2. 验证格式
 # 应该看到：
-# "sk-52cf690b****9c32"  ✅ 脱敏的实际密钥
+# "sk-52cf690bb7054a92a91d85940cdd9c32"  ✅ 完整的实际密钥
 #
 # 而不是：
 # "v2-platform-asd-token" ❌ Token名称
@@ -985,6 +993,8 @@ curl -s "http://服务器IP:3000/api/v2/platform/asd/logs?start_date=2025-11-05&
 
 **Git提交**：
 - `a74ef25c` - fix(v2-api): 修复消费流水接口token_key显示错误
+- `ac3323f4` - docs: 记录V2消费流水Token显示修复
+- `6d91490d` - refactor(v2-api): 修改消费流水token_key显示为完整密钥
 
 ---
 *最后更新：2025-11-05*
