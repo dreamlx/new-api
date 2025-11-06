@@ -347,16 +347,11 @@ func V2GetPlatformLogs(c *gin.Context) {
 		// 获取实际的Token密钥（优先）
 		var tokenKey string
 		if token, err := model.GetTokenById(log.TokenId); err == nil && token != nil {
-			// 脱敏显示：sk-前8位****后4位
-			fullKey := token.Key
+			// 显示完整的Token密钥（不脱敏，便于对方平台匹配识别）
+			tokenKey = token.Key
 			// 如果token.Key不包含sk-前缀，添加上
-			if !strings.HasPrefix(fullKey, "sk-") {
-				fullKey = "sk-" + fullKey
-			}
-			if len(fullKey) > 12 { // sk- + 至少9个字符
-				tokenKey = fullKey[:11] + "****" + fullKey[len(fullKey)-4:]
-			} else {
-				tokenKey = fullKey // 太短则不脱敏
+			if !strings.HasPrefix(tokenKey, "sk-") {
+				tokenKey = "sk-" + tokenKey
 			}
 		} else if log.TokenName != "" {
 			// 备选：使用TokenName（但这不是理想情况）
