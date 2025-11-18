@@ -191,7 +191,16 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	err := LOG_DB.Create(log).Error
 	if err != nil {
 		logger.LogError(c, "failed to record log: "+err.Error())
+		return // 日志记录失败，不继续后续操作
 	}
+
+	// 🆕 异步发送回调通知（如果Token配置了回调）
+	if params.TokenId > 0 {
+		gopool.Go(func() {
+			SendConsumeCallback(userId, params.TokenId, log)
+		})
+	}
+
 	if common.DataExportEnabled {
 		gopool.Go(func() {
 			LogQuotaData(userId, username, params.ModelName, params.Quota, common.GetTimestamp(), params.PromptTokens+params.CompletionTokens)

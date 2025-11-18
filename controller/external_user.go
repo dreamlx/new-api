@@ -66,9 +66,13 @@ type ExternalUserTopUpResponse struct {
 
 // 外部用户Token创建请求结构
 type ExternalUserTokenRequest struct {
-	ExternalUserId string `json:"external_user_id" binding:"required,min=1,max=100"`
-	TokenName      string `json:"token_name" binding:"required,min=1,max=100"`
-	ExpiresInDays  int    `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
+	ExternalUserId  string `json:"external_user_id" binding:"required,min=1,max=100"`
+	TokenName       string `json:"token_name" binding:"required,min=1,max=100"`
+	AllocatedQuota  int    `json:"allocated_quota" binding:"required,min=0"` // 从User余额分配给Token的额度
+	ExpiresInDays   int    `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
+	CallbackUrl     string `json:"callback_url" binding:"omitempty,max=500"`     // 回调URL（可选）
+	CallbackEnabled bool   `json:"callback_enabled"`                             // 是否启用回调（可选）
+	CallbackSecret  string `json:"callback_secret" binding:"omitempty,max=64"` // 回调签名密钥（可选）
 }
 
 // 外部用户Token创建响应结构
@@ -76,11 +80,13 @@ type ExternalUserTokenResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		TokenId     int    `json:"token_id"`
-		AccessKey   string `json:"access_key"`
-		TokenName   string `json:"token_name"`
-		ExpiresAt   int64  `json:"expires_at"`
-		RemainQuota int    `json:"remain_quota"`
+		TokenId           int    `json:"token_id"`
+		AccessKey         string `json:"access_key"`
+		TokenName         string `json:"token_name"`
+		ExpiresAt         int64  `json:"expires_at"`
+		RemainQuota       int    `json:"remain_quota"`
+		CallbackEnabled   bool   `json:"callback_enabled,omitempty"`    // 是否启用回调
+		CallbackUrlMasked string `json:"callback_url_masked,omitempty"` // 脱敏显示的回调URL
 	} `json:"data"`
 }
 
@@ -335,26 +341,58 @@ func CreateExternalUserToken(c *gin.Context) {
 		return
 	}
 
+	// 验证用户余额是否足够分配
+	if user.Quota < req.AllocatedQuota {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("用户余额不足，当前余额: %d，请求分配: %d", user.Quota, req.AllocatedQuota),
+		})
+		return
+	}
+
 	// 设置默认过期时间（365天）
 	expiresInDays := req.ExpiresInDays
 	if expiresInDays == 0 {
 		expiresInDays = 365
 	}
 
-	// 创建Token
-	token := &model.Token{
-		UserId:         user.Id,
-		Key:            common.GetRandomString(32),
-		Name:           req.TokenName,
-		CreatedTime:    common.GetTimestamp(),
-		AccessedTime:   common.GetTimestamp(),
-		ExpiredTime:    common.GetTimestamp() + int64(expiresInDays*24*3600),
-		Status:         common.TokenStatusEnabled,
-		RemainQuota:    user.Quota,
-		UnlimitedQuota: false,
+	// 使用事务：从User扣除额度，分配给Token
+	tx := model.DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// 1. 从User扣除额度
+	if err := tx.Model(user).Update("quota", user.Quota-req.AllocatedQuota).Error; err != nil {
+		tx.Rollback()
+		common.SysError("扣减用户额度失败: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "扣减用户额度失败",
+		})
+		return
 	}
 
-	if err := model.DB.Create(token).Error; err != nil {
+	// 2. 创建Token并分配额度
+	token := &model.Token{
+		UserId:          user.Id,
+		Key:             common.GetRandomString(32),
+		Name:            req.TokenName,
+		CreatedTime:     common.GetTimestamp(),
+		AccessedTime:    common.GetTimestamp(),
+		ExpiredTime:     common.GetTimestamp() + int64(expiresInDays*24*3600),
+		Status:          common.TokenStatusEnabled,
+		RemainQuota:     req.AllocatedQuota, // 使用分配的额度，不是user.Quota
+		UnlimitedQuota:  false,
+		CallbackUrl:     req.CallbackUrl,     // 回调URL
+		CallbackEnabled: req.CallbackEnabled, // 是否启用回调
+		CallbackSecret:  req.CallbackSecret,  // 回调签名密钥
+	}
+
+	if err := tx.Create(token).Error; err != nil {
+		tx.Rollback()
 		common.SysError("创建Token失败: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -363,9 +401,20 @@ func CreateExternalUserToken(c *gin.Context) {
 		return
 	}
 
+	// 3. 提交事务
+	if err := tx.Commit().Error; err != nil {
+		tx.Rollback()
+		common.SysError("事务提交失败: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "事务提交失败",
+		})
+		return
+	}
+
 	// 记录日志
-	common.SysLog(fmt.Sprintf("为外部用户创建Token成功: %s, Token名称: %s",
-		req.ExternalUserId, req.TokenName))
+	common.SysLog(fmt.Sprintf("为外部用户创建Token成功: %s, Token名称: %s, 分配额度: %d",
+		req.ExternalUserId, req.TokenName, req.AllocatedQuota))
 
 	// 构造响应
 	response := ExternalUserTokenResponse{
@@ -376,7 +425,24 @@ func CreateExternalUserToken(c *gin.Context) {
 	response.Data.AccessKey = "sk-" + token.Key
 	response.Data.TokenName = token.Name
 	response.Data.ExpiresAt = token.ExpiredTime
-	response.Data.RemainQuota = user.Quota
+	response.Data.RemainQuota = req.AllocatedQuota // 返回Token的额度，不是user剩余额度
+
+	// 如果启用了回调，返回脱敏的URL
+	if token.CallbackEnabled && token.CallbackUrl != "" {
+		response.Data.CallbackEnabled = true
+		// 脱敏URL: 只显示协议和域名，路径用***代替
+		// 例如: https://cec.example.com/api/notify -> https://cec.example.com/***
+		if idx := strings.Index(token.CallbackUrl, "//"); idx != -1 {
+			afterSlash := token.CallbackUrl[idx+2:]
+			if pathIdx := strings.Index(afterSlash, "/"); pathIdx != -1 {
+				response.Data.CallbackUrlMasked = token.CallbackUrl[:idx+2+pathIdx] + "/***"
+			} else {
+				response.Data.CallbackUrlMasked = token.CallbackUrl
+			}
+		} else {
+			response.Data.CallbackUrlMasked = "***"
+		}
+	}
 
 	c.JSON(http.StatusOK, response)
 }
