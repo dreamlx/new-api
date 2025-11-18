@@ -26,6 +26,9 @@ type Token struct {
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
+	CallbackUrl        string         `json:"callback_url" gorm:"type:varchar(500);default:''"`     // 回调URL
+	CallbackEnabled    bool           `json:"callback_enabled" gorm:"default:false;index"`          // 是否启用回调
+	CallbackSecret     string         `json:"callback_secret" gorm:"type:varchar(64);default:''"` // 回调签名密钥
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
@@ -96,16 +99,15 @@ func ValidateUserToken(key string) (token *Token, err error) {
 			}
 			return token, errors.New("该令牌已过期")
 		}
-		// 检查用户余额而不是Token余额（Token共享用户余额）
+		// 检查Token独立余额
 		if !token.UnlimitedQuota {
-			userQuota, err := GetUserQuota(token.UserId, false)
-			if err != nil {
-				return token, fmt.Errorf("获取用户余额失败: %v", err)
-			}
-			if userQuota <= 0 {
+			if token.RemainQuota <= 0 {
 				keyPrefix := key[:3]
 				keySuffix := key[len(key)-3:]
-				return token, errors.New(fmt.Sprintf("[sk-%s***%s] 用户余额已用尽，当前余额: %d", keyPrefix, keySuffix, userQuota))
+				// 自动更新Token状态为已耗尽
+				token.Status = common.TokenStatusExhausted
+				token.SelectUpdate()
+				return token, errors.New(fmt.Sprintf("[sk-%s***%s] 令牌额度已用尽，当前余额: %d", keyPrefix, keySuffix, token.RemainQuota))
 			}
 		}
 		return token, nil
