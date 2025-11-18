@@ -130,45 +130,46 @@ func V2TokenAuthorize(c *gin.Context) {
 		// Token已存在，检查是否属于同一平台
 		tokenUser, err := model.GetUserById(existingToken.UserId, true)
 		if err == nil && tokenUser != nil && tokenUser.Username == platformUsername {
-			// 同一平台，更新额度
+			// 同一平台，更新为无限额度模式
 			oldQuota := existingToken.RemainQuota
-			quotaDiff := req.InitialQuota - oldQuota
 
-			err = model.UpdateTokenQuota(existingToken.Id, req.InitialQuota)
+			// V2平台Token统一设置为无限额度
+			err = model.DB.Model(existingToken).Updates(map[string]interface{}{
+				"unlimited_quota": true,
+				"remain_quota":    0,
+			}).Error
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"success":   false,
-					"message":   "额度更新失败：" + err.Error(),
+					"message":   "Token更新失败：" + err.Error(),
 					"error_code": "INTERNAL_ERROR",
 				})
 				return
 			}
 
 			// 记录额度变更日志
-			if quotaDiff > 0 {
-				topupLog := &model.Log{
-					UserId:    user.Id,
-					TokenName: req.TokenKey,
-					Type:      model.LogTypeTopup,
-					Content:   fmt.Sprintf("v2平台密钥授权充值 +%d quota", quotaDiff),
-					Quota:     quotaDiff,
-					Other:     fmt.Sprintf("platform_id:%s", req.PlatformId),
-				}
-				if metadata, err := json.Marshal(req.Metadata); err == nil {
-					topupLog.Other += fmt.Sprintf(";metadata:%s", string(metadata))
-				}
-				model.LOG_DB.Create(topupLog)
+			topupLog := &model.Log{
+				UserId:    user.Id,
+				TokenName: req.TokenKey,
+				Type:      model.LogTypeTopup,
+				Content:   "v2平台密钥更新为无限额度模式",
+				Quota:     0,
+				Other:     fmt.Sprintf("platform_id:%s", req.PlatformId),
 			}
+			if metadata, err := json.Marshal(req.Metadata); err == nil {
+				topupLog.Other += fmt.Sprintf(";metadata:%s", string(metadata))
+			}
+			model.LOG_DB.Create(topupLog)
 
 			response := V2TokenAuthorizeResponse{
 				Success: true,
-				Message: "密钥已存在，额度已更新",
+				Message: "密钥已存在，已更新为无限额度模式",
 			}
 			response.Data.TokenKey = req.TokenKey
 			response.Data.PreviousQuota = oldQuota
-			response.Data.CurrentQuota = req.InitialQuota
-			response.Data.QuotaAdded = quotaDiff
-			response.Data.Status = "updated"
+			response.Data.CurrentQuota = 0 // 无限额度模式下设为0
+			response.Data.QuotaAdded = 0
+			response.Data.Status = "updated_unlimited"
 			response.Data.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 			response.Data.ProxyUserId = user.Id
 
@@ -186,15 +187,17 @@ func V2TokenAuthorize(c *gin.Context) {
 
 	// 创建新token
 	// 重要：去掉 sk- 前缀后存储，因为 middleware/auth.go 验证时会去掉 sk- 前缀
+	// V2平台Token使用无限额度（平台自己管理计费）
 	tokenKey := strings.TrimPrefix(req.TokenKey, "sk-")
 	token := &model.Token{
-		UserId:      user.Id,
-		Key:         tokenKey,
-		Name:        fmt.Sprintf("v2-platform-%s-token", req.PlatformId),
-		RemainQuota: req.InitialQuota,
-		UsedQuota:   0,
-		CreatedTime: time.Now().Unix(),
-		Status:      1, // common.TokenStatusEnabled
+		UserId:         user.Id,
+		Key:            tokenKey,
+		Name:           fmt.Sprintf("v2-platform-%s-token", req.PlatformId),
+		UnlimitedQuota: true, // V2平台Token使用无限额度
+		RemainQuota:    0,    // 无限额度时设为0
+		UsedQuota:      0,
+		CreatedTime:    time.Now().Unix(),
+		Status:         1, // common.TokenStatusEnabled
 	}
 
 	err = model.DB.Create(token).Error
@@ -341,6 +344,18 @@ func V2GetPlatformLogs(c *gin.Context) {
 	response.Data.PlatformId = platformId
 	response.Data.DateRange.StartDate = startDate
 	response.Data.DateRange.EndDate = endDate
+
+	// 初始化logs数组为空数组（而非nil）
+	response.Data.Logs = make([]struct {
+		LogId            string `json:"log_id"`
+		Time             string `json:"time"`
+		TokenKey         string `json:"token_key"`
+		ModelName        string `json:"model_name"`
+		PromptTokens     int    `json:"prompt_tokens"`
+		CompletionTokens int    `json:"completion_tokens"`
+		TotalTokens      int    `json:"total_tokens"`
+		QuotaCost        int    `json:"quota_cost"`
+	}, 0)
 
 	// 转换日志格式
 	for _, log := range logs {
