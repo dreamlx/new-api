@@ -132,10 +132,16 @@ make test-user-story   # 测试完整业务流程
 ### 数据库管理
 
 ```bash
-make db-init      # 初始化外部用户系统数据库
+make db-init      # 初始化外部用户系统数据库（首次部署）
 make db-backup    # 备份开发数据库
 make db-reset     # 重置数据库（危险操作，需确认）
 ```
+
+**重要说明**：
+- ✅ **新增字段无需手动执行SQL**：项目使用 GORM 自动迁移
+- ✅ **首次启动自动创建**：后端服务启动时会自动检测并创建新字段
+- ✅ **增量更新安全**：已存在的字段不会重复创建
+- ⚠️ `make db-init` 仅用于首次部署或需要确保外部用户字段存在时
 
 ### 其他命令
 
@@ -193,6 +199,225 @@ vim .env.local
 | `GIN_MODE` | Gin运行模式 | `debug` (开发环境) |
 | `TZ` | 时区设置 | `Asia/Shanghai` |
 | `ERROR_LOG_ENABLED` | 是否启用错误日志 | `true` |
+
+---
+
+## 🗄️ 数据库迁移机制
+
+### GORM 自动迁移
+
+项目使用 **GORM AutoMigrate** 自动管理数据库结构变更，**无需手动执行SQL脚本**。
+
+#### 工作原理
+
+```
+启动后端服务
+  ↓
+GORM 读取模型定义（model/*.go）
+  ↓
+检测数据库当前结构
+  ↓
+自动创建缺失的表和字段
+  ↓
+服务正常启动
+```
+
+#### 支持的操作
+
+✅ **自动创建新表**：首次启动时创建所有表
+✅ **自动添加新字段**：模型新增字段时自动创建
+✅ **幂等性保证**：重复执行安全，不会重复创建
+✅ **多数据库支持**：MySQL、PostgreSQL、SQLite
+
+#### 涉及的模型
+
+```go
+// model/main.go
+DB.AutoMigrate(
+    &Channel{},
+    &Token{},             // ✅ 包含 callback_url, callback_enabled, callback_secret
+    &User{},              // ✅ 包含 external_user_id 等外部用户字段
+    &Option{},
+    &Redemption{},
+    // ...
+)
+```
+
+#### 最新字段变更（Callback功能）
+
+**Token表新增字段**：
+- `callback_url` - varchar(500) - 回调URL
+- `callback_enabled` - boolean - 是否启用回调
+- `callback_secret` - varchar(64) - 回调签名密钥
+
+**迁移方式**：
+```bash
+# 无需任何操作，直接启动服务即可
+make start
+
+# 首次启动会自动创建这些字段
+# 已存在的字段不会重复创建
+```
+
+#### 验证字段是否创建
+
+```bash
+# 方式1：通过MySQL客户端
+mysql -h 127.0.0.1 -P 3307 -u root -pdev123456 new_api_dev \
+  -e "DESCRIBE tokens;" | grep callback
+
+# 方式2：查看后端启动日志
+# 应该看到类似输出：
+# [GORM] migrating schema for Token
+```
+
+#### 何时需要手动SQL脚本？
+
+**几乎不需要**，除非：
+- ⚠️ 首次部署需要确保外部用户字段（可选）
+- ⚠️ 需要创建特殊索引（GORM自动创建常规索引）
+- ⚠️ 需要修改已存在字段的类型（需谨慎操作）
+
+---
+
+## 🔄 Token独立额度迁移
+
+### 重要说明
+
+**Token独立额度机制**是一个重大架构变更，涉及：
+1. **代码逻辑变更**：从共享用户余额改为Token独立额度
+2. **数据迁移**：需要将现有Token的余额从用户迁移到Token
+
+### 迁移前后对比
+
+**迁移前（共享用户余额）**：
+```
+User.Quota = $100
+  ↓
+多个Token共享这$100
+  ↓
+任何Token消费都扣User.Quota
+```
+
+**迁移后（Token独立额度）**：
+```
+User.Quota = $100 → 分配给Token
+  ↓
+Token1.RemainQuota = $20
+Token2.RemainQuota = $30
+Token3.RemainQuota = $50
+  ↓
+每个Token消费扣自己的RemainQuota
+```
+
+### 何时需要迁移？
+
+**新项目**：
+- ✅ 无需迁移，直接使用最新代码
+- ✅ 创建Token时分配`allocated_quota`即可
+
+**现有项目升级**：
+- ⚠️ **必须执行迁移脚本**
+- ⚠️ 否则会出现"Token余额不足"错误
+- ⚠️ 现有Token的`RemainQuota`为0，需要从用户余额分配
+
+### 迁移步骤
+
+#### 1. 开发环境迁移
+
+```bash
+# 进入项目目录
+cd /Users/dreamlinx/Dropbox/Projects/NetBeansProjects/new-api
+
+# 执行迁移脚本（会提示确认）
+./scripts/migrate-token-quota.sh \
+    -d mysql \
+    -H localhost \
+    -P 3307 \
+    -u root \
+    -D new_api_dev
+
+# 输入数据库密码：dev123456
+# 确认迁移：输入 yes
+```
+
+#### 2. 生产环境迁移（推荐步骤）
+
+```bash
+# 步骤1：Dry-run模拟执行，查看影响
+./scripts/migrate-token-quota.sh \
+    -d mysql \
+    -H your-db-host \
+    -P 3306 \
+    -u root \
+    -D new_api_prod \
+    --dry-run
+
+# 步骤2：生成SQL文件供审查
+./scripts/migrate-token-quota.sh \
+    -d mysql \
+    -s /tmp/migration.sql
+
+# 步骤3：备份数据库（自动备份到./backups）
+# 或手动备份：
+mysqldump -h host -u root -p new_api_prod > backup_$(date +%Y%m%d).sql
+
+# 步骤4：执行迁移
+./scripts/migrate-token-quota.sh \
+    -d mysql \
+    -H your-db-host \
+    -P 3306 \
+    -u root \
+    -D new_api_prod
+
+# 步骤5：验证迁移结果
+mysql -h your-db-host -u root -p new_api_prod \
+  -e "SELECT id, name, remain_quota FROM tokens LIMIT 5;"
+```
+
+### 迁移脚本功能
+
+**自动处理**：
+- ✅ 单Token用户：获得100%用户余额（最少$20）
+- ✅ 多Token用户：按比例平均分配（每个最少$20）
+- ✅ V2平台Token：自动跳过（UnlimitedQuota=true）
+- ✅ 数据库备份：自动备份到`./backups`目录
+- ✅ 验证输出：显示迁移统计信息
+
+**详细文档**：
+- 完整迁移指南：`docs/token-quota-migration-guide.md`
+- 实施总结：`docs/token-independent-quota-implementation-summary.md`
+- 测试脚本：`scripts/test-v1-token-quota.sh`
+
+### 迁移后验证
+
+```bash
+# 1. 检查Token余额
+mysql -h 127.0.0.1 -P 3307 -u root -pdev123456 new_api_dev \
+  -e "SELECT id, name, remain_quota,
+      CONCAT('$', ROUND(remain_quota/500000, 2)) as balance_usd
+      FROM tokens WHERE unlimited_quota = 0 LIMIT 10;"
+
+# 2. 运行自动化测试
+bash scripts/test-v1-token-quota.sh
+
+# 3. 测试完整业务流程
+bash scripts/test-user-story.sh
+```
+
+### 常见问题
+
+**Q: 新创建的Token需要迁移吗？**
+- A: 不需要。使用最新代码创建Token时会自动设置`RemainQuota`
+
+**Q: 迁移脚本是幂等的吗？**
+- A: 不是。重复执行会再次分配额度，不推荐
+
+**Q: 迁移失败怎么办？**
+- A: 使用自动备份恢复：`mysql -u root -p db_name < backups/backup_xxx.sql`
+
+**Q: V2 API的Token需要迁移吗？**
+- A: 不需要。迁移脚本会自动跳过`UnlimitedQuota=true`的Token
 
 ---
 
@@ -448,9 +673,105 @@ make dev
 bash scripts/test-user-story.sh
 ```
 
+#### 6. 新字段未创建（数据库迁移问题）
+
+**症状：**
+- API报错 `Error 1054: Unknown column 'callback_url' in 'field list'`
+- 或其他新字段不存在的错误
+
+**原因：** GORM自动迁移未正常执行
+
+**诊断：**
+```bash
+# 检查tokens表是否有callback字段
+mysql -h 127.0.0.1 -P 3307 -u root -pdev123456 new_api_dev \
+  -e "DESCRIBE tokens;" | grep callback
+
+# 应该看到3个字段：
+# callback_url
+# callback_enabled
+# callback_secret
+```
+
+**解决方式1（推荐）：重启后端**
+```bash
+# 停止服务
+make stop
+
+# 重新启动，GORM会自动创建缺失字段
+make start
+
+# 查看启动日志，确认迁移执行
+# 应该看到类似：[GORM] migrating schema...
+```
+
+**解决方式2（手动创建，不推荐）：**
+```bash
+# 仅在自动迁移失败时使用
+mysql -h 127.0.0.1 -P 3307 -u root -pdev123456 new_api_dev
+
+# 手动添加callback字段
+ALTER TABLE tokens ADD COLUMN callback_url VARCHAR(500) DEFAULT '';
+ALTER TABLE tokens ADD COLUMN callback_enabled BOOLEAN DEFAULT false;
+ALTER TABLE tokens ADD COLUMN callback_secret VARCHAR(64) DEFAULT '';
+CREATE INDEX idx_tokens_callback_enabled ON tokens(callback_enabled);
+```
+
+**预防：**
+- ✅ 拉取最新代码后，重启后端服务
+- ✅ 不要手动修改数据库结构（让GORM管理）
+- ✅ 首次部署可运行 `make db-init` 确保基础字段存在
+
 **验证修复：**
 - 充值日志应该显示正确的 `spend` 金额（负数表示充值）
 - 例如：充值 $20 应显示为 `spend: -20`
+
+#### 7. Token余额不足错误（Token独立额度迁移）
+
+**症状：**
+- API调用报错：`Token余额不足，当前余额: $0.00，需要: $0.01`
+- 或报错：`Token余额不足 (insufficient token quota)`
+- 用户明明充值过，但Token无法使用
+
+**根本原因：**
+- 项目从**共享用户余额模式**升级到**Token独立额度模式**
+- 旧Token的`remain_quota`为0，需要执行数据迁移
+
+**诊断：**
+```bash
+# 检查Token余额
+mysql -h 127.0.0.1 -P 3307 -u root -pdev123456 new_api_dev \
+  -e "SELECT id, name, remain_quota, unlimited_quota FROM tokens LIMIT 5;"
+
+# 如果remain_quota全部为0，且unlimited_quota为0，需要迁移
+```
+
+**解决：执行Token独立额度迁移**
+```bash
+# 查看详细迁移指南
+cat docs/token-quota-migration-guide.md
+
+# 执行迁移脚本
+./scripts/migrate-token-quota.sh \
+    -d mysql \
+    -H localhost \
+    -P 3307 \
+    -u root \
+    -D new_api_dev
+
+# 验证迁移成功
+mysql -h 127.0.0.1 -P 3307 -u root -pdev123456 new_api_dev \
+  -e "SELECT id, name, remain_quota,
+      CONCAT('$', ROUND(remain_quota/500000, 2)) as balance_usd
+      FROM tokens WHERE unlimited_quota = 0 LIMIT 5;"
+```
+
+**完整说明：** 参见 [Token独立额度迁移](#-token独立额度迁移) 章节
+
+**预防：**
+- ✅ 升级项目前阅读迁移指南
+- ✅ 使用 `--dry-run` 模式预览影响
+- ✅ 生产环境执行前先备份数据库
 
 #### 6. 前端构建失败
 
@@ -832,18 +1153,32 @@ golangci-lint run
 
 ---
 
-**开发指南版本：v3.2**
-**最后更新：2025-09-30**
+**开发指南版本：v3.4**
+**最后更新：2025-11-18**
 **基于 Make + Docker Compose 工作流**
 
-**v3.2 更新内容**：
+**v3.4 更新内容**（2025-11-18）：
+- ✅ 新增"Token独立额度迁移"完整章节（140行）
+- ✅ 说明Token独立额度的架构变更和迁移必要性
+- ✅ 提供开发环境和生产环境的详细迁移步骤
+- ✅ 新增故障排除：Token余额不足错误（迁移问题）
+- ✅ 补充迁移常见问题FAQ
+
+**v3.3 更新内容**（2025-11-18）：
+- ✅ 新增"数据库迁移机制"章节（GORM自动迁移说明）
+- ✅ 说明Callback功能的数据库字段自动创建
+- ✅ 更新数据库管理命令说明（强调自动迁移）
+- ✅ 新增故障排除：数据库字段未创建问题
+- ✅ 明确无需手动执行SQL脚本的场景
+
+**v3.2 更新内容**（2025-09-30）：
 - ✅ 新增"服务器后台运行"章节
 - ✅ 添加 `make start-daemon` 后台启动命令
 - ✅ 详细说明 tmux 使用方法和快捷键
 - ✅ 提供方案对比表格（make daemon vs tmux）
 - ✅ 补充 screen 和 systemd 参考方案
 
-**v3.1 更新内容**：
+**v3.1 更新内容**（2025-09-30）：
 - ✅ 添加环境变量配置说明（`.env.dev`）
 - ✅ 更新 `make start` 命令说明（优先使用 `.env.dev`）
 - ✅ 添加 `make start-backend` 兼容性说明

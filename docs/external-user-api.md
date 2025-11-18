@@ -1,8 +1,101 @@
-# 外部用户系统集成 API 文档
+# 外部用户系统集成 API 文档 (V1 - 个人用户)
+
+**📖 文档导航**：[← 返回API总览](external-api-overview.md) | [V2平台API →](external-user-api-v2.md)
+
+---
 
 ## 项目概述
 
-本文档描述了 New API 的外部用户系统集成方案，允许前端平台通过 API 与 New API 进行用户数据同步、充值管理和 Access Key 管理。
+本文档描述了 New API 的 **V1 个人用户**集成方案，允许前端平台通过 API 与 New API 进行用户数据同步、充值管理和 Token 管理。
+
+**适用场景**：
+- ✅ 前端用户系统集成（微信、支付宝、邮箱等登录）
+- ✅ 用户充值和余额管理
+- ✅ Token独立额度控制
+- ✅ 每个用户可创建多个Token
+
+**如果你需要平台级别的集成（下游平台、无限额度Token）**，请查看 [V2 平台Token API文档](external-user-api-v2.md)。
+
+---
+
+## 🚀 快速开始（5分钟上手）
+
+### 完整流程示例
+
+以用户 Amos 的使用流程为例：
+
+```bash
+# 1. 用户微信登录后同步到 New API
+curl -X POST "http://localhost:3000/api/user/external/sync" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "amos_wechat_123",
+    "username": "amos_chen",
+    "display_name": "Amos Chen",
+    "email": "amos@example.com",
+    "wechat_openid": "wx_openid_12345",
+    "login_type": "wechat"
+  }'
+
+# 2. 用户充值 $50
+curl -X POST "http://localhost:3000/api/user/external/topup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "amos_wechat_123",
+    "amount_usd": 50,
+    "payment_id": "stripe_pi_1234567890"
+  }'
+# 响应：current_quota: 25000000 ($50)
+
+# 3. 创建 Token（分配$20额度）
+curl -X POST "http://localhost:3000/api/user/external/token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "amos_wechat_123",
+    "token_name": "我的聊天应用",
+    "allocated_quota": 10000000,
+    "expires_in_days": 365
+  }'
+# 响应：access_key: "sk-xxxxxxxxxxxx", remain_quota: 10000000
+
+# 4. 用户使用 Token 调用 LLM API
+curl -X POST "http://localhost:3000/v1/chat/completions" \
+  -H "Authorization: Bearer sk-xxxxxxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-chat",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# 5. 查看用户统计
+curl "http://localhost:3000/api/user/external/amos_wechat_123/stats"
+# 响应：current_quota: 15000000 ($30剩余)
+
+# 6. 查询消费记录
+curl "http://localhost:3000/api/user/external/amos_wechat_123/logs?page=1&limit=10"
+```
+
+**关键数据验证**：
+- 充值：$50 = 25,000,000 quota
+- 分配给Token：$20 = 10,000,000 quota
+- 用户剩余：$30 = 15,000,000 quota
+
+### 测试脚本
+
+```bash
+# 自动化测试（所有7个接口）
+bash scripts/test-v1-token-quota.sh
+
+# 真实curl测试
+bash /tmp/real-api-test.sh
+
+# 查看测试报告
+cat /tmp/real-api-test-report.md
+```
+
+**测试结果**：19/19 通过 ✅
+
+---
 
 ## 设计架构
 
@@ -12,6 +105,19 @@
 - **映射机制**：通过 `external_user_id` 建立前端用户与 New API 用户的关联
 
 ### 计费策略
+
+⚠️ **2025-11-18更新**：Token独立额度模式
+
+#### Token独立额度架构
+- **Token独立计费**：每个Token拥有独立的 `RemainQuota`，消耗各自额度
+- **User余额池**：User充值到余额池，手动分配额度给Token
+- **额度分配机制**：
+  1. User充值 → `User.Quota` 增加
+  2. 创建Token时从 `User.Quota` 扣除，分配给 `Token.RemainQuota`
+  3. Token消费时只扣减自己的 `Token.RemainQuota`
+  4. Token之间互不影响，独立计费
+
+#### 货币和额度
 - **货币统一**：前端收款任意货币 → 支付网关转换 → 后端只接收美元
 - **汇率处理**：完全由前端网站和支付网关负责，New API 不处理汇率转换
 - **计费逻辑**：$1 USD = 500,000 quota（使用 `common.QuotaPerUnit`）
@@ -19,6 +125,13 @@
   ```
   消耗quota = 分组倍率 × 模型倍率 × (输入tokens + 输出tokens × 补全倍率)
   ```
+
+#### V1 vs V2 Token差异
+| 特性 | V1 Token | V2 Token (平台) |
+|------|----------|----------------|
+| 额度模式 | 独立额度（RemainQuota） | 无限额度（UnlimitedQuota=true） |
+| 计费主体 | New API计费 | 平台自己计费 |
+| 适用场景 | 个人用户 | 下游平台（如asd） |
 
 ## API 接口
 
@@ -124,6 +237,9 @@ Content-Type: application/json
 ### 3. Token 管理接口
 
 #### 3.1 创建 Access Key
+
+⚠️ **重要变更**（2025-11-18）：新增必填参数 `allocated_quota`，用于从用户余额分配额度给Token（Token独立额度模式）
+
 ```http
 POST /api/user/external/token
 Content-Type: application/json
@@ -134,11 +250,45 @@ Content-Type: application/json
 {
   "external_user_id": "string, required, 外部用户ID",
   "token_name": "string, required, Token名称",
-  "expires_in_days": "number, optional, 有效期天数，默认365"
+  "allocated_quota": "number, required, 从User余额分配给Token的额度",
+  "expires_in_days": "number, optional, 有效期天数，默认365",
+
+  "callback_url": "string, optional, 🆕 回调URL（用于实时消费通知）",
+  "callback_enabled": "boolean, optional, 🆕 是否启用回调，默认false",
+  "callback_secret": "string, optional, 🆕 回调密钥（暂不使用，预留）"
 }
 ```
 
-**响应示例**:
+**🆕 Callback回调参数说明**（可选功能）:
+- `callback_url`: 下游平台接收消费通知的URL
+  - 示例：`https://cec.example.com/api/consume-notify`
+  - Token消费时会异步POST回调
+- `callback_enabled`: 是否启用回调功能
+  - 默认：false（不启用）
+  - 适用场景：CEC等下游平台需要实时统计
+- `callback_secret`: 回调签名密钥
+  - 当前版本暂不使用（使用IP白名单保护）
+  - 预留字段，未来可用于HMAC签名验证
+
+**使用示例**：
+```json
+{
+  "external_user_id": "cec_user_123",
+  "token_name": "CEC用户Token",
+  "allocated_quota": 10000000,
+  "callback_url": "https://cec.example.com/api/consume-notify",
+  "callback_enabled": true
+}
+```
+
+**字段说明**:
+- `allocated_quota`: **必填**，分配给Token的额度（单位：quota）
+  - 此额度将从用户余额中扣除
+  - 最小值：0（但建议至少10,000,000，即$20）
+  - 最大值：不能超过用户当前余额
+  - 示例：10,000,000 = $20 USD
+
+**响应示例**（普通Token）:
 ```json
 {
   "success": true,
@@ -148,10 +298,43 @@ Content-Type: application/json
     "access_key": "sk-xxxxxxxxxxxxxxxxxxxx",
     "token_name": "My API Token",
     "expires_at": 1767195600,
-    "remain_quota": 5000000
+    "remain_quota": 10000000
   }
 }
 ```
+
+**响应示例**（带Callback的Token）:
+```json
+{
+  "success": true,
+  "message": "Token创建成功",
+  "data": {
+    "token_id": 132,
+    "access_key": "sk-xxxxxxxxxxxxxxxxxxxx",
+    "token_name": "CEC用户Token",
+    "expires_at": 1767195600,
+    "remain_quota": 10000000,
+    "callback_enabled": true,
+    "callback_url_masked": "https://cec.example.com/***"
+  }
+}
+```
+
+**错误示例**:
+```json
+{
+  "success": false,
+  "message": "用户余额不足，当前余额: 5000000，请求分配: 10000000"
+}
+```
+
+**注意事项**:
+1. Token创建采用**数据库事务**保证原子性：
+   - 从User余额扣除 `allocated_quota`
+   - 为Token分配相同额度
+   - 任一步骤失败则全部回滚
+2. Token余额**独立计费**，消耗Token自身的 `RemainQuota`，不影响其他Token
+3. User余额扣减后，剩余额度可继续分配给其他新Token
 
 #### 3.2 删除 Access Key
 ```http
@@ -763,6 +946,140 @@ CREATE UNIQUE INDEX idx_users_external_user_id ON users(external_user_id);
 - balance_capacity 计算经过优化，支持实时计费展示
 - 错误处理详细但不影响性能
 
+## ❓ 常见问题 (FAQ)
+
+### Q1: 为什么Token创建需要allocated_quota参数？
+**A**: V1 API采用Token独立额度模式：
+- 每个Token有自己的`RemainQuota`
+- 创建Token时从用户余额池扣除并分配给Token
+- Token消费时只扣减自己的额度，互不影响
+
+**示例**：
+```
+用户充值 $100 → User.Quota = 50,000,000
+创建Token1分配$30 → Token1.RemainQuota = 15,000,000
+创建Token2分配$20 → Token2.RemainQuota = 10,000,000
+用户剩余 $50 → User.Quota = 25,000,000
+```
+
+### Q2: 用户余额用完后Token还能用吗？
+**A**: 能！Token余额独立于用户余额：
+- Token创建时已经从用户余额扣除并分配
+- Token消费时只扣减自己的`RemainQuota`
+- 用户余额为0不影响已创建Token的使用
+
+### Q3: 如何计算分配多少quota给Token？
+**A**: 根据用户需求和模型价格估算：
+```
+deepseek-chat 示例：
+- 输入：135 quota/1K tokens
+- 输出：540 quota/1K tokens
+- 10,000,000 quota ($20) ≈ 74,000次输入（1K tokens/次）
+
+qwen-turbo 示例：
+- 输入：857 quota/1K tokens
+- 10,000,000 quota ($20) ≈ 11,600次输入（1K tokens/次）
+```
+
+### Q4: Token额度用完了怎么办？
+**A**: 有两种方案：
+1. **创建新Token**：用户如果有余额，可以创建新Token并分配额度
+2. **无法续费**：现有Token额度用完后无法充值续费，只能创建新Token
+
+### Q5: 能否修改Token的allocated_quota？
+**A**: 不能。Token创建后：
+- ❌ 不支持额度修改或追加
+- ❌ 不支持额度回收到用户余额
+- ✅ 只能查看剩余额度（remain_quota）
+- ✅ 可以删除Token（但额度不退还）
+
+### Q6: V1和V2 API有什么区别？
+**A**: 核心区别在于计费模式：
+
+| 维度 | V1 (本文档) | V2 平台API |
+|------|-------------|-----------|
+| Token额度 | 独立额度 | 无限额度 |
+| 计费主体 | New API | 平台自己 |
+| 适用场景 | 个人用户前端 | 下游平台集成 |
+| Token生成 | New API | 平台自己 |
+
+👉 查看 [V2平台API文档](external-user-api-v2.md)
+
+### Q7: 充值记录为什么显示负数？
+**A**: 这是设计上的特性：
+- 消费记录：`spend > 0`（正数）
+- 充值记录：`spend < 0`（负数）
+- 便于前端区分类型和计算总花费
+
+**示例**：
+```json
+{
+  "type": "consume",
+  "spend": 2.5    // 消费$2.5
+},
+{
+  "type": "topup",
+  "spend": -50    // 充值$50
+}
+```
+
+### Q8: 如何处理余额不足的错误？
+**A**: 创建Token时如果余额不足，API会返回明确错误：
+```json
+{
+  "success": false,
+  "message": "用户余额不足，当前余额: 5000000，请求分配: 10000000"
+}
+```
+
+**解决方案**：
+1. 提示用户充值
+2. 减少Token分配额度
+3. 删除不用的Token（但额度不退还）
+
+### Q9: Token验证接口有缓存吗？
+**A**: 是的，有Redis缓存：
+- ⚠️ 刚删除的Token可能因缓存暂时仍显示有效
+- ⏱️ 几分钟后缓存失效，Token会正确显示无效
+- 💡 重要业务逻辑不要完全依赖验证接口
+
+### Q10: 🆕 什么是Callback回调功能？
+**A**: V1 API的可选扩展功能，适用于下游平台集成：
+
+**工作原理**：
+- Token创建时配置`callback_url`（可选）
+- Token消费时自动异步POST通知到callback_url
+- 下游平台接收通知后自己做统计汇总
+
+**适用场景**：
+- ✅ CEC等下游平台需要实时接收消费通知
+- ✅ 平台需要按用户+Token维度统计（"Agent消费"）
+- ✅ 平台需要自己做二次计费
+
+**不适用场景**：
+- ❌ 前端个人用户应用（直接查询消费记录即可）
+
+**详细文档**：[callback-feature.md](callback-feature.md)
+
+### Q11: 🆕 Callback回调如何保证安全？
+**A**: 使用IP白名单保护（Nginx层配置）：
+
+**推荐方案**：
+```nginx
+location /api/consume-notify {
+    allow 1.2.3.4;       # CEC服务器IP
+    allow 5.6.7.8/24;    # CEC服务器IP段
+    deny all;
+    proxy_pass http://backend;
+}
+```
+
+**注意**：
+- callback_secret字段已预留但当前不使用
+- 未来如需HMAC签名验证，可升级实现
+
+---
+
 ## 注意事项
 
 1. **货币处理**：所有金额必须是美元，前端负责货币转换
@@ -774,10 +1091,11 @@ CREATE UNIQUE INDEX idx_users_external_user_id ON users(external_user_id);
 7. **模型显示**：只显示当前启用渠道的模型，测试模型优先显示
 8. **实时性**：渠道启用/禁用会立即反映在 API 响应中
 9. **Token 管理**：
-   - 统计接口返回完整的 Access Key，前端可自行决定是否隐藏显示
+   - Token列表接口返回脱敏密钥（前8位+后4位），前端可安全显示
    - 用户可以自由创建和删除自己的 Token
    - 删除 Token 后立即失效，无法恢复
    - Token 删除只能由该 Token 的所有者执行
+   - Token额度用完后无法续费，只能创建新Token
 
 ## 开发工具
 
