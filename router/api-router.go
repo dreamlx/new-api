@@ -112,7 +112,7 @@ func SetApiRouter(router *gin.Engine) {
 				externalRoute.POST("/sync", controller.SyncExternalUser)
 				externalRoute.POST("/topup", controller.ExternalUserTopUp)
 				externalRoute.POST("/token", controller.CreateExternalUserToken)
-				externalRoute.DELETE("/token", controller.DeleteExternalUserToken)           // 删除Token
+				externalRoute.DELETE("/:external_user_id/token/:token_id", controller.DeleteExternalUserToken) // 删除Token（RESTful）
 				externalRoute.GET("/:external_user_id/tokens", controller.GetExternalUserTokens)  // 获取用户所有Token列表
 				externalRoute.POST("/token/verify", controller.VerifyExternalUserToken)      // 验证Token有效性
 				externalRoute.GET("/:external_user_id/stats", controller.GetExternalUserStats)

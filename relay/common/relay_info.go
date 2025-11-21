@@ -78,6 +78,7 @@ type RelayInfo struct {
 	UsingGroup        string // 使用的分组
 	UserGroup         string // 用户所在分组
 	TokenUnlimited    bool
+	DeductUserQuota   bool   // V1无限额度Token扣用户余额
 	StartTime         time.Time
 	FirstResponseTime time.Time
 	isFirstResponse   bool
@@ -388,9 +389,10 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 		PromptTokens:    common.GetContextKeyInt(c, constant.ContextKeyPromptTokens),
 
-		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
-		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
-		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+		TokenId:         common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+		TokenKey:        common.GetContextKeyString(c, constant.ContextKeyTokenKey),
+		TokenUnlimited:  common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+		DeductUserQuota: common.GetContextKeyBool(c, constant.ContextKeyDeductUserQuota),
 
 		isFirstResponse: true,
 		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),

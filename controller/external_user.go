@@ -7,6 +7,7 @@ import (
 	"one-api/common"
 	"one-api/model"
 	"one-api/setting/ratio_setting"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,7 +69,8 @@ type ExternalUserTopUpResponse struct {
 type ExternalUserTokenRequest struct {
 	ExternalUserId  string `json:"external_user_id" binding:"required,min=1,max=100"`
 	TokenName       string `json:"token_name" binding:"required,min=1,max=100"`
-	AllocatedQuota  int    `json:"allocated_quota" binding:"required,min=0"` // 从User余额分配给Token的额度
+	AllocatedQuota  int    `json:"allocated_quota"` // 从User余额分配给Token的额度（独立额度模式必填）
+	UnlimitedQuota  bool   `json:"unlimited_quota"` // 无限额度模式（扣用户余额）
 	ExpiresInDays   int    `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
 	CallbackUrl     string `json:"callback_url" binding:"omitempty,max=500"`     // 回调URL（可选）
 	CallbackEnabled bool   `json:"callback_enabled"`                             // 是否启用回调（可选）
@@ -85,6 +87,7 @@ type ExternalUserTokenResponse struct {
 		TokenName         string `json:"token_name"`
 		ExpiresAt         int64  `json:"expires_at"`
 		RemainQuota       int    `json:"remain_quota"`
+		UnlimitedQuota    bool   `json:"unlimited_quota,omitempty"`     // 是否为无限额度Token
 		CallbackEnabled   bool   `json:"callback_enabled,omitempty"`    // 是否启用回调
 		CallbackUrlMasked string `json:"callback_url_masked,omitempty"` // 脱敏显示的回调URL
 	} `json:"data"`
@@ -341,8 +344,17 @@ func CreateExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	// 验证用户余额是否足够分配
-	if user.Quota < req.AllocatedQuota {
+	// 参数验证：非无限额度模式必须提供allocated_quota
+	if !req.UnlimitedQuota && req.AllocatedQuota <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "独立额度模式必须提供allocated_quota参数",
+		})
+		return
+	}
+
+	// 独立额度模式：验证用户余额是否足够分配
+	if !req.UnlimitedQuota && user.Quota < req.AllocatedQuota {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": fmt.Sprintf("用户余额不足，当前余额: %d，请求分配: %d", user.Quota, req.AllocatedQuota),
@@ -356,7 +368,7 @@ func CreateExternalUserToken(c *gin.Context) {
 		expiresInDays = 365
 	}
 
-	// 使用事务：从User扣除额度，分配给Token
+	// 使用事务
 	tx := model.DB.Begin()
 	defer func() {
 		if r := recover(); r != nil {
@@ -364,18 +376,20 @@ func CreateExternalUserToken(c *gin.Context) {
 		}
 	}()
 
-	// 1. 从User扣除额度
-	if err := tx.Model(user).Update("quota", user.Quota-req.AllocatedQuota).Error; err != nil {
-		tx.Rollback()
-		common.SysError("扣减用户额度失败: " + err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "扣减用户额度失败",
-		})
-		return
+	// 1. 独立额度模式：从User扣除额度
+	if !req.UnlimitedQuota {
+		if err := tx.Model(user).Update("quota", user.Quota-req.AllocatedQuota).Error; err != nil {
+			tx.Rollback()
+			common.SysError("扣减用户额度失败: " + err.Error())
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "扣减用户额度失败",
+			})
+			return
+		}
 	}
 
-	// 2. 创建Token并分配额度
+	// 2. 创建Token
 	token := &model.Token{
 		UserId:          user.Id,
 		Key:             common.GetRandomString(32),
@@ -384,8 +398,9 @@ func CreateExternalUserToken(c *gin.Context) {
 		AccessedTime:    common.GetTimestamp(),
 		ExpiredTime:     common.GetTimestamp() + int64(expiresInDays*24*3600),
 		Status:          common.TokenStatusEnabled,
-		RemainQuota:     req.AllocatedQuota, // 使用分配的额度，不是user.Quota
-		UnlimitedQuota:  false,
+		RemainQuota:     req.AllocatedQuota, // 独立额度模式使用分配的额度，无限额度模式为0
+		UnlimitedQuota:  req.UnlimitedQuota, // 是否为无限额度Token
+		DeductUserQuota: req.UnlimitedQuota, // V1无限额度Token扣用户余额
 		CallbackUrl:     req.CallbackUrl,     // 回调URL
 		CallbackEnabled: req.CallbackEnabled, // 是否启用回调
 		CallbackSecret:  req.CallbackSecret,  // 回调签名密钥
@@ -413,8 +428,13 @@ func CreateExternalUserToken(c *gin.Context) {
 	}
 
 	// 记录日志
-	common.SysLog(fmt.Sprintf("为外部用户创建Token成功: %s, Token名称: %s, 分配额度: %d",
-		req.ExternalUserId, req.TokenName, req.AllocatedQuota))
+	if req.UnlimitedQuota {
+		common.SysLog(fmt.Sprintf("为外部用户创建无限额度Token成功: %s, Token名称: %s",
+			req.ExternalUserId, req.TokenName))
+	} else {
+		common.SysLog(fmt.Sprintf("为外部用户创建Token成功: %s, Token名称: %s, 分配额度: %d",
+			req.ExternalUserId, req.TokenName, req.AllocatedQuota))
+	}
 
 	// 构造响应
 	response := ExternalUserTokenResponse{
@@ -425,7 +445,8 @@ func CreateExternalUserToken(c *gin.Context) {
 	response.Data.AccessKey = "sk-" + token.Key
 	response.Data.TokenName = token.Name
 	response.Data.ExpiresAt = token.ExpiredTime
-	response.Data.RemainQuota = req.AllocatedQuota // 返回Token的额度，不是user剩余额度
+	response.Data.RemainQuota = req.AllocatedQuota // 独立额度模式返回Token的额度，无限额度模式为0
+	response.Data.UnlimitedQuota = req.UnlimitedQuota
 
 	// 如果启用了回调，返回脱敏的URL
 	if token.CallbackEnabled && token.CallbackUrl != "" {
@@ -457,20 +478,33 @@ type DeleteExternalUserTokenResponse struct {
 	} `json:"data"`
 }
 
-// 删除外部用户Token
+// 删除外部用户Token (RESTful路径参数版本)
+// DELETE /api/user/external/:external_user_id/token/:token_id
 func DeleteExternalUserToken(c *gin.Context) {
-	var req ExternalUserTokenDeleteRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	externalUserId := c.Param("external_user_id")
+	tokenIdStr := c.Param("token_id")
+
+	// 验证参数
+	if externalUserId == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "请求参数错误: " + err.Error(),
+			"message": "缺少external_user_id参数",
+		})
+		return
+	}
+
+	tokenId, err := strconv.Atoi(tokenIdStr)
+	if err != nil || tokenId <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的token_id参数",
 		})
 		return
 	}
 
 	// 查找用户
 	user := &model.User{}
-	if err := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(user).Error; err != nil {
+	if err := model.DB.Where("external_user_id = ?", externalUserId).First(user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "用户不存在",
@@ -480,7 +514,7 @@ func DeleteExternalUserToken(c *gin.Context) {
 
 	// 查找Token并验证所有权
 	token := &model.Token{}
-	if err := model.DB.Where("id = ? AND user_id = ?", req.TokenId, user.Id).First(token).Error; err != nil {
+	if err := model.DB.Where("id = ? AND user_id = ?", tokenId, user.Id).First(token).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "Token不存在或无权删除",
@@ -488,8 +522,8 @@ func DeleteExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	// 删除Token
-	if err := model.DB.Delete(token).Error; err != nil {
+	// 删除Token（使用Token.Delete()方法会自动清理缓存）
+	if err := token.Delete(); err != nil {
 		common.SysError("删除Token失败: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -500,14 +534,14 @@ func DeleteExternalUserToken(c *gin.Context) {
 
 	// 记录日志
 	common.SysLog(fmt.Sprintf("外部用户删除Token成功: %s, Token ID: %d, Token名称: %s",
-		req.ExternalUserId, req.TokenId, token.Name))
+		externalUserId, tokenId, token.Name))
 
 	// 构造响应
 	response := DeleteExternalUserTokenResponse{
 		Success: true,
 		Message: "Token删除成功",
 	}
-	response.Data.TokenId = req.TokenId
+	response.Data.TokenId = tokenId
 	response.Data.ExternalUserId = user.ExternalUserId
 
 	c.JSON(http.StatusOK, response)

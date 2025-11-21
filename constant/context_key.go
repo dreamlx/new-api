@@ -11,6 +11,7 @@ const (
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"
+	ContextKeyDeductUserQuota        ContextKey = "deduct_user_quota" // V1无限额度Token扣用户余额
 	ContextKeyTokenKey               ContextKey = "token_key"
 	ContextKeyTokenId                ContextKey = "token_id"
 	ContextKeyTokenGroup             ContextKey = "token_group"

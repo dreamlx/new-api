@@ -21,6 +21,7 @@ type Token struct {
 	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
 	RemainQuota        int            `json:"remain_quota" gorm:"default:0"`
 	UnlimitedQuota     bool           `json:"unlimited_quota"`
+	DeductUserQuota    bool           `json:"deduct_user_quota" gorm:"default:false"` // V1无限额度Token扣用户余额
 	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
 	ModelLimits        string         `json:"model_limits" gorm:"type:varchar(1024);default:''"`
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`

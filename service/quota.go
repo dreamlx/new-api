@@ -488,8 +488,9 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 }
 
 func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (err error) {
-	// Token独立额度，扣减或退还Token余额
+	// 根据Token类型选择扣费逻辑
 	if !relayInfo.TokenUnlimited {
+		// Token独立额度模式：扣减或退还Token余额
 		if quota > 0 {
 			err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
 		} else {
@@ -498,7 +499,18 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 		if err != nil {
 			return err
 		}
+	} else if relayInfo.DeductUserQuota {
+		// V1无限额度Token：扣减用户余额（不是Token余额）
+		if quota > 0 {
+			err = model.DecreaseUserQuota(relayInfo.UserId, quota)
+		} else {
+			err = model.IncreaseUserQuota(relayInfo.UserId, -quota, false)
+		}
+		if err != nil {
+			return err
+		}
 	}
+	// else: V2无限额度Token（TokenUnlimited=true && DeductUserQuota=false），不扣任何余额
 
 	if sendEmail {
 		if (quota + preConsumedQuota) != 0 {

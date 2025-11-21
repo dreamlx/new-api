@@ -250,16 +250,36 @@ Content-Type: application/json
 {
   "external_user_id": "string, required, 外部用户ID",
   "token_name": "string, required, Token名称",
-  "allocated_quota": "number, required, 从User余额分配给Token的额度",
+  "allocated_quota": "number, 条件必填, 从User余额分配给Token的额度（独立额度模式）",
+  "unlimited_quota": "boolean, optional, 🆕 是否为无限额度Token（扣用户余额）",
   "expires_in_days": "number, optional, 有效期天数，默认365",
 
-  "callback_url": "string, optional, 🆕 回调URL（用于实时消费通知）",
-  "callback_enabled": "boolean, optional, 🆕 是否启用回调，默认false",
-  "callback_secret": "string, optional, 🆕 回调密钥（暂不使用，预留）"
+  "callback_url": "string, optional, 回调URL（用于实时消费通知）",
+  "callback_enabled": "boolean, optional, 是否启用回调，默认false",
+  "callback_secret": "string, optional, 回调密钥（暂不使用，预留）"
 }
 ```
 
-**🆕 Callback回调参数说明**（可选功能）:
+**🆕 无限额度参数说明**（新功能）:
+- `unlimited_quota`: 是否创建无限额度Token
+  - 当为`true`时：`allocated_quota`参数忽略
+  - Token本身不限制额度，但消费**仍扣减用户余额**（User.Quota）
+  - 适用场景：不限制单个Token，但需要统计用户总消费
+
+**⚠️ V1与V2无限额度的区别**:
+
+| 维度 | V1无限额度Token | V2无限额度Token |
+|------|----------------|----------------|
+| 计费方式 | 扣User.Quota | 不扣任何余额 |
+| 用户余额 | 需要充值 | 不需要 |
+| New API统计 | ✅ 统计总消费 | ❌ 不统计 |
+| 适用场景 | 需要New API统计的小平台 | 完全自己计费的大平台 |
+
+> **类比理解**：
+> - V1无限额度 ≈ **信用卡**：刷卡不限额，但月底要还
+> - V2无限额度 ≈ **免费试用**：完全免费，平台自己赚钱
+
+**Callback回调参数说明**（可选功能）:
 - `callback_url`: 下游平台接收消费通知的URL
   - 示例：`https://cec.example.com/api/consume-notify`
   - Token消费时会异步POST回调
@@ -271,6 +291,28 @@ Content-Type: application/json
   - 预留字段，未来可用于HMAC签名验证
 
 **使用示例**：
+
+示例1：独立额度Token（推荐大多数场景）
+```json
+{
+  "external_user_id": "user_123",
+  "token_name": "我的应用Token",
+  "allocated_quota": 10000000
+}
+```
+
+示例2：无限额度Token（扣用户余额）
+```json
+{
+  "external_user_id": "platform_user_456",
+  "token_name": "平台无限Token",
+  "unlimited_quota": true,
+  "callback_url": "https://platform.example.com/api/consume-notify",
+  "callback_enabled": true
+}
+```
+
+示例3：带Callback的独立额度Token
 ```json
 {
   "external_user_id": "cec_user_123",
@@ -282,13 +324,18 @@ Content-Type: application/json
 ```
 
 **字段说明**:
-- `allocated_quota`: **必填**，分配给Token的额度（单位：quota）
+- `allocated_quota`: **条件必填**，分配给Token的额度（单位：quota）
+  - 当`unlimited_quota=false`或未设置时**必填**
+  - 当`unlimited_quota=true`时**忽略**
   - 此额度将从用户余额中扣除
   - 最小值：0（但建议至少10,000,000，即$20）
   - 最大值：不能超过用户当前余额
   - 示例：10,000,000 = $20 USD
+- `unlimited_quota`: **可选**，是否为无限额度Token
+  - 默认：false
+  - 当为true时：Token不限额度，消费扣User.Quota
 
-**响应示例**（普通Token）:
+**响应示例**（独立额度Token）:
 ```json
 {
   "success": true,
@@ -298,12 +345,31 @@ Content-Type: application/json
     "access_key": "sk-xxxxxxxxxxxxxxxxxxxx",
     "token_name": "My API Token",
     "expires_at": 1767195600,
-    "remain_quota": 10000000
+    "remain_quota": 10000000,
+    "unlimited_quota": false
   }
 }
 ```
 
-**响应示例**（带Callback的Token）:
+**响应示例**（无限额度Token）:
+```json
+{
+  "success": true,
+  "message": "Token创建成功",
+  "data": {
+    "token_id": 133,
+    "access_key": "sk-xxxxxxxxxxxxxxxxxxxx",
+    "token_name": "平台无限Token",
+    "expires_at": 1767195600,
+    "remain_quota": 0,
+    "unlimited_quota": true,
+    "callback_enabled": true,
+    "callback_url_masked": "https://platform.example.com/***"
+  }
+}
+```
+
+**响应示例**（带Callback的独立额度Token）:
 ```json
 {
   "success": true,
@@ -314,6 +380,7 @@ Content-Type: application/json
     "token_name": "CEC用户Token",
     "expires_at": 1767195600,
     "remain_quota": 10000000,
+    "unlimited_quota": false,
     "callback_enabled": true,
     "callback_url_masked": "https://cec.example.com/***"
   }
@@ -338,17 +405,12 @@ Content-Type: application/json
 
 #### 3.2 删除 Access Key
 ```http
-DELETE /api/user/external/token
-Content-Type: application/json
+DELETE /api/user/external/{external_user_id}/token/{token_id}
 ```
 
-**请求参数**:
-```json
-{
-  "external_user_id": "string, required, 外部用户ID",
-  "token_id": "number, required, 要删除的Token ID"
-}
-```
+**路径参数**:
+- `external_user_id` (string, required): 外部用户ID
+- `token_id` (number, required): 要删除的Token ID
 
 **响应示例**:
 ```json
@@ -356,16 +418,33 @@ Content-Type: application/json
   "success": true,
   "message": "Token删除成功",
   "data": {
-    "token_id": 1,
+    "token_id": 132,
+    "token_name": "已删除的Token",
     "external_user_id": "test_user_001"
   }
 }
 ```
 
+**错误示例**:
+```json
+{
+  "success": false,
+  "message": "Token不存在或不属于该用户"
+}
+```
+
 **说明**:
+- 使用**软删除**：Token记录保留（设置deleted_at），但无法使用
 - 只能删除属于指定外部用户的Token
-- Token删除后立即失效，无法恢复
-- 删除不存在的Token或无权限的Token会返回404错误
+- Token删除后立即失效
+- 删除会清除Token缓存
+- 删除不存在的Token或无权限的Token会返回错误
+
+**使用示例**:
+```bash
+# 删除用户test_user_001的Token 132
+curl -X DELETE "http://localhost:3000/api/user/external/test_user_001/token/132"
+```
 
 #### 3.3 获取用户所有Token列表 🆕
 ```http
@@ -1077,6 +1156,54 @@ location /api/consume-notify {
 **注意**：
 - callback_secret字段已预留但当前不使用
 - 未来如需HMAC签名验证，可升级实现
+
+### Q12: 🆕 什么时候使用V1无限额度Token？
+**A**: 当你需要：
+
+1. **不限制单个Token**，但仍需New API统计总消费
+2. **用户充值模式**，但不想按Token分配额度
+3. **简化Token管理**，所有Token共享用户余额
+
+**对比**：
+| Token类型 | 检查 | 扣减 | 场景 |
+|-----------|------|------|------|
+| 独立额度 | Token.RemainQuota | Token余额 | 预算控制 |
+| 无限额度 | 不检查 | User.Quota | 共享余额 |
+
+**示例**：
+```json
+{
+  "external_user_id": "platform_user",
+  "token_name": "无限Token",
+  "unlimited_quota": true
+}
+```
+
+### Q13: 🆕 V1无限额度和V2无限额度有什么区别？
+**A**: 计费方式不同：
+
+| 维度 | V1无限额度 | V2无限额度 |
+|------|-----------|-----------|
+| 扣减方式 | User.Quota | 不扣 |
+| 需要充值 | ✅ 需要 | ❌ 不需要 |
+| New API统计 | ✅ 统计 | ❌ 不统计 |
+| 用户体系 | 有User实体 | 无User实体 |
+
+**选择建议**：
+- 需要New API统计消费 → **V1无限额度**
+- 完全自己管理计费 → **V2无限额度**
+
+### Q14: 🆕 如何删除Token？
+**A**: 使用DELETE接口：
+
+```bash
+curl -X DELETE "http://localhost:3000/api/user/external/{external_user_id}/token/{token_id}"
+```
+
+**说明**：
+- **软删除**：记录保留，但Token立即失效
+- **权限验证**：只能删除属于自己的Token
+- **缓存清除**：删除后自动清除Token缓存
 
 ---
 
