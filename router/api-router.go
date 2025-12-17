@@ -269,5 +269,23 @@ func SetApiRouter(router *gin.Engine) {
 			modelsRoute.PUT("/", controller.UpdateModelMeta)
 			modelsRoute.DELETE("/:id", controller.DeleteModelMeta)
 		}
+
+		// OpenRouter 兼容接口路由
+		openrouterRoute := apiRouter.Group("/openrouter")
+		{
+			// 公开接口 - OpenRouter 格式模型列表（无需认证）
+			openrouterRoute.GET("/v1/models", controller.ListOpenRouterModels)
+			openrouterRoute.GET("/v1/models/:model", controller.GetOpenRouterModel)
+			openrouterRoute.GET("/status", controller.GetOpenRouterStatus)
+
+			// 管理接口 - 需要管理员认证
+			openrouterAdminRoute := openrouterRoute.Group("/config")
+			openrouterAdminRoute.Use(middleware.AdminAuth())
+			{
+				openrouterAdminRoute.GET("", controller.GetOpenRouterConfig)
+				openrouterAdminRoute.PUT("", controller.UpdateOpenRouterConfig)
+				openrouterAdminRoute.POST("/reload", controller.ReloadOpenRouterConfig)
+			}
+		}
 	}
 }

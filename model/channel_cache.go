@@ -85,6 +85,11 @@ func InitChannelCache() {
 	channelsIDM = newChannelId2channel
 	channelSyncLock.Unlock()
 	common.SysLog("channels synced from database")
+
+	// 同步刷新 OpenRouter 缓存
+	if openRouterCache != nil {
+		go openRouterCache.refreshCache()
+	}
 }
 
 func SyncChannelCache(frequency int) {
