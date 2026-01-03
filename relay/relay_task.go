@@ -32,7 +32,94 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 	if info.TaskRelayInfo == nil {
 		info.TaskRelayInfo = &relaycommon.TaskRelayInfo{}
 	}
+	path := c.Request.URL.Path
+	if strings.Contains(path, "/v1/videos/") && strings.HasSuffix(path, "/remix") {
+		info.Action = constant.TaskActionRemix
+	}
+
+	// 提取 remix 任务的 video_id
+	if info.Action == constant.TaskActionRemix {
+		videoID := c.Param("video_id")
+		if strings.TrimSpace(videoID) == "" {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("video_id is required"), "invalid_request", http.StatusBadRequest)
+		}
+		info.OriginTaskID = videoID
+	}
+
 	platform := constant.TaskPlatform(c.GetString("platform"))
+
+	// 获取原始任务信息
+	if info.OriginTaskID != "" {
+		originTask, exist, err := model.GetByTaskId(info.UserId, info.OriginTaskID)
+		if err != nil {
+			taskErr = service.TaskErrorWrapper(err, "get_origin_task_failed", http.StatusInternalServerError)
+			return
+		}
+		if !exist {
+			taskErr = service.TaskErrorWrapperLocal(errors.New("task_origin_not_exist"), "task_not_exist", http.StatusBadRequest)
+			return
+		}
+		if info.OriginModelName == "" {
+			if originTask.Properties.OriginModelName != "" {
+				info.OriginModelName = originTask.Properties.OriginModelName
+			} else if originTask.Properties.UpstreamModelName != "" {
+				info.OriginModelName = originTask.Properties.UpstreamModelName
+			} else {
+				var taskData map[string]interface{}
+				_ = json.Unmarshal(originTask.Data, &taskData)
+				if m, ok := taskData["model"].(string); ok && m != "" {
+					info.OriginModelName = m
+					platform = originTask.Platform
+				}
+			}
+		}
+		if originTask.ChannelId != info.ChannelId {
+			channel, err := model.GetChannelById(originTask.ChannelId, true)
+			if err != nil {
+				taskErr = service.TaskErrorWrapperLocal(err, "channel_not_found", http.StatusBadRequest)
+				return
+			}
+			if channel.Status != common.ChannelStatusEnabled {
+				taskErr = service.TaskErrorWrapperLocal(errors.New("the channel of the origin task is disabled"), "task_channel_disable", http.StatusBadRequest)
+				return
+			}
+			key, _, newAPIError := channel.GetNextEnabledKey()
+			if newAPIError != nil {
+				taskErr = service.TaskErrorWrapper(newAPIError, "channel_no_available_key", newAPIError.StatusCode)
+				return
+			}
+			common.SetContextKey(c, constant.ContextKeyChannelKey, key)
+			common.SetContextKey(c, constant.ContextKeyChannelType, channel.Type)
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, channel.GetBaseURL())
+			common.SetContextKey(c, constant.ContextKeyChannelId, originTask.ChannelId)
+
+			info.ChannelBaseUrl = channel.GetBaseURL()
+			info.ChannelId = originTask.ChannelId
+			info.ChannelType = channel.Type
+			info.ApiKey = key
+			platform = originTask.Platform
+		}
+
+		// 使用原始任务的参数
+		if info.Action == constant.TaskActionRemix {
+			var taskData map[string]interface{}
+			_ = json.Unmarshal(originTask.Data, &taskData)
+			secondsStr, _ := taskData["seconds"].(string)
+			seconds, _ := strconv.Atoi(secondsStr)
+			if seconds <= 0 {
+				seconds = 4
+			}
+			sizeStr, _ := taskData["size"].(string)
+			if info.PriceData.OtherRatios == nil {
+				info.PriceData.OtherRatios = map[string]float64{}
+			}
+			info.PriceData.OtherRatios["seconds"] = float64(seconds)
+			info.PriceData.OtherRatios["size"] = 1
+			if sizeStr == "1792x1024" || sizeStr == "1024x1792" {
+				info.PriceData.OtherRatios["size"] = 1.666667
+			}
+		}
+	}
 	if platform == "" {
 		platform = GetTaskPlatform(c)
 	}
@@ -72,10 +159,13 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 	} else {
 		ratio = modelPrice * groupRatio
 	}
-	if len(info.PriceData.OtherRatios) > 0 {
-		for _, ra := range info.PriceData.OtherRatios {
-			if 1.0 != ra {
-				ratio *= ra
+	// FIXME: 临时修补，支持任务仅按次计费
+	if !common.StringsContains(constant.TaskPricePatches, modelName) {
+		if len(info.PriceData.OtherRatios) > 0 {
+			for _, ra := range info.PriceData.OtherRatios {
+				if 1.0 != ra {
+					ratio *= ra
+				}
 			}
 		}
 	}
@@ -89,34 +179,6 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 	if userQuota-quota < 0 {
 		taskErr = service.TaskErrorWrapperLocal(errors.New("user quota is not enough"), "quota_not_enough", http.StatusForbidden)
 		return
-	}
-
-	if info.OriginTaskID != "" {
-		originTask, exist, err := model.GetByTaskId(info.UserId, info.OriginTaskID)
-		if err != nil {
-			taskErr = service.TaskErrorWrapper(err, "get_origin_task_failed", http.StatusInternalServerError)
-			return
-		}
-		if !exist {
-			taskErr = service.TaskErrorWrapperLocal(errors.New("task_origin_not_exist"), "task_not_exist", http.StatusBadRequest)
-			return
-		}
-		if originTask.ChannelId != info.ChannelId {
-			channel, err := model.GetChannelById(originTask.ChannelId, true)
-			if err != nil {
-				taskErr = service.TaskErrorWrapperLocal(err, "channel_not_found", http.StatusBadRequest)
-				return
-			}
-			if channel.Status != common.ChannelStatusEnabled {
-				return service.TaskErrorWrapperLocal(errors.New("该任务所属渠道已被禁用"), "task_channel_disable", http.StatusBadRequest)
-			}
-			c.Set("base_url", channel.GetBaseURL())
-			c.Set("channel_id", originTask.ChannelId)
-			c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
-
-			info.ChannelBaseUrl = channel.GetBaseURL()
-			info.ChannelId = originTask.ChannelId
-		}
 	}
 
 	// build body
@@ -153,15 +215,20 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.
 				//	gRatio = userGroupRatio
 				//}
 				logContent := fmt.Sprintf("操作 %s", info.Action)
-				if len(info.PriceData.OtherRatios) > 0 {
-					var contents []string
-					for key, ra := range info.PriceData.OtherRatios {
-						if 1.0 != ra {
-							contents = append(contents, fmt.Sprintf("%s: %.2f", key, ra))
+				// FIXME: 临时修补，支持任务仅按次计费
+				if common.StringsContains(constant.TaskPricePatches, modelName) {
+					logContent = fmt.Sprintf("%s，按次计费", logContent)
+				} else {
+					if len(info.PriceData.OtherRatios) > 0 {
+						var contents []string
+						for key, ra := range info.PriceData.OtherRatios {
+							if 1.0 != ra {
+								contents = append(contents, fmt.Sprintf("%s: %.2f", key, ra))
+							}
 						}
-					}
-					if len(contents) > 0 {
-						logContent = fmt.Sprintf("%s, 计算参数：%s", logContent, strings.Join(contents, ", "))
+						if len(contents) > 0 {
+							logContent = fmt.Sprintf("%s, 计算参数：%s", logContent, strings.Join(contents, ", "))
+						}
 					}
 				}
 				other := make(map[string]interface{})
@@ -311,13 +378,14 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		if err2 != nil {
 			return
 		}
-		if channelModel.Type != constant.ChannelTypeVertexAi {
+		if channelModel.Type != constant.ChannelTypeVertexAi && channelModel.Type != constant.ChannelTypeGemini {
 			return
 		}
 		baseURL := constant.ChannelBaseURLs[channelModel.Type]
 		if channelModel.GetBaseURL() != "" {
 			baseURL = channelModel.GetBaseURL()
 		}
+		proxy := channelModel.GetSetting().Proxy
 		adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(channelModel.Type)))
 		if adaptor == nil {
 			return
@@ -325,7 +393,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		resp, err2 := adaptor.FetchTask(baseURL, channelModel.Key, map[string]any{
 			"task_id": originTask.TaskID,
 			"action":  originTask.Action,
-		})
+		}, proxy)
 		if err2 != nil || resp == nil {
 			return
 		}
@@ -343,7 +411,10 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 				originTask.Progress = ti.Progress
 			}
 			if ti.Url != "" {
-				originTask.FailReason = ti.Url
+				if strings.HasPrefix(ti.Url, "data:") {
+				} else {
+					originTask.FailReason = ti.Url
+				}
 			}
 			_ = originTask.Update()
 			var raw map[string]any
@@ -371,18 +442,20 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 			case model.TaskStatusQueued, model.TaskStatusSubmitted:
 				status = "queued"
 			}
-			out := map[string]any{
-				"error":    nil,
-				"format":   format,
-				"metadata": nil,
-				"status":   status,
-				"task_id":  originTask.TaskID,
-				"url":      originTask.FailReason,
+			if !strings.HasPrefix(c.Request.RequestURI, "/v1/videos/") {
+				out := map[string]any{
+					"error":    nil,
+					"format":   format,
+					"metadata": nil,
+					"status":   status,
+					"task_id":  originTask.TaskID,
+					"url":      originTask.FailReason,
+				}
+				respBody, _ = json.Marshal(dto.TaskResponse[any]{
+					Code: "success",
+					Data: out,
+				})
 			}
-			respBody, _ = json.Marshal(dto.TaskResponse[any]{
-				Code: "success",
-				Data: out,
-			})
 		}
 	}()
 

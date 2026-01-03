@@ -27,18 +27,19 @@ type User struct {
 	Status           int    `json:"status" gorm:"type:int;default:1"` // enabled, disabled
 	Email            string `json:"email" gorm:"index" validate:"max=50"`
 	GitHubId         string `json:"github_id" gorm:"column:github_id;index"`
+	DiscordId        string `json:"discord_id" gorm:"column:discord_id;index"`
 	OidcId           string `json:"oidc_id" gorm:"column:oidc_id;index"`
 	WeChatId         string `json:"wechat_id" gorm:"column:wechat_id;index"`
 	TelegramId       string `json:"telegram_id" gorm:"column:telegram_id;index"`
 	// 外部用户系统集成字段
-	ExternalUserId   string         `json:"external_user_id" gorm:"type:varchar(100);column:external_user_id;index"`
-	Phone            string         `json:"phone" gorm:"type:varchar(20);column:phone"`
-	WechatOpenId     string         `json:"wechat_openid" gorm:"type:varchar(100);column:wechat_openid"`
-	WechatUnionId    string         `json:"wechat_unionid" gorm:"type:varchar(100);column:wechat_unionid"`
-	AlipayUserId     string         `json:"alipay_userid" gorm:"type:varchar(100);column:alipay_userid"`
-	LoginType        string         `json:"login_type" gorm:"type:varchar(20);column:login_type;default:'email'"`
-	IsExternal       bool           `json:"is_external" gorm:"type:boolean;column:is_external;default:false"`
-	ExternalData     string         `json:"external_data" gorm:"type:text;column:external_data"`
+	ExternalUserId string `json:"external_user_id" gorm:"type:varchar(100);column:external_user_id;index"`
+	Phone          string `json:"phone" gorm:"type:varchar(20);column:phone"`
+	WechatOpenId   string `json:"wechat_openid" gorm:"type:varchar(100);column:wechat_openid"`
+	WechatUnionId  string `json:"wechat_unionid" gorm:"type:varchar(100);column:wechat_unionid"`
+	AlipayUserId   string `json:"alipay_userid" gorm:"type:varchar(100);column:alipay_userid"`
+	LoginType      string `json:"login_type" gorm:"type:varchar(20);column:login_type;default:'email'"`
+	IsExternal     bool   `json:"is_external" gorm:"type:boolean;column:is_external;default:false"`
+	ExternalData   string `json:"external_data" gorm:"type:text;column:external_data"`
 	VerificationCode string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
 	AccessToken      *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
 	Quota            int            `json:"quota" gorm:"type:int;default:0"`
@@ -548,6 +549,14 @@ func (user *User) FillUserByGitHubId() error {
 	return nil
 }
 
+func (user *User) FillUserByDiscordId() error {
+	if user.DiscordId == "" {
+		return errors.New("discord id 为空！")
+	}
+	DB.Where(User{DiscordId: user.DiscordId}).First(user)
+	return nil
+}
+
 func (user *User) FillUserByOidcId() error {
 	if user.OidcId == "" {
 		return errors.New("oidc id 为空！")
@@ -585,6 +594,10 @@ func IsWeChatIdAlreadyTaken(wechatId string) bool {
 
 func IsGitHubIdAlreadyTaken(githubId string) bool {
 	return DB.Unscoped().Where("github_id = ?", githubId).Find(&User{}).RowsAffected == 1
+}
+
+func IsDiscordIdAlreadyTaken(discordId string) bool {
+	return DB.Unscoped().Where("discord_id = ?", discordId).Find(&User{}).RowsAffected == 1
 }
 
 func IsOidcIdAlreadyTaken(oidcId string) bool {
