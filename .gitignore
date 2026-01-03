@@ -31,6 +31,7 @@ backup_*.sql
 
 # Go cache
 .gocache
+.gomodcache/
 .cache
 web/bun.lock
 
@@ -38,3 +39,4 @@ web/bun.lock
 electron/node_modules
 electron/dist
 data/
+.gomodcache/
