@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"one-api/model"
+	"github.com/QuantumNous/new-api/model"
 	"strconv"
 	"strings"
 	"time"
@@ -122,7 +122,7 @@ func V2TokenAuthorize(c *gin.Context) {
 		return
 	}
 
-	// 需要导入 "one-api/common"
+	// 需要导入 "github.com/QuantumNous/new-api/common"
 	// 检查token是否已存在（去掉 sk- 前缀后查询）
 	tokenKeyToCheck := strings.TrimPrefix(req.TokenKey, "sk-")
 	existingToken, err := model.GetTokenByKey(tokenKeyToCheck, true)

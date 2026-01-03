@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"one-api/common"
+	"github.com/QuantumNous/new-api/common"
 
 	"gopkg.in/yaml.v3"
 )

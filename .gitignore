@@ -9,9 +9,11 @@ logs
 web/dist
 .env
 one-api
+new-api
 .DS_Store
 tiktoken_cache
 .eslintcache
+
 # 后台运行日志
 logs/
 .pid
@@ -24,3 +26,10 @@ logs/
 
 # 数据库备份文件
 backup_*.sql
+
+# Go cache
+.gocache
+
+# Electron
+electron/node_modules
+electron/dist

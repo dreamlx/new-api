@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"one-api/common"
+	"github.com/QuantumNous/new-api/common"
 	"strings"
 	"time"
 )
