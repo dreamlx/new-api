@@ -27,7 +27,7 @@ type Token struct {
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
-	CrossGroupRetry    bool           `json:"cross_group_retry" gorm:"default:false"` // 跨分组重试，仅auto分组有效
+	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	CallbackUrl        string         `json:"callback_url" gorm:"type:varchar(500);default:''"`   // 回调URL
 	CallbackEnabled    bool           `json:"callback_enabled" gorm:"default:false;index"`        // 是否启用回调
 	CallbackSecret     string         `json:"callback_secret" gorm:"type:varchar(64);default:''"` // 回调签名密钥
