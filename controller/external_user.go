@@ -65,6 +65,27 @@ type ExternalUserTopUpResponse struct {
 	} `json:"data"`
 }
 
+// 外部用户扣除余额请求结构
+type ExternalUserDeductRequest struct {
+	ExternalUserId string  `json:"external_user_id" binding:"required,min=1,max=100"`
+	AmountUSD      float64 `json:"amount_usd" binding:"required,min=0.01"`
+	Reason         string  `json:"reason" binding:"required,min=1,max=200"`
+	AdminNote      string  `json:"admin_note" binding:"omitempty,max=500"`
+}
+
+// 外部用户扣除余额响应结构
+type ExternalUserDeductResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		AmountUSD      float64 `json:"amount_usd"`
+		QuotaDeducted  int     `json:"quota_deducted"`
+		CurrentQuota   int     `json:"current_quota"`
+		CurrentBalance float64 `json:"current_balance"`
+		Reason         string  `json:"reason"`
+	} `json:"data"`
+}
+
 // 外部用户Token创建请求结构
 type ExternalUserTokenRequest struct {
 	ExternalUserId  string `json:"external_user_id" binding:"required,min=1,max=100"`
@@ -323,6 +344,86 @@ func ExternalUserTopUp(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// 扣除外部用户余额（管理后台调整）
+func ExternalUserDeduct(c *gin.Context) {
+	var req ExternalUserDeductRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "请求参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 查找用户
+	user := &model.User{}
+	if err := model.DB.Where("external_user_id = ?", req.ExternalUserId).First(user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"message": "用户不存在",
+		})
+		return
+	}
+
+	// 计算要扣除的quota（$1 USD = 500,000 quota）
+	quotaToDeduct := int(req.AmountUSD * common.QuotaPerUnit)
+
+	// 检查余额是否足够
+	if user.Quota < quotaToDeduct {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("用户余额不足，当前余额: %d quota ($%.2f), 请求扣除: %d quota ($%.2f)",
+				user.Quota, float64(user.Quota)/common.QuotaPerUnit, quotaToDeduct, req.AmountUSD),
+		})
+		return
+	}
+
+	// 更新用户quota（扣除）
+	newQuota := user.Quota - quotaToDeduct
+	if err := model.DB.Model(user).Update("quota", newQuota).Error; err != nil {
+		common.SysError("扣除余额更新quota失败: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "扣除余额失败",
+		})
+		return
+	}
+
+	// 重新获取用户信息
+	model.DB.First(user, user.Id)
+
+	// 记录扣除日志到logs表（使用LogTypeManage类型，记录为负quota）
+	deductLog := &model.Log{
+		UserId:    user.Id,
+		Username:  user.Username,
+		CreatedAt: common.GetTimestamp(),
+		Type:      model.LogTypeManage, // 使用管理类型
+		Content: fmt.Sprintf("管理员扣除余额，扣除金额: $%.2f，扣除额度: %d quota，原因: %s，备注: %s",
+			req.AmountUSD, quotaToDeduct, req.Reason, req.AdminNote),
+		Quota: -quotaToDeduct, // 负数表示扣除
+	}
+	if err := model.LOG_DB.Create(deductLog).Error; err != nil {
+		common.SysError("创建扣除日志失败: " + err.Error())
+	}
+
+	// 记录系统日志
+	common.SysLog(fmt.Sprintf("外部用户余额扣除: %s, 金额: $%.2f, 扣除quota: %d, 原因: %s",
+		req.ExternalUserId, req.AmountUSD, quotaToDeduct, req.Reason))
+
+	// 构造响应
+	response := ExternalUserDeductResponse{
+		Success: true,
+		Message: "余额扣除成功",
+	}
+	response.Data.AmountUSD = req.AmountUSD
+	response.Data.QuotaDeducted = quotaToDeduct
+	response.Data.CurrentQuota = user.Quota
+	response.Data.CurrentBalance = float64(user.Quota) / common.QuotaPerUnit
+	response.Data.Reason = req.Reason
+
+	c.JSON(http.StatusOK, response)
+}
+
 // 为外部用户创建Token
 func CreateExternalUserToken(c *gin.Context) {
 	var req ExternalUserTokenRequest
@@ -562,12 +663,15 @@ type ExternalUserLogsResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
 		Logs []struct {
-			Time     string  `json:"time"`     // 时间，格式: 2024-01-30 15:30:25
-			Username string  `json:"username"` // 用户名
-			Tokens   int     `json:"tokens"`   // 消费的Token数量 (prompt + completion)
-			Type     string  `json:"type"`     // 类型: consume/topup/error
-			Model    string  `json:"model"`    // 模型名称
-			Spend    float64 `json:"spend"`    // 花费金额 (美元)
+			Time      string  `json:"time"`       // 时间，格式: 2024-01-30 15:30:25
+			Username  string  `json:"username"`   // 用户名
+			TokenKey  string  `json:"token_key"`  // 令牌密钥（完整）
+			TokenName string  `json:"token_name"` // 令牌名称
+			TokenId   int     `json:"token_id"`   // 令牌ID
+			Tokens    int     `json:"tokens"`     // 消费的Token数量 (prompt + completion)
+			Type      string  `json:"type"`       // 类型: consume/topup/error
+			Model     string  `json:"model"`      // 模型名称
+			Spend     float64 `json:"spend"`      // 花费金额 (美元)
 		} `json:"logs"`
 		Pagination struct {
 			Page      int   `json:"page"`       // 当前页码
@@ -645,9 +749,9 @@ func GetExternalUserLogs(c *gin.Context) {
 	var logs []*model.Log
 	var total int64
 
-	// 构建查询条件
-	tx := model.LOG_DB.Where("user_id = ? AND (type = ? OR type = ?)",
-		user.Id, model.LogTypeConsume, model.LogTypeTopup)
+	// 构建查询条件（包含消费、充值、扣除记录）
+	tx := model.LOG_DB.Where("user_id = ? AND (type = ? OR type = ? OR type = ?)",
+		user.Id, model.LogTypeConsume, model.LogTypeTopup, model.LogTypeManage)
 
 	if req.Username != "" {
 		tx = tx.Where("username = ?", req.Username)
@@ -704,26 +808,51 @@ func GetExternalUserLogs(c *gin.Context) {
 			logType = "topup"
 			// 充值记录显示为负数，便于区分
 			spend = -spend
+		} else if log.Type == model.LogTypeManage {
+			logType = "deduct" // 扣除记录
 		} else if log.Type == model.LogTypeError {
 			logType = "error"
 		}
 
 		totalSpend += spend
 
+		// 获取Token信息（如果存在token_id）
+		var tokenKey, tokenName string
+		var tokenId int
+		if log.TokenId > 0 {
+			token, err := model.GetTokenById(log.TokenId)
+			if err == nil && token != nil {
+				tokenId = token.Id
+				tokenName = token.Name
+				// 构造完整的token_key（添加sk-前缀）
+				fullKey := token.Key
+				if !strings.HasPrefix(fullKey, "sk-") {
+					fullKey = "sk-" + fullKey
+				}
+				tokenKey = fullKey
+			}
+		}
+
 		logItem := struct {
-			Time     string  `json:"time"`
-			Username string  `json:"username"`
-			Tokens   int     `json:"tokens"`
-			Type     string  `json:"type"`
-			Model    string  `json:"model"`
-			Spend    float64 `json:"spend"`
+			Time      string  `json:"time"`
+			Username  string  `json:"username"`
+			TokenKey  string  `json:"token_key"`
+			TokenName string  `json:"token_name"`
+			TokenId   int     `json:"token_id"`
+			Tokens    int     `json:"tokens"`
+			Type      string  `json:"type"`
+			Model     string  `json:"model"`
+			Spend     float64 `json:"spend"`
 		}{
-			Time:     logTime,
-			Username: log.Username,
-			Tokens:   tokens,
-			Type:     logType,
-			Model:    log.ModelName,
-			Spend:    spend,
+			Time:      logTime,
+			Username:  log.Username,
+			TokenKey:  tokenKey,
+			TokenName: tokenName,
+			TokenId:   tokenId,
+			Tokens:    tokens,
+			Type:      logType,
+			Model:     log.ModelName,
+			Spend:     spend,
 		}
 
 		response.Data.Logs = append(response.Data.Logs, logItem)

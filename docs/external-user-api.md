@@ -142,6 +142,7 @@ cat /tmp/real-api-test-report.md
 ### 接口列表
 - `POST /api/user/external/sync` - 用户同步接口
 - `POST /api/user/external/topup` - 用户充值接口
+- `POST /api/user/external/deduct` - 扣除余额接口 🆕
 - `POST /api/user/external/token` - 创建 Access Key
 - `DELETE /api/user/external/token` - 删除 Access Key
 - `GET /api/user/external/{id}/tokens` - 获取用户所有Token列表 🆕
@@ -234,7 +235,68 @@ Content-Type: application/json
   - 充值卡: `"card_20241201_001"`
   - 自定义: `"custom_order_12345"`
 
-### 3. Token 管理接口
+### 3. 扣除余额接口 🆕
+
+#### 扣除外部用户余额（管理后台调整）
+```http
+POST /api/user/external/deduct
+Content-Type: application/json
+```
+
+**请求参数**:
+```json
+{
+  "external_user_id": "string, required, 外部用户ID",
+  "amount_usd": "number, required, 扣除美元金额，最小0.01",
+  "reason": "string, required, 扣除原因，1-200字符",
+  "admin_note": "string, optional, 管理员备注，最大500字符"
+}
+```
+
+**响应示例（成功）**:
+```json
+{
+  "success": true,
+  "message": "余额扣除成功",
+  "data": {
+    "amount_usd": 10.0,
+    "quota_deducted": 5000000,
+    "current_quota": 15000000,
+    "current_balance": 30.0,
+    "reason": "用户投诉退款"
+  }
+}
+```
+
+**响应示例（余额不足）**:
+```json
+{
+  "success": false,
+  "message": "用户余额不足，当前余额: 5000000 quota ($10.00), 请求扣除: 10000000 quota ($20.00)"
+}
+```
+
+**说明**:
+- `amount_usd` 必须是美元金额，将自动转换为 quota 扣除
+- `reason` 必填，用于记录扣除原因（如"用户投诉退款"、"管理员调整"等）
+- `admin_note` 可选，用于记录详细的管理员备注
+- 余额不足时会返回错误，不允许扣除成负数
+- 扣除记录会记录到logs表，类型为 `deduct`（LogTypeManage）
+- 扣除的quota显示为负数，便于区分充值和扣除
+
+**使用示例**:
+```bash
+curl -X POST "http://localhost:3000/api/user/external/deduct" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_user_id": "test_user_001",
+    "amount_usd": 10.0,
+    "reason": "用户投诉退款",
+    "admin_note": "订单号：ORDER-12345，退款金额$10"
+  }'
+```
+
+### 4. Token 管理接口
 
 #### 3.1 创建 Access Key
 
@@ -697,6 +759,9 @@ GET /api/user/external/{external_user_id}/logs
       {
         "time": "2024-01-30 15:30:25",
         "username": "testuser",
+        "token_key": "sk-abc123def456789xyz",
+        "token_name": "我的聊天应用",
+        "token_id": 132,
         "tokens": 80,
         "type": "consume",
         "model": "qwen-turbo",
@@ -704,11 +769,25 @@ GET /api/user/external/{external_user_id}/logs
       },
       {
         "time": "2024-01-30 10:00:00",
-        "username": "testuser", 
+        "username": "testuser",
+        "token_key": "",
+        "token_name": "",
+        "token_id": 0,
         "tokens": 0,
         "type": "topup",
         "model": "",
         "spend": -10.0
+      },
+      {
+        "time": "2024-01-30 09:00:00",
+        "username": "testuser",
+        "token_key": "",
+        "token_name": "",
+        "token_id": 0,
+        "tokens": 0,
+        "type": "deduct",
+        "model": "",
+        "spend": -5.0
       }
     ],
     "pagination": {
@@ -728,12 +807,16 @@ GET /api/user/external/{external_user_id}/logs
 **字段说明**:
 - `time`: 记录时间，格式：YYYY-MM-DD HH:mm:ss
 - `username`: 用户名
-- `tokens`: Token消费数量（prompt + completion），充值记录为0
+- `token_key`: 🆕 令牌密钥（完整），仅消费记录有值，其他类型为空字符串
+- `token_name`: 🆕 令牌名称，仅消费记录有值，其他类型为空字符串
+- `token_id`: 🆕 令牌ID，仅消费记录有值，其他类型为0
+- `tokens`: Token消费数量（prompt + completion），充值/扣除记录为0
 - `type`: 记录类型
   - `consume`: 消费记录（调用LLM）
   - `topup`: 充值记录
+  - `deduct`: 🆕 扣除记录（管理员调整）
   - `error`: 错误记录
-- `model`: 使用的模型名称，充值记录为空
+- `model`: 使用的模型名称，充值/扣除记录为空
 - `spend`: 花费金额（美元）
   - 正数：实际消费
   - 负数：充值金额（显示为负数便于区分）

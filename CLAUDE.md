@@ -167,6 +167,14 @@ GET /api/user/external/{external_user_id}
   - 详细状态信息（启用/禁用/耗尽/过期）
   - 兼容处理不同Token存储格式（带/不带sk-前缀）
   - 已通过实际Token测试验证
+- [x] **扣除余额和消费记录增强功能** (2025-01-18) - 管理后台余额调整和消费明细优化
+  - POST /api/user/external/deduct - 扣除余额接口（管理后台）
+  - 消费记录增加Token信息显示（token_key、token_name、token_id）
+  - 余额不足验证和错误提示
+  - 扣除记录日志（LogTypeManage，显示为deduct类型）
+  - 消费记录支持扣除类型筛选
+  - 完整测试脚本（scripts/test-new-features.sh）
+  - 已通过8/8自动化测试验证
 
 ### 待完成功能 📋
 - [ ] 性能优化和安全加固
