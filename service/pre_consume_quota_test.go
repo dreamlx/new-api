@@ -1,10 +1,10 @@
 package service
 
 import (
-	"one-api/common"
-	"one-api/model"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

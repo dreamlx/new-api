@@ -481,9 +481,6 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
-	if relayInfo.IsPlayground {
-		return nil
-	}
 	// Token独立额度，检查并扣减Token余额
 	if !relayInfo.TokenUnlimited {
 		token, err := model.GetTokenById(relayInfo.TokenId)
@@ -491,7 +488,7 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 			return fmt.Errorf("获取Token失败: %v", err)
 		}
 		if token.RemainQuota < quota {
-			return fmt.Errorf("Token余额不足，当前余额: %s，需要: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
+			return fmt.Errorf("预扣费额度失败, Token剩余额度: %s, 需要预扣费额度: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 		}
 		err = model.DecreaseTokenQuota(token.Id, token.Key, quota)
 		if err != nil {

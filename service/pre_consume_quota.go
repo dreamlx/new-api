@@ -31,6 +31,34 @@ func ReturnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
 // PreConsumeQuota checks if the user has enough quota to pre-consume.
 // It returns the pre-consumed quota if successful, or an error if not.
 func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	// If the request won't deduct any quota (V2 unlimited token), skip pre-consume.
+	// Playground is handled separately (it uses a temporary token and should still pre-consume user quota).
+	if relayInfo.TokenUnlimited && !relayInfo.DeductUserQuota && !relayInfo.IsPlayground {
+		relayInfo.FinalPreConsumedQuota = 0
+		return nil
+	}
+
+	if preConsumedQuota <= 0 {
+		relayInfo.FinalPreConsumedQuota = 0
+		return nil
+	}
+
+	// Playground requests use session auth and a temporary token; pre-consume user quota only.
+	// Otherwise, decide by token type:
+	// - TokenUnlimited=false: use token independent quota
+	// - TokenUnlimited=true && DeductUserQuota=true: use user quota
+	useTokenQuota := !relayInfo.IsPlayground && !relayInfo.TokenUnlimited
+
+	if useTokenQuota {
+		err := PreConsumeTokenQuota(relayInfo, preConsumedQuota)
+		if err != nil {
+			return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		}
+		logger.LogInfo(c, fmt.Sprintf("用户 %d Token %d 预扣费 %s", relayInfo.UserId, relayInfo.TokenId, logger.FormatQuota(preConsumedQuota)))
+		relayInfo.FinalPreConsumedQuota = preConsumedQuota
+		return nil
+	}
+
 	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
@@ -53,11 +81,6 @@ func PreConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 	}
 
 	if preConsumedQuota > 0 {
-		// 保留我们的Token共享用户余额机制，但也支持上游的预扣Token逻辑
-		err := PreConsumeTokenQuota(relayInfo, preConsumedQuota)
-		if err != nil {
-			return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
-		}
 		err = model.DecreaseUserQuota(relayInfo.UserId, preConsumedQuota)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
