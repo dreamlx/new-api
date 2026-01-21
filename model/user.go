@@ -40,6 +40,8 @@ type User struct {
 	LoginType      string `json:"login_type" gorm:"type:varchar(20);column:login_type;default:'email'"`
 	IsExternal     bool   `json:"is_external" gorm:"type:boolean;column:is_external;default:false"`
 	ExternalData   string `json:"external_data" gorm:"type:text;column:external_data"`
+	// Wisemodel MaaS平台集成字段
+	WisemodelKey string `json:"wisemodel_key" gorm:"type:varchar(100);column:wisemodel_key;index"`
 	VerificationCode string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
 	AccessToken      *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
 	Quota            int            `json:"quota" gorm:"type:int;default:0"`
@@ -990,4 +992,18 @@ func GetOrCreatePlatformUser(username string) (*User, error) {
 
 	common.SysLog(fmt.Sprintf("created platform user: %s (id: %d)", username, user.Id))
 	return user, nil
+}
+
+// GetUserByPhone 根据手机号查询用户
+// 用于Wisemodel集成
+func GetUserByPhone(phone string) *User {
+	if phone == "" {
+		return nil
+	}
+	var user User
+	err := DB.Where("phone = ?", phone).First(&user).Error
+	if err != nil {
+		return nil
+	}
+	return &user
 }
