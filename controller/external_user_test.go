@@ -72,6 +72,7 @@ func setupTestRouter() *gin.Engine {
 			externalUser.DELETE("/token", DeleteExternalUserToken)
 			externalUser.GET("/:external_user_id/stats", GetExternalUserStats)
 			externalUser.GET("/:external_user_id/logs", GetExternalUserLogs)
+			externalUser.DELETE("/:external_user_id", DeleteExternalUser) // 注销外部用户
 		}
 	}
 	
@@ -653,4 +654,201 @@ func TestDeleteExternalUserToken(t *testing.T) {
 
 	// 清理测试数据
 	model.DB.Delete(user)
+}
+
+// TestDeleteExternalUser 测试注销外部用户
+func TestDeleteExternalUser(t *testing.T) {
+	router := setupTestRouter()
+
+	// 创建测试用户
+	testUser := &model.User{
+		Username:       "test_deactivate_user",
+		ExternalUserId: "test_deactivate_001",
+		Email:          "test@example.com",
+		Phone:          "13800138000",
+		WechatOpenId:   "wx_openid_123",
+		WechatUnionId:  "wx_unionid_456",
+		AlipayUserId:   "alipay_789",
+		Role:           common.RoleCommonUser,
+		Status:         common.UserStatusEnabled,
+		Quota:          1000000,
+		IsExternal:     true,
+	}
+	model.DB.Create(testUser)
+
+	// 创建测试Token
+	token1 := &model.Token{
+		UserId:      testUser.Id,
+		Key:         "test_deactivate_token_1",
+		Name:        "Test Token 1",
+		Status:      common.TokenStatusEnabled,
+		RemainQuota: 500000,
+	}
+	token2 := &model.Token{
+		UserId:      testUser.Id,
+		Key:         "test_deactivate_token_2",
+		Name:        "Test Token 2",
+		Status:      common.TokenStatusEnabled,
+		RemainQuota: 500000,
+	}
+	model.DB.Create(token1)
+	model.DB.Create(token2)
+
+	tests := []struct {
+		name           string
+		externalUserId string
+		expectedCode   int
+		expectedMsg    string
+		shouldSucceed  bool
+	}{
+		{
+			name:           "正常注销",
+			externalUserId: "test_deactivate_001",
+			expectedCode:   http.StatusOK,
+			expectedMsg:    "用户已注销",
+			shouldSucceed:  true,
+		},
+		{
+			name:           "重复注销",
+			externalUserId: "test_deactivate_001",
+			expectedCode:   http.StatusNotFound,
+			expectedMsg:    "用户不存在",
+			shouldSucceed:  false,
+		},
+		{
+			name:           "用户不存在",
+			externalUserId: "non_existent_user",
+			expectedCode:   http.StatusNotFound,
+			expectedMsg:    "用户不存在",
+			shouldSucceed:  false,
+		},
+		{
+			name:           "空ID",
+			externalUserId: "",
+			expectedCode:   http.StatusNotFound, // 路由不匹配
+			expectedMsg:    "",
+			shouldSucceed:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest("DELETE", "/api/user/external/"+tt.externalUserId, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedCode, w.Code)
+
+			var response map[string]interface{}
+			json.Unmarshal(w.Body.Bytes(), &response)
+
+			if tt.shouldSucceed {
+				assert.Equal(t, true, response["success"])
+				assert.Equal(t, tt.expectedMsg, response["message"])
+
+				// 验证数据
+				data := response["data"].(map[string]interface{})
+				assert.Equal(t, float64(testUser.Id), data["user_id"])
+				assert.Equal(t, "test_deactivate_001", data["original_external_user_id"])
+				assert.Contains(t, data["deleted_external_user_id"], "deleted_test_deactivate_001_")
+				assert.Equal(t, float64(2), data["tokens_disabled"]) // 2个Token被禁用
+
+				// 验证用户已被软删除
+				var deletedUser model.User
+				err := model.DB.Where("id = ?", testUser.Id).First(&deletedUser).Error
+				assert.Error(t, err) // 应该找不到（软删除）
+
+				// 验证用户在Unscoped查询中存在
+				err = model.DB.Unscoped().Where("id = ?", testUser.Id).First(&deletedUser).Error
+				assert.NoError(t, err)
+				assert.Contains(t, deletedUser.Username, "deleted_")
+				assert.Contains(t, deletedUser.ExternalUserId, "deleted_")
+				assert.Equal(t, "", deletedUser.WechatOpenId)
+				assert.Equal(t, "", deletedUser.WechatUnionId)
+				assert.Equal(t, "", deletedUser.AlipayUserId)
+				assert.Equal(t, "", deletedUser.Phone)
+				assert.Equal(t, "", deletedUser.Email)
+				assert.Equal(t, common.UserStatusDisabled, deletedUser.Status)
+
+				// 验证Token已被禁用
+				var tokens []model.Token
+				model.DB.Where("user_id = ?", testUser.Id).Find(&tokens)
+				for _, token := range tokens {
+					assert.Equal(t, common.TokenStatusDisabled, token.Status)
+				}
+			} else if tt.expectedMsg != "" {
+				assert.Equal(t, false, response["success"])
+				assert.Contains(t, response["message"], tt.expectedMsg)
+			}
+		})
+	}
+
+	// 清理测试数据（硬删除）
+	model.DB.Unscoped().Delete(testUser)
+	model.DB.Unscoped().Delete(token1)
+	model.DB.Unscoped().Delete(token2)
+}
+
+// TestDeleteExternalUserThenReregister 测试注销后重新注册
+func TestDeleteExternalUserThenReregister(t *testing.T) {
+	router := setupTestRouter()
+
+	// 1. 创建用户
+	syncReq := SyncExternalUserRequest{
+		ExternalUserId: "test_reregister_001",
+		Username:       "test_reregister_user",
+		DisplayName:    "Test User",
+		Email:          "test@example.com",
+	}
+	jsonBody, _ := json.Marshal(syncReq)
+	req, _ := http.NewRequest("POST", "/api/user/external/sync", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var syncResponse map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &syncResponse)
+	assert.Equal(t, true, syncResponse["success"])
+	data := syncResponse["data"].(map[string]interface{})
+	userId := int(data["user_id"].(float64))
+
+	// 2. 注销用户
+	req, _ = http.NewRequest("DELETE", "/api/user/external/test_reregister_001", nil)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var deleteResponse map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &deleteResponse)
+	assert.Equal(t, true, deleteResponse["success"])
+	assert.Equal(t, "用户已注销", deleteResponse["message"])
+
+	// 3. 重新注册（使用相同的external_user_id）
+	newSyncReq := SyncExternalUserRequest{
+		ExternalUserId: "test_reregister_001",
+		Username:       "test_reregister_user_new", // 新用户名
+		DisplayName:    "New Test User",
+		Email:          "newtest@example.com",
+	}
+	jsonBody, _ = json.Marshal(newSyncReq)
+	req, _ = http.NewRequest("POST", "/api/user/external/sync", bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var reregisterResponse map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &reregisterResponse)
+
+	// 应该成功创建新用户
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, true, reregisterResponse["success"])
+	newData := reregisterResponse["data"].(map[string]interface{})
+	assert.Equal(t, true, newData["is_new_user"]) // 应该是新用户
+	newUserId := int(newData["user_id"].(float64))
+	assert.NotEqual(t, userId, newUserId) // 新用户ID应该不同
+
+	// 清理测试数据
+	model.DB.Unscoped().Delete(&model.User{}, "id = ?", userId)
+	model.DB.Unscoped().Delete(&model.User{}, "id = ?", newUserId)
 }

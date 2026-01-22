@@ -1366,3 +1366,75 @@ func VerifyExternalUserToken(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// 外部用户注销响应结构
+type DeleteExternalUserResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		UserId                   int    `json:"user_id"`
+		OriginalExternalUserId   string `json:"original_external_user_id"`
+		DeletedExternalUserId    string `json:"deleted_external_user_id"`
+		TokensDisabled           int    `json:"tokens_disabled"`
+		DeletedAt                string `json:"deleted_at"`
+	} `json:"data,omitempty"`
+}
+
+// DeleteExternalUser 注销外部用户
+// DELETE /api/user/external/:external_user_id
+func DeleteExternalUser(c *gin.Context) {
+	externalUserId := c.Param("external_user_id")
+
+	if externalUserId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "external_user_id 不能为空",
+		})
+		return
+	}
+
+	// 调用model层函数执行注销
+	user, tokensDisabled, err := model.DeactivateExternalUser(externalUserId)
+	if err != nil {
+		// 根据错误类型返回不同的状态码
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "用户不存在") {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "用户不存在",
+			})
+			return
+		}
+		if strings.Contains(errMsg, "用户已注销") {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "用户已注销",
+			})
+			return
+		}
+		// 其他错误
+		common.SysError("注销外部用户失败: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "注销用户失败: " + err.Error(),
+		})
+		return
+	}
+
+	// 记录注销日志
+	common.SysLog(fmt.Sprintf("外部用户注销成功: original_id=%s, deleted_id=%s, user_id=%d, tokens_disabled=%d",
+		externalUserId, user.ExternalUserId, user.Id, tokensDisabled))
+
+	// 构造响应
+	response := DeleteExternalUserResponse{
+		Success: true,
+		Message: "用户已注销",
+	}
+	response.Data.UserId = user.Id
+	response.Data.OriginalExternalUserId = externalUserId
+	response.Data.DeletedExternalUserId = user.ExternalUserId
+	response.Data.TokensDisabled = tokensDisabled
+	response.Data.DeletedAt = time.Now().UTC().Format(time.RFC3339)
+
+	c.JSON(http.StatusOK, response)
+}
+

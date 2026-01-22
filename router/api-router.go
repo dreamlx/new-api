@@ -131,6 +131,7 @@ func SetApiRouter(router *gin.Engine) {
 				externalRoute.GET("/:external_user_id/stats", controller.GetExternalUserStats)
 				externalRoute.GET("/:external_user_id/logs", controller.GetExternalUserLogs)   // 获取消费记录
 				externalRoute.GET("/models", controller.GetExternalUserModels)
+				externalRoute.DELETE("/:external_user_id", controller.DeleteExternalUser) // 注销外部用户
 			}
 
 			// v2 外部系统集成路由 (授权计费网关模式)

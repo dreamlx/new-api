@@ -142,11 +142,12 @@ cat /tmp/real-api-test-report.md
 ### 接口列表
 - `POST /api/user/external/sync` - 用户同步接口
 - `POST /api/user/external/topup` - 用户充值接口
-- `POST /api/user/external/deduct` - 扣除余额接口 🆕
+- `POST /api/user/external/deduct` - 扣除余额接口
 - `POST /api/user/external/token` - 创建 Access Key
 - `DELETE /api/user/external/token` - 删除 Access Key
-- `GET /api/user/external/{id}/tokens` - 获取用户所有Token列表 🆕
-- `POST /api/user/external/token/verify` - 验证Token有效性 🆕
+- `GET /api/user/external/{id}/tokens` - 获取用户所有Token列表
+- `POST /api/user/external/token/verify` - 验证Token有效性
+- `DELETE /api/user/external/{id}` - 注销用户 🆕
 - `GET /api/user/external/{id}/stats` - 用户统计接口
 - `GET /api/user/external/{id}/logs` - 消费记录查询接口
 
@@ -662,7 +663,94 @@ Content-Type: application/json
 - 可用于前端Token管理页面的实时验证功能
 - ⚠️ 注意：刚删除的Token可能因Redis缓存暂时仍显示有效，几分钟后会失效
 
-### 4. 用户统计接口
+---
+
+#### 注销外部用户 🆕
+
+```http
+DELETE /api/user/external/{external_user_id}
+```
+
+**功能说明**:
+- 软删除用户账号（保留历史数据）
+- 释放唯一性字段（Username、ExternalUserId等）
+- 清空关联字段（微信OpenID、支付宝ID等）
+- 禁用用户所有Token
+- 注销后用户可使用相同`external_user_id`重新注册
+
+**请求参数**:
+| 参数 | 位置 | 必填 | 说明 |
+|------|------|------|------|
+| external_user_id | path | 是 | 外部用户ID |
+
+**响应示例（成功）**:
+```json
+{
+  "success": true,
+  "message": "用户已注销",
+  "data": {
+    "user_id": 123,
+    "original_external_user_id": "cec_user_456",
+    "deleted_external_user_id": "deleted_cec_user_456_1705912345",
+    "tokens_disabled": 5,
+    "deleted_at": "2026-01-22T12:34:56Z"
+  }
+}
+```
+
+**响应字段说明**:
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| user_id | int | New API内部用户ID |
+| original_external_user_id | string | 原始外部用户ID |
+| deleted_external_user_id | string | 注销后的外部用户ID（添加deleted_前缀和时间戳） |
+| tokens_disabled | int | 被禁用的Token数量 |
+| deleted_at | string | 注销时间（RFC3339格式） |
+
+**错误响应**:
+
+用户不存在（404）:
+```json
+{
+  "success": false,
+  "message": "用户不存在"
+}
+```
+
+用户已注销（400）:
+```json
+{
+  "success": false,
+  "message": "用户已注销"
+}
+```
+
+**字段处理说明**:
+
+| 字段 | 处理方式 | 原因 |
+|------|---------|------|
+| Username | 改名：`deleted_{原值}_{时间戳}` | 释放唯一约束 |
+| ExternalUserId | 改名：`deleted_{原值}_{时间戳}` | 释放唯一约束 |
+| AccessToken | 设为`null` | 释放唯一约束 |
+| AffCode | 设为`null` | 释放唯一约束 |
+| WechatOpenId | 清空 | 允许重新绑定 |
+| WechatUnionId | 清空 | 允许重新绑定 |
+| AlipayUserId | 清空 | 允许重新绑定 |
+| Phone | 清空 | 允许重新绑定 |
+| Email | 清空 | 允许重新绑定 |
+| Status | 设为`Disabled` | 禁用账号 |
+
+**使用场景**:
+1. 用户在下游平台注销账号，同步注销New API账号
+2. 用户要求删除数据（GDPR合规）
+3. 清理测试账号
+
+**注意事项**:
+- ⚠️ 注销操作不可逆（历史数据保留但账号无法恢复）
+- ⚠️ 注销后所有Token立即失效
+- ⚠️ 建议在调用前确认用户意图
+
+### 5. 用户统计接口
 
 #### 获取用户使用统计
 ```http
@@ -735,7 +823,7 @@ GET /api/user/external/{external_user_id}/stats
 - `pricing_note`: 详细的计费说明，包含输入和输出token的消费
 - 只显示当前启用渠道的模型，禁用渠道的模型不会出现
 
-### 5. 消费记录查询接口
+### 6. 消费记录查询接口
 
 #### 获取用户消费记录
 ```http

@@ -1007,3 +1007,104 @@ func GetUserByPhone(phone string) *User {
 	}
 	return &user
 }
+
+// GetUserByExternalUserId 根据外部用户ID获取用户
+func GetUserByExternalUserId(externalUserId string) (*User, error) {
+	if externalUserId == "" {
+		return nil, errors.New("external_user_id 为空")
+	}
+	var user User
+	err := DB.Where("external_user_id = ?", externalUserId).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// DeactivateExternalUser 注销外部用户（软删除+释放唯一字段）
+// 返回：用户信息、禁用的Token数量、错误
+func DeactivateExternalUser(externalUserId string) (*User, int, error) {
+	if externalUserId == "" {
+		return nil, 0, errors.New("external_user_id 为空")
+	}
+
+	// 1. 查找用户
+	user, err := GetUserByExternalUserId(externalUserId)
+	if err != nil {
+		return nil, 0, fmt.Errorf("用户不存在: %w", err)
+	}
+
+	// 2. 检查是否已注销
+	if user.Status == common.UserStatusDisabled {
+		// 检查是否已被软删除（通过Unscoped查询）
+		var deletedUser User
+		err := DB.Unscoped().Where("id = ? AND deleted_at IS NOT NULL", user.Id).First(&deletedUser).Error
+		if err == nil {
+			return nil, 0, errors.New("用户已注销")
+		}
+	}
+
+	// 3. 生成时间戳后缀
+	timestamp := common.GetTimestamp()
+
+	// 4. 保存原始值用于日志
+	originalUsername := user.Username
+	originalExternalUserId := user.ExternalUserId
+
+	// 5. 释放唯一性字段（添加deleted_前缀和时间戳）
+	user.Username = fmt.Sprintf("deleted_%s_%d", originalUsername, timestamp)
+	user.ExternalUserId = fmt.Sprintf("deleted_%s_%d", originalExternalUserId, timestamp)
+	user.AccessToken = nil
+	user.AffCode = nil
+
+	// 6. 清空关联字段
+	user.WechatOpenId = ""
+	user.WechatUnionId = ""
+	user.AlipayUserId = ""
+	user.Phone = ""
+	user.Email = ""
+
+	// 7. 禁用账号
+	user.Status = common.UserStatusDisabled
+
+	// 8. 使用事务保存更改
+	tx := DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// 保存用户更改
+	if err := tx.Save(user).Error; err != nil {
+		tx.Rollback()
+		return nil, 0, fmt.Errorf("更新用户失败: %w", err)
+	}
+
+	// 9. 禁用所有Token
+	tokensDisabled, err := DisableAllTokensByUserId(tx, user.Id)
+	if err != nil {
+		tx.Rollback()
+		return nil, 0, fmt.Errorf("禁用Token失败: %w", err)
+	}
+
+	// 10. 软删除用户
+	if err := tx.Delete(user).Error; err != nil {
+		tx.Rollback()
+		return nil, 0, fmt.Errorf("软删除用户失败: %w", err)
+	}
+
+	// 11. 提交事务
+	if err := tx.Commit().Error; err != nil {
+		return nil, 0, fmt.Errorf("事务提交失败: %w", err)
+	}
+
+	// 12. 清除缓存
+	invalidateUserCache(user.Id)
+
+	// 13. 记录日志
+	common.SysLog(fmt.Sprintf("外部用户注销成功: %s -> %s, 禁用Token数: %d",
+		originalExternalUserId, user.ExternalUserId, tokensDisabled))
+
+	return user, tokensDisabled, nil
+}

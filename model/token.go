@@ -398,3 +398,31 @@ func UpdateTokenQuota(tokenId int, newQuota int) error {
 
 	return nil
 }
+
+// DisableAllTokensByUserId 禁用用户的所有Token
+// 使用传入的事务tx，如果tx为nil则使用默认DB
+func DisableAllTokensByUserId(tx *gorm.DB, userId int) (int, error) {
+	if tx == nil {
+		tx = DB
+	}
+
+	// 更新所有Token状态为禁用
+	result := tx.Model(&Token{}).Where("user_id = ?", userId).Update("status", common.TokenStatusDisabled)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+
+	// 清除Redis缓存中的所有Token
+	if common.RedisEnabled {
+		var tokens []Token
+		if err := tx.Where("user_id = ?", userId).Find(&tokens).Error; err == nil {
+			for _, token := range tokens {
+				gopool.Go(func() {
+					cacheDeleteToken(token.Key)
+				})
+			}
+		}
+	}
+
+	return int(result.RowsAffected), nil
+}
