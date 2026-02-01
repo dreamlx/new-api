@@ -34,6 +34,7 @@ backup_*.sql
 .gomodcache/
 .cache
 web/bun.lock
+plans
 
 # Electron
 electron/node_modules
