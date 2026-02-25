@@ -37,6 +37,9 @@ type ClaudeConvertInfo struct {
 	Usage            *dto.Usage
 	FinishReason     string
 	Done             bool
+
+	ToolCallBaseIndex      int
+	ToolCallMaxIndexOffset int
 }
 
 type RerankerInfo struct {
@@ -87,7 +90,6 @@ type RelayInfo struct {
 	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
 	UserGroup         string // 用户所在分组
 	TokenUnlimited    bool
-	DeductUserQuota   bool   // V1无限额度Token扣用户余额
 	StartTime         time.Time
 	FirstResponseTime time.Time
 	isFirstResponse   bool
@@ -99,6 +101,7 @@ type RelayInfo struct {
 	RelayMode              int
 	OriginModelName        string
 	RequestURLPath         string
+	RequestHeaders         map[string]string
 	ShouldIncludeUsage     bool
 	DisablePing            bool // 是否禁止向下游发送自定义 Ping
 	ClientWs               *websocket.Conn
@@ -116,6 +119,13 @@ type RelayInfo struct {
 	SendResponseCount      int
 	ReceivedResponseCount  int
 	FinalPreConsumedQuota  int // 最终预消耗的配额
+	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
+	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
+	// 必须在提交前锁定全额。
+	ForcePreConsume bool
+	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
+	// 免费模型时为 nil。
+	Billing BillingSettler
 	// BillingSource indicates whether this request is billed from wallet quota or subscription.
 	// "" or "wallet" => wallet; "subscription" => subscription
 	BillingSource string
@@ -135,6 +145,11 @@ type RelayInfo struct {
 	SubscriptionAmountUsedAfterPreConsume int64
 	IsClaudeBetaQuery                     bool // /v1/messages?beta=true
 	IsChannelTest                         bool // channel test request
+	RetryIndex                            int
+	LastError                             *types.NewAPIError
+	RuntimeHeadersOverride                map[string]interface{}
+	RuntimeHeadersDeletedNormalized       map[string]bool
+	UseRuntimeHeadersOverride             bool
 
 	PriceData types.PriceData
 
@@ -286,21 +301,24 @@ func (info *RelayInfo) ToString() string {
 
 // 定义支持流式选项的通道类型
 var streamSupportedChannels = map[int]bool{
-	constant.ChannelTypeOpenAI:     true,
-	constant.ChannelTypeAnthropic:  true,
-	constant.ChannelTypeAws:        true,
-	constant.ChannelTypeGemini:     true,
-	constant.ChannelCloudflare:     true,
-	constant.ChannelTypeAzure:      true,
-	constant.ChannelTypeVolcEngine: true,
-	constant.ChannelTypeOllama:     true,
-	constant.ChannelTypeXai:        true,
-	constant.ChannelTypeDeepSeek:   true,
-	constant.ChannelTypeBaiduV2:    true,
-	constant.ChannelTypeZhipu_v4:   true,
-	constant.ChannelTypeAli:        true,
-	constant.ChannelTypeSubmodel:   true,
-	constant.ChannelTypeCodex:      true,
+	constant.ChannelTypeOpenAI:      true,
+	constant.ChannelTypeAnthropic:   true,
+	constant.ChannelTypeAws:         true,
+	constant.ChannelTypeGemini:      true,
+	constant.ChannelCloudflare:      true,
+	constant.ChannelTypeAzure:       true,
+	constant.ChannelTypeVolcEngine:  true,
+	constant.ChannelTypeOllama:      true,
+	constant.ChannelTypeXai:         true,
+	constant.ChannelTypeDeepSeek:    true,
+	constant.ChannelTypeBaiduV2:     true,
+	constant.ChannelTypeZhipu_v4:    true,
+	constant.ChannelTypeAli:         true,
+	constant.ChannelTypeSubmodel:    true,
+	constant.ChannelTypeCodex:       true,
+	constant.ChannelTypeMoonshot:    true,
+	constant.ChannelTypeMiniMax:     true,
+	constant.ChannelTypeSiliconFlow: true,
 }
 
 func GenRelayInfoWs(c *gin.Context, ws *websocket.Conn) *RelayInfo {
@@ -320,10 +338,13 @@ func GenRelayInfoClaude(c *gin.Context, request dto.Request) *RelayInfo {
 	info.ClaudeConvertInfo = &ClaudeConvertInfo{
 		LastMessagesType: LastMessageTypeNone,
 	}
-	if c.Query("beta") == "true" {
-		info.IsClaudeBetaQuery = true
-	}
+	info.IsClaudeBetaQuery = c.Query("beta") == "true" || isClaudeBetaForced(c)
 	return info
+}
+
+func isClaudeBetaForced(c *gin.Context) bool {
+	channelOtherSettings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
+	return ok && channelOtherSettings.ClaudeBetaQuery
 }
 
 func GenRelayInfoRerank(c *gin.Context, request *dto.RerankRequest) *RelayInfo {
@@ -422,9 +443,14 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 	// firstResponseTime = time.Now() - 1 second
 
+	reqId := common.GetContextKeyString(c, common.RequestIdKey)
+	if reqId == "" {
+		reqId = common.GetTimeString() + common.GetRandomString(8)
+	}
 	info := &RelayInfo{
 		Request: request,
 
+		RequestId:  reqId,
 		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
 		UsingGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
 		UserGroup:  common.GetContextKeyString(c, constant.ContextKeyUserGroup),
@@ -433,15 +459,15 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 
-		TokenId:         common.GetContextKeyInt(c, constant.ContextKeyTokenId),
-		TokenKey:        common.GetContextKeyString(c, constant.ContextKeyTokenKey),
-		TokenUnlimited:  common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
-		TokenGroup:      tokenGroup,
-		DeductUserQuota: common.GetContextKeyBool(c, constant.ContextKeyDeductUserQuota),
+		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
+		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+		TokenGroup:     tokenGroup,
 
 		isFirstResponse: true,
 		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),
 		RequestURLPath:  c.Request.URL.String(),
+		RequestHeaders:  cloneRequestHeaders(c),
 		IsStream:        isStream,
 
 		StartTime:         startTime,
@@ -472,6 +498,27 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	}
 
 	return info
+}
+
+func cloneRequestHeaders(c *gin.Context) map[string]string {
+	if c == nil || c.Request == nil {
+		return nil
+	}
+	if len(c.Request.Header) == 0 {
+		return nil
+	}
+	headers := make(map[string]string, len(c.Request.Header))
+	for key := range c.Request.Header {
+		value := strings.TrimSpace(c.Request.Header.Get(key))
+		if value == "" {
+			continue
+		}
+		headers[key] = value
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
 }
 
 func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Request, ws *websocket.Conn) (*RelayInfo, error) {
@@ -511,8 +558,10 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 		return nil, errors.New("request is not a OpenAIResponsesCompactionRequest")
 	case types.RelayFormatTask:
 		info = genBaseRelayInfo(c, nil)
+		info.TaskRelayInfo = &TaskRelayInfo{}
 	case types.RelayFormatMjProxy:
 		info = genBaseRelayInfo(c, nil)
+		info.TaskRelayInfo = &TaskRelayInfo{}
 	default:
 		err = errors.New("invalid relay format")
 	}
@@ -607,8 +656,16 @@ func (info *RelayInfo) HasSendResponse() bool {
 type TaskRelayInfo struct {
 	Action       string
 	OriginTaskID string
+	// PublicTaskID 是提交时预生成的 task_xxxx 格式公开 ID，
+	// 供 DoResponse 在返回给客户端时使用（避免暴露上游真实 ID）。
+	PublicTaskID string
 
 	ConsumeQuota bool
+
+	// LockedChannel holds the full channel object when the request is bound to
+	// a specific channel (e.g., remix on origin task's channel). Stored as any
+	// to avoid an import cycle with model; callers type-assert to *model.Channel.
+	LockedChannel any
 }
 
 type TaskSubmitReq struct {
@@ -666,11 +723,11 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 func (t *TaskSubmitReq) UnmarshalMetadata(v any) error {
 	metadata := t.Metadata
 	if metadata != nil {
-		metadataBytes, err := json.Marshal(metadata)
+		metadataBytes, err := common.Marshal(metadata)
 		if err != nil {
 			return fmt.Errorf("marshal metadata failed: %w", err)
 		}
-		err = json.Unmarshal(metadataBytes, v)
+		err = common.Unmarshal(metadataBytes, v)
 		if err != nil {
 			return fmt.Errorf("unmarshal metadata to target failed: %w", err)
 		}
@@ -699,9 +756,15 @@ func FailTaskInfo(reason string) *TaskInfo {
 
 // RemoveDisabledFields 从请求 JSON 数据中移除渠道设置中禁用的字段
 // service_tier: 服务层级字段，可能导致额外计费（OpenAI、Claude、Responses API 支持）
+// inference_geo: Claude 数据驻留推理区域字段（仅 Claude 支持，默认过滤）
 // store: 数据存储授权字段，涉及用户隐私（仅 OpenAI、Responses API 支持，默认允许透传，禁用后可能导致 Codex 无法使用）
 // safety_identifier: 安全标识符，用于向 OpenAI 报告违规用户（仅 OpenAI 支持，涉及用户隐私）
-func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings) ([]byte, error) {
+// stream_options.include_obfuscation: 响应流混淆控制字段（仅 OpenAI Responses API 支持）
+func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings, channelPassThroughEnabled bool) ([]byte, error) {
+	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelPassThroughEnabled {
+		return jsonData, nil
+	}
+
 	var data map[string]interface{}
 	if err := common.Unmarshal(jsonData, &data); err != nil {
 		common.SysError("RemoveDisabledFields Unmarshal error :" + err.Error())
@@ -712,6 +775,13 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 	if !channelOtherSettings.AllowServiceTier {
 		if _, exists := data["service_tier"]; exists {
 			delete(data, "service_tier")
+		}
+	}
+
+	// 默认移除 inference_geo，除非明确允许（避免在未授权情况下透传数据驻留区域）
+	if !channelOtherSettings.AllowInferenceGeo {
+		if _, exists := data["inference_geo"]; exists {
+			delete(data, "inference_geo")
 		}
 	}
 
@@ -726,6 +796,22 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 	if !channelOtherSettings.AllowSafetyIdentifier {
 		if _, exists := data["safety_identifier"]; exists {
 			delete(data, "safety_identifier")
+		}
+	}
+
+	// 默认移除 stream_options.include_obfuscation，除非明确允许（避免关闭响应流混淆保护）
+	if !channelOtherSettings.AllowIncludeObfuscation {
+		if streamOptionsAny, exists := data["stream_options"]; exists {
+			if streamOptions, ok := streamOptionsAny.(map[string]interface{}); ok {
+				if _, includeExists := streamOptions["include_obfuscation"]; includeExists {
+					delete(streamOptions, "include_obfuscation")
+				}
+				if len(streamOptions) == 0 {
+					delete(data, "stream_options")
+				} else {
+					data["stream_options"] = streamOptions
+				}
+			}
 		}
 	}
 
