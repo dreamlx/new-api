@@ -13,7 +13,7 @@ import (
 type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
-	Key                string         `json:"key" gorm:"type:char(48);uniqueIndex"`
+	Key                string         `json:"key" gorm:"type:varchar(200);uniqueIndex"`
 	Status             int            `json:"status" gorm:"default:1"`
 	Name               string         `json:"name" gorm:"index" `
 	CreatedTime        int64          `json:"created_time" gorm:"bigint"`
@@ -223,6 +223,24 @@ func (token *Token) Delete() (err error) {
 		}
 	}()
 	err = DB.Delete(token).Error
+	return err
+}
+
+func DisableTokenByKey(key string) error {
+	err := DB.Model(&Token{}).Where(commonKeyCol+" = ?", key).
+		Update("status", common.TokenStatusDisabled).Error
+	if err == nil {
+		gopool.Go(func() { _ = cacheDeleteToken(key) })
+	}
+	return err
+}
+
+func EnableTokenByKey(key string) error {
+	err := DB.Model(&Token{}).Where(commonKeyCol+" = ?", key).
+		Update("status", common.TokenStatusEnabled).Error
+	if err == nil {
+		gopool.Go(func() { _ = cacheDeleteToken(key) })
+	}
 	return err
 }
 

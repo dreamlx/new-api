@@ -1,10 +1,37 @@
 package controller
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
+
+// createWisemodelToken 为用户创建 wisemodel token，并写入 tokens 表。
+// 并发场景下若 duplicate key 则忽略错误。
+func createWisemodelToken(user *model.User, wisemodelKey string) error {
+	newToken := &model.Token{
+		UserId:          user.Id,
+		Key:             wisemodelKey,
+		Name:            "wisemodel-token",
+		Status:          common.TokenStatusEnabled,
+		CreatedTime:     common.GetTimestamp(),
+		AccessedTime:    common.GetTimestamp(),
+		ExpiredTime:     -1,
+		UnlimitedQuota:  true,
+		DeductUserQuota: true,
+	}
+	err := newToken.Insert()
+	if err != nil {
+		// duplicate key：token 已存在（可能是 disabled 状态），重新启用
+		if strings.Contains(err.Error(), "Duplicate") || strings.Contains(err.Error(), "duplicate") {
+			return model.EnableTokenByKey(wisemodelKey)
+		}
+		return err
+	}
+	return nil
+}
 
 // WisemodelBind 用户绑定接口
 // POST /api/wisemodel/user/bind
@@ -66,8 +93,22 @@ func WisemodelBind(c *gin.Context) {
 			})
 			return
 		}
+
+		// 创建 wisemodel token
+		if err := createWisemodelToken(user, req.WisemodelKey); err != nil {
+			c.JSON(500, gin.H{
+				"message": "创建Token失败: " + err.Error(),
+				"success": false,
+			})
+			return
+		}
 	} else {
-		// 用户已存在，更新wisemodel_key
+		// 用户已存在，禁用旧 token（仅当 key 发生变化时），更新 key，创建新 token
+		if user.WisemodelKey != "" && user.WisemodelKey != req.WisemodelKey {
+			// 忽略禁用旧 token 的错误（旧 key 可能已不存在）
+			_ = model.DisableTokenByKey(user.WisemodelKey)
+		}
+
 		user.WisemodelKey = req.WisemodelKey
 		err := model.DB.Save(user).Error
 		if err != nil {
@@ -77,11 +118,20 @@ func WisemodelBind(c *gin.Context) {
 			})
 			return
 		}
+
+		if err := createWisemodelToken(user, req.WisemodelKey); err != nil {
+			c.JSON(500, gin.H{
+				"message": "创建Token失败: " + err.Error(),
+				"success": false,
+			})
+			return
+		}
 	}
 
 	c.JSON(200, gin.H{
-		"message": "绑定成功",
-		"success": true,
+		"message":    "绑定成功",
+		"success":    true,
+		"access_key": req.WisemodelKey,
 	})
 }
 
@@ -107,6 +157,11 @@ func DeleteWisemodelKey(c *gin.Context) {
 			"success": false,
 		})
 		return
+	}
+
+	// 禁用关联 token
+	if user.WisemodelKey != "" {
+		_ = model.DisableTokenByKey(user.WisemodelKey)
 	}
 
 	// 清空wisemodel_key
@@ -151,12 +206,26 @@ func UpdateWisemodelKey(c *gin.Context) {
 		return
 	}
 
+	// 禁用旧 token
+	if user.WisemodelKey != "" {
+		_ = model.DisableTokenByKey(user.WisemodelKey)
+	}
+
 	// 更新wisemodel_key
 	user.WisemodelKey = req.NewKey
 	err := model.DB.Save(user).Error
 	if err != nil {
 		c.JSON(500, gin.H{
 			"message": "更新失败: " + err.Error(),
+			"success": false,
+		})
+		return
+	}
+
+	// 创建新 token
+	if err := createWisemodelToken(user, req.NewKey); err != nil {
+		c.JSON(500, gin.H{
+			"message": "创建Token失败: " + err.Error(),
 			"success": false,
 		})
 		return
@@ -261,6 +330,11 @@ func DeleteWisemodelUser(c *gin.Context) {
 			"success": false,
 		})
 		return
+	}
+
+	// 禁用关联 token
+	if user.WisemodelKey != "" {
+		_ = model.DisableTokenByKey(user.WisemodelKey)
 	}
 
 	// 删除所有资源包记录
