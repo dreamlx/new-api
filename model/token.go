@@ -28,6 +28,9 @@ type Token struct {
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	CallbackUrl        string         `json:"callback_url" gorm:"type:varchar(500);default:''"`
+	CallbackEnabled    bool           `json:"callback_enabled" gorm:"default:false;index"`
+	CallbackSecret     string         `json:"callback_secret" gorm:"type:varchar(64);default:''"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
@@ -314,6 +317,14 @@ func (token *Token) Delete() (err error) {
 	}()
 	err = DB.Delete(token).Error
 	return err
+}
+
+func DisableAllTokensByUserId(tx *gorm.DB, userId int) (int64, error) {
+	result := tx.Model(&Token{}).Where("user_id = ? AND status = ?", userId, 1).Update("status", 2)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }
 
 func (token *Token) IsModelLimitsEnabled() bool {

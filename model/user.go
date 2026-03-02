@@ -1106,5 +1106,5 @@ func DeactivateExternalUser(externalUserId string) (*User, int, error) {
 	common.SysLog(fmt.Sprintf("外部用户注销成功: %s -> %s, 禁用Token数: %d",
 		originalExternalUserId, user.ExternalUserId, tokensDisabled))
 
-	return user, tokensDisabled, nil
+	return user, int(tokensDisabled), nil
 }
