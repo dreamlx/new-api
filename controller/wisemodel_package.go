@@ -185,19 +185,42 @@ func GetPackageUsage(c *gin.Context) {
 		return
 	}
 
-	var data []map[string]interface{}
+	data := make([]map[string]interface{}, 0)
 
 	for _, pkg := range packages {
-		// 从logs表统计该资源包创建后的所有消费
-		var logs []model.Log
-		query := model.LOG_DB.Where("user_id = ? AND type = ?", user.Id, model.LogTypeConsume)
-
-		// 只统计资源包创建后的消费
-		if !pkg.CreatedAt.IsZero() {
-			query = query.Where("created_at >= ?", pkg.CreatedAt)
+		// 解析 available_models（供查询过滤和响应使用）
+		availableModels := []string{}
+		if pkg.AvailableModels != "" {
+			for _, m := range strings.Split(pkg.AvailableModels, ",") {
+				m = strings.TrimSpace(m)
+				if m != "" {
+					availableModels = append(availableModels, m)
+				}
+			}
 		}
 
-		query.Find(&logs)
+		// 从 logs 表统计该资源包时间窗口内的消费
+		// BUG-1 修复: Log.CreatedAt 是 bigint（Unix 秒时间戳），必须用 .Unix() 转换后比较
+		var logs []model.Log
+		query := model.LOG_DB.Where("user_id = ? AND type = ?", user.Id, model.LogTypeConsume)
+		if !pkg.CreatedAt.IsZero() {
+			query = query.Where("created_at >= ?", pkg.CreatedAt.Unix())
+		}
+		// BUG-2 修复: 加上 ValidUntil 作为上边界，避免多包消费重叠
+		if pkg.ValidUntil != nil {
+			query = query.Where("created_at < ?", pkg.ValidUntil.Unix())
+		}
+		// BUG-3 修复: 按资源包可用模型过滤（为空则计入所有模型消费）
+		if len(availableModels) > 0 {
+			query = query.Where("model_name IN ?", availableModels)
+		}
+		if err := query.Find(&logs).Error; err != nil {
+			c.JSON(500, gin.H{
+				"message": "查询消费日志失败: " + err.Error(),
+				"success": false,
+			})
+			return
+		}
 
 		// 按模型聚合使用量
 		modelUsage := make(map[string]int)
@@ -212,31 +235,36 @@ func GetPackageUsage(c *gin.Context) {
 			totalUsed += log.Quota
 		}
 
-		// 构建details数组
+		// BUG-6 修复: 先计算顶层 remain/amount，再按模型 quota 占比分配 details
+		// 用 "总量 - 剩余" 得到 amount，保证 remain + amount = OriginalTokens/Points
+		var totalAmount int64 // 实际已消费的 token/point 数（展示单位）
+		if pkg.OriginalPoints > 0 {
+			remainPoints := (pkg.QuotaGranted - int64(totalUsed)) / 500000
+			totalAmount = int64(pkg.OriginalPoints) - remainPoints
+		} else {
+			remainTokens := (pkg.QuotaGranted - int64(totalUsed)) / 500000
+			totalAmount = int64(pkg.OriginalTokens) - remainTokens
+		}
+
+		// 构建 details 数组：各模型按 quota 占比分配 totalAmount
 		details := []map[string]interface{}{}
 		for modelName, quotaUsed := range modelUsage {
 			detail := make(map[string]interface{})
 			detail["model_name"] = modelName
 
-			// 根据资源包类型返回对应字段
+			var modelAmount int64
+			if totalUsed > 0 {
+				// 按 quota 占比分配已消费 token/point 数
+				modelAmount = int64(quotaUsed) * totalAmount / int64(totalUsed)
+			}
+
 			if pkg.OriginalPoints > 0 {
-				detail["used_amount"] = quotaUsed / 500000 // quota转回points
+				detail["used_amount"] = modelAmount
 			} else {
-				detail["used_amount_tokens"] = quotaUsed / 500000 // quota转回tokens
+				detail["used_amount_tokens"] = modelAmount
 			}
 
 			details = append(details, detail)
-		}
-
-		// 解析available_models
-		availableModels := []string{}
-		if pkg.AvailableModels != "" {
-			for _, model := range strings.Split(pkg.AvailableModels, ",") {
-				model = strings.TrimSpace(model)
-				if model != "" {
-					availableModels = append(availableModels, model)
-				}
-			}
 		}
 
 		// 构建响应数据
@@ -245,17 +273,16 @@ func GetPackageUsage(c *gin.Context) {
 		packageData["available_models"] = availableModels
 		packageData["details"] = details
 
-		// 根据资源包类型返回不同字段
 		if pkg.OriginalPoints > 0 {
-			// 积分模式
+			remainPoints := (pkg.QuotaGranted - int64(totalUsed)) / 500000
 			packageData["points"] = pkg.OriginalPoints
-			packageData["remain_points"] = (pkg.QuotaGranted - int64(totalUsed)) / 500000
-			packageData["amount"] = totalUsed / 500000
+			packageData["remain_points"] = remainPoints
+			packageData["amount"] = int64(pkg.OriginalPoints) - remainPoints
 		} else {
-			// Token模式
+			remainTokens := (pkg.QuotaGranted - int64(totalUsed)) / 500000
 			packageData["tokens"] = pkg.OriginalTokens
-			packageData["remain_tokens"] = (pkg.QuotaGranted - int64(totalUsed)) / 500000
-			packageData["amount_tokens"] = totalUsed / 500000
+			packageData["remain_tokens"] = remainTokens
+			packageData["amount_tokens"] = int64(pkg.OriginalTokens) - remainTokens
 		}
 
 		data = append(data, packageData)
