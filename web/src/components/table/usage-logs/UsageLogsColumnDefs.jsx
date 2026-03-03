@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import {
   Avatar,
+  Button,
   Space,
   Tag,
   Tooltip,
@@ -69,6 +70,34 @@ function formatRatio(ratio) {
     return ratio.toFixed(4);
   }
   return String(ratio);
+}
+
+function buildChannelAffinityTooltip(affinity, t) {
+  if (!affinity) {
+    return null;
+  }
+
+  const keySource = affinity.key_source || '-';
+  const keyPath = affinity.key_path || affinity.key_key || '-';
+  const keyHint = affinity.key_hint || '';
+  const keyFp = affinity.key_fp ? `#${affinity.key_fp}` : '';
+  const keyText = `${keySource}:${keyPath}${keyFp}`;
+
+  const lines = [
+    t('渠道亲和性'),
+    `${t('规则')}：${affinity.rule_name || '-'}`,
+    `${t('分组')}：${affinity.selected_group || '-'}`,
+    `${t('Key')}：${keyText}`,
+    ...(keyHint ? [`${t('Key 摘要')}：${keyHint}`] : []),
+  ];
+
+  return (
+    <div style={{ lineHeight: 1.6, display: 'flex', flexDirection: 'column' }}>
+      {lines.map((line, i) => (
+        <div key={i}>{line}</div>
+      ))}
+    </div>
+  );
 }
 
 // Render functions
@@ -245,11 +274,50 @@ function renderModelName(record, copyText, t) {
   }
 }
 
+function toTokenNumber(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return parsed;
+}
+
+function formatTokenCount(value) {
+  return toTokenNumber(value).toLocaleString();
+}
+
+function getPromptCacheSummary(other) {
+  if (!other || typeof other !== 'object') {
+    return null;
+  }
+
+  const cacheReadTokens = toTokenNumber(other.cache_tokens);
+  const cacheCreationTokens = toTokenNumber(other.cache_creation_tokens);
+  const cacheCreationTokens5m = toTokenNumber(other.cache_creation_tokens_5m);
+  const cacheCreationTokens1h = toTokenNumber(other.cache_creation_tokens_1h);
+
+  const hasSplitCacheCreation =
+    cacheCreationTokens5m > 0 || cacheCreationTokens1h > 0;
+  const cacheWriteTokens = hasSplitCacheCreation
+    ? cacheCreationTokens5m + cacheCreationTokens1h
+    : cacheCreationTokens;
+
+  if (cacheReadTokens <= 0 && cacheWriteTokens <= 0) {
+    return null;
+  }
+
+  return {
+    cacheReadTokens,
+    cacheWriteTokens,
+  };
+}
+
 export const getLogsColumns = ({
   t,
   COLUMN_KEYS,
   copyText,
   showUserInfoFunc,
+  openChannelAffinityUsageCacheModal,
   isAdminUser,
 }) => {
   return [
@@ -429,11 +497,56 @@ export const getLogsColumns = ({
     },
     {
       key: COLUMN_KEYS.PROMPT,
-      title: t('输入'),
+      title: (
+        <div className='flex items-center gap-1'>
+          {t('输入')}
+          <Tooltip
+            content={t(
+              '根据 Anthropic 协定，/v1/messages 的输入 tokens 仅统计非缓存输入，不包含缓存读取与缓存写入 tokens。',
+            )}
+          >
+            <IconHelpCircle className='text-gray-400 cursor-help' />
+          </Tooltip>
+        </div>
+      ),
       dataIndex: 'prompt_tokens',
       render: (text, record, index) => {
+        const other = getLogOther(record.other);
+        const cacheSummary = getPromptCacheSummary(other);
+        const hasCacheRead = (cacheSummary?.cacheReadTokens || 0) > 0;
+        const hasCacheWrite = (cacheSummary?.cacheWriteTokens || 0) > 0;
+        let cacheText = '';
+        if (hasCacheRead && hasCacheWrite) {
+          cacheText = `${t('缓存读')} ${formatTokenCount(cacheSummary.cacheReadTokens)} · ${t('写')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
+        } else if (hasCacheRead) {
+          cacheText = `${t('缓存读')} ${formatTokenCount(cacheSummary.cacheReadTokens)}`;
+        } else if (hasCacheWrite) {
+          cacheText = `${t('缓存写')} ${formatTokenCount(cacheSummary.cacheWriteTokens)}`;
+        }
+
         return record.type === 0 || record.type === 2 || record.type === 5 ? (
-          <>{<span> {text} </span>}</>
+          <div
+            style={{
+              display: 'inline-flex',
+              flexDirection: 'column',
+              alignItems: 'flex-start',
+              lineHeight: 1.2,
+            }}
+          >
+            <span>{text}</span>
+            {cacheText ? (
+              <span
+                style={{
+                  marginTop: 2,
+                  fontSize: 11,
+                  color: 'var(--semi-color-text-2)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {cacheText}
+              </span>
+            ) : null}
+          </div>
         ) : (
           <></>
         );
@@ -532,42 +645,39 @@ export const getLogsColumns = ({
         return isAdminUser ? (
           <Space>
             <div>{content}</div>
-	            {affinity ? (
-	              <Tooltip
-	                content={
-	                  <div style={{ lineHeight: 1.6 }}>
-	                    <Typography.Text strong>{t('渠道亲和性')}</Typography.Text>
-	                    <div>
-	                      <Typography.Text type='secondary'>
-	                        {t('规则')}：{affinity.rule_name || '-'}
-	                      </Typography.Text>
-	                    </div>
-	                    <div>
-	                      <Typography.Text type='secondary'>
-	                        {t('分组')}：{affinity.selected_group || '-'}
-	                      </Typography.Text>
-	                    </div>
-	                    <div>
-	                      <Typography.Text type='secondary'>
-	                        {t('Key')}：
-	                        {(affinity.key_source || '-') +
-	                          ':' +
-	                          (affinity.key_path || affinity.key_key || '-') +
-                          (affinity.key_fp ? `#${affinity.key_fp}` : '')}
-                      </Typography.Text>
+            {affinity ? (
+              <Tooltip
+                content={
+                  <div>
+                    {buildChannelAffinityTooltip(affinity, t)}
+                    <div style={{ marginTop: 6 }}>
+                      <Button
+                        theme='borderless'
+                        size='small'
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openChannelAffinityUsageCacheModal?.(affinity);
+                        }}
+                      >
+                        {t('查看详情')}
+                      </Button>
                     </div>
-	                  </div>
-	                }
-	              >
-	                <span>
-	                  <Tag className='channel-affinity-tag' color='cyan' shape='circle'>
-	                    <span className='channel-affinity-tag-content'>
-	                      <IconStarStroked style={{ fontSize: 13 }} />
-	                      {t('优选')}
-	                    </span>
-	                  </Tag>
-	                </span>
-	              </Tooltip>
+                  </div>
+                }
+              >
+                <span>
+                  <Tag
+                    className='channel-affinity-tag'
+                    color='cyan'
+                    shape='circle'
+                  >
+                    <span className='channel-affinity-tag-content'>
+                      <IconStarStroked style={{ fontSize: 13 }} />
+                      {t('优选')}
+                    </span>
+                  </Tag>
+                </span>
+              </Tooltip>
             ) : null}
           </Space>
         ) : (

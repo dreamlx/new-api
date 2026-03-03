@@ -1,6 +1,7 @@
 package model
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -764,9 +765,16 @@ func GetUserSetting(id int, fromDB bool) (settingMap dto.UserSetting, err error)
 		// Don't return error - fall through to DB
 	}
 	fromDB = true
-	err = DB.Model(&User{}).Where("id = ?", id).Select("setting").Find(&setting).Error
+	// can be nil setting
+	var safeSetting sql.NullString
+	err = DB.Model(&User{}).Where("id = ?", id).Select("setting").Find(&safeSetting).Error
 	if err != nil {
 		return settingMap, err
+	}
+	if safeSetting.Valid {
+		setting = safeSetting.String
+	} else {
+		setting = ""
 	}
 	userBase := &UserBase{
 		Setting: setting,
@@ -1106,5 +1114,5 @@ func DeactivateExternalUser(externalUserId string) (*User, int, error) {
 	common.SysLog(fmt.Sprintf("外部用户注销成功: %s -> %s, 禁用Token数: %d",
 		originalExternalUserId, user.ExternalUserId, tokensDisabled))
 
-	return user, tokensDisabled, nil
+	return user, int(tokensDisabled), nil
 }
