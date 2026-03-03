@@ -222,6 +222,115 @@ GET /api/user/external/{external_user_id}
 4. **认证方式**：使用external_user_id映射替代session认证
 5. **账号统一策略**：采用OpenID优先匹配方案，确保用户在多平台间账号统一（2025-09-17）
 
+## Docker管理最佳实践 🐳
+
+**重要提醒**: 避免使用 `killall` 强制终止 Docker Desktop，应优先使用优雅关闭方式。
+
+### ✅ 正确做法
+
+#### 1. 优雅停止容器
+```bash
+# 停止单个容器
+docker stop <container_name>
+
+# 停止所有运行中的容器
+docker stop $(docker ps -q)
+
+# 停止docker-compose管理的服务
+docker compose down
+docker compose -f docker-compose.db-only.yml down
+```
+
+#### 2. 优雅重启 Docker Desktop（macOS）
+```bash
+# 方法1：使用osascript（推荐）
+osascript -e 'quit app "Docker"'
+sleep 3
+open -a Docker
+
+# 方法2：通过菜单操作
+# Docker Desktop → Quit Docker Desktop
+# 然后从应用程序重新启动
+```
+
+#### 3. 检查Docker状态
+```bash
+# 检查Docker daemon是否就绪
+docker ps
+
+# 检查容器状态
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+# 检查特定容器
+docker ps --filter "name=mysql-dev" --filter "name=redis-dev"
+```
+
+### ❌ 错误做法
+
+```bash
+# ❌ 强制终止Docker Desktop进程
+killall "Docker Desktop"
+
+# 后果：
+# - 直接终止主进程，可能导致容器异常退出
+# - 数据库事务未完成可能导致数据损坏
+# - 容器状态不一致
+# - Docker daemon可能无法正常重启
+```
+
+### ⚠️ 最后手段
+
+仅在以下情况使用强制终止：
+- Docker Desktop 完全无响应
+- 通过菜单无法退出
+- osascript 命令无效
+- 系统需要紧急回收资源
+
+```bash
+# 最后手段：强制终止（谨慎使用）
+killall "Docker Desktop"
+# 然后检查是否有残留进程
+ps aux | grep -i docker | grep -v grep
+```
+
+### 💡 开发环境启动流程
+
+```bash
+# 1. 确保Docker Desktop运行
+docker ps > /dev/null 2>&1 || open -a Docker
+
+# 2. 等待Docker daemon就绪
+for i in {1..30}; do
+    docker ps > /dev/null 2>&1 && break || sleep 2
+done
+
+# 3. 启动数据库服务
+docker compose -f docker-compose.db-only.yml up -d
+
+# 4. 检查容器健康状态
+docker ps --filter "name=mysql-dev" --filter "name=redis-dev"
+
+# 5. 启动后端服务
+export $(cat .env.dev | xargs) && nohup ./new-api > logs/app.log 2>&1 &
+```
+
+### 📊 容器健康检查
+
+```bash
+# 检查容器健康状态（healthy标志）
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+# 查看容器日志
+docker logs mysql-dev --tail 50
+docker logs redis-dev --tail 50
+
+# 进入容器调试
+docker exec -it mysql-dev mysql -u root -pdev123456
+docker exec -it redis-dev redis-cli
+```
+
+---
+
 ## 微信小程序集成方案 (2025-09-17)
 
 ### 账号统一解决方案
