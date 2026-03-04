@@ -462,8 +462,9 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
-		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
-		TokenGroup:     tokenGroup,
+		TokenUnlimited:  common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+		DeductUserQuota: common.GetContextKeyBool(c, constant.ContextKeyDeductUserQuota),
+		TokenGroup:      tokenGroup,
 
 		isFirstResponse: true,
 		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),
