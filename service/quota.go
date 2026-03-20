@@ -34,8 +34,15 @@ func GetWisemodelPackageIdForLog(relayInfo *relaycommon.RelayInfo, tokenName str
 	if err != nil || len(packages) == 0 {
 		return ""
 	}
-	model.SortPackagesByValidUntil(packages)
-	return packages[0].PackageId
+	attribution, err := model.CalculatePackageAttribution(relayInfo.UserId, packages)
+	if err != nil {
+		return ""
+	}
+	selected := model.SelectPackageWithRemainingQuota(packages, attribution)
+	if selected == nil {
+		return ""
+	}
+	return selected.PackageId
 }
 
 type TokenDetails struct {

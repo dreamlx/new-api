@@ -135,21 +135,31 @@ check_env() {
 }
 
 # ── 测试用户准备 ──────────────────────────────────────────────────────────────
-TEST_PHONE="189$(date +%s | tail -c 9)"
-TEST_WM_KEY="wisemodel-test-$(date +%s)"
+TEST_PHONE="${TEST_PHONE:-18900000001}"
+TEST_WM_KEY="wisemodel-test-precision"
+TEST_USERNAME="prec_test_${TEST_PHONE}"
+TEST_USER_ID=""
 setup_test_user() {
     section "测试用户准备 (phone: $TEST_PHONE)"
 
+    # 先按手机号查，再按用户名查，任一命中则直接复用
+    TEST_USER_ID=$(qs "SELECT id FROM users WHERE phone='$TEST_PHONE' OR username='$TEST_USERNAME' LIMIT 1")
+
+    if [ -n "${TEST_USER_ID:-}" ]; then
+        pass "测试用户已存在，直接使用 (ID: $TEST_USER_ID)"
+        return
+    fi
+
+    # 用户不存在，调用 bind 接口创建（用含手机号的唯一用户名避免冲突）
     resp=$(api POST /api/wisemodel/user/bind "{
         \"phone\": \"$TEST_PHONE\",
         \"wisemodel_key\": \"$TEST_WM_KEY\",
-        \"username\": \"quota_precision_test\"
+        \"username\": \"$TEST_USERNAME\"
     }")
     if echo "$resp" | jq -e '.success == true' > /dev/null 2>&1; then
         pass "测试用户绑定成功"
     else
-        # 可能已存在，继续
-        info "绑定响应: $resp (可能已存在，继续)"
+        fail "测试用户绑定失败: $resp"; exit 1
     fi
 
     TEST_USER_ID=$(qs "SELECT id FROM users WHERE phone='$TEST_PHONE' LIMIT 1")
@@ -222,12 +232,12 @@ test_phase_b_log_attribution() {
     #    （实际 relay 需要真实模型调用，这里用 SQL 验证列结构和查询逻辑）
     NOW_UNIX=$(date +%s)
     qs "INSERT INTO logs (user_id, type, model_name, quota, created_at, wisemodel_package_id, other)
-        VALUES ('$TEST_USER_ID', 4, 'deepseek-chat', 50000, $NOW_UNIX, '$INTERNAL_PKG_ID', 'test')"
+        VALUES ('$TEST_USER_ID', 2, 'deepseek-chat', 50000, $NOW_UNIX, '$INTERNAL_PKG_ID', 'test')"
     LOG_ID=$(qs "SELECT LAST_INSERT_ID()")
     pass "注入合成消费 log (id=$LOG_ID, wisemodel_package_id=$INTERNAL_PKG_ID)"
 
     # 3. 验证查询：该 log 可以通过 wisemodel_package_id 精确找到
-    found=$(qs "SELECT COUNT(*) FROM logs WHERE wisemodel_package_id='$INTERNAL_PKG_ID' AND type=4")
+    found=$(qs "SELECT COUNT(*) FROM logs WHERE wisemodel_package_id='$INTERNAL_PKG_ID' AND type=2")
     if [ "${found:-0}" != "0" ]; then
         pass "通过 wisemodel_package_id 精确查询到 ${found} 条 log"
     else
@@ -236,7 +246,7 @@ test_phase_b_log_attribution() {
 
     # 4. 验证 package_usage API 显示消费
     resp=$(api POST /api/wisemodel/user/package_usage "{\"phone\": \"$TEST_PHONE\"}")
-    pkg_data=$(echo "$resp" | jq -r --arg pid "$INTERNAL_PKG_ID" '.data[] | select(.package_id == $pid)')
+    pkg_data=$(echo "$resp" | jq -r --arg pid "$INTERNAL_PKG_ID" '.data[] | select((.package_record_id // .package_id) == $pid)')
     if [ -n "${pkg_data:-}" ]; then
         remain=$(echo "$pkg_data" | jq -r '.remain_points // .remain_tokens')
         amount=$(echo "$pkg_data" | jq -r '.amount // .amount_tokens')
@@ -320,15 +330,15 @@ test_phase_c_fifo_overlap() {
     # 注入合成消费 log（wisemodel_package_id 为空，模拟旧 log，由 FIFO 归因）
     NOW_UNIX=$(date +%s)
     qs "INSERT INTO logs (user_id, type, model_name, quota, created_at, wisemodel_package_id, other)
-        VALUES ('$TEST_USER_ID', 4, 'deepseek-chat', 1000000, $NOW_UNIX, '', 'fifo_test')"
+        VALUES ('$TEST_USER_ID', 2, 'deepseek-chat', 1000000, $NOW_UNIX, '', 'fifo_test')"
     LOG_ID=$(qs "SELECT LAST_INSERT_ID()")
     info "注入旧 log（无 package_id，quota=1000000，期待归属 PKG-A）"
 
     # 调用 package_usage
     resp=$(api POST /api/wisemodel/user/package_usage "{\"phone\": \"$TEST_PHONE\"}")
 
-    data_a=$(echo "$resp" | jq -r --arg pid "$INTERNAL_A" '.data[] | select(.package_id == $pid)')
-    data_b=$(echo "$resp" | jq -r --arg pid "$INTERNAL_B" '.data[] | select(.package_id == $pid)')
+    data_a=$(echo "$resp" | jq -r --arg pid "$INTERNAL_A" '.data[] | select((.package_record_id // .package_id) == $pid)')
+    data_b=$(echo "$resp" | jq -r --arg pid "$INTERNAL_B" '.data[] | select((.package_record_id // .package_id) == $pid)')
 
     amount_a=$(echo "${data_a:-{\}}" | jq -r '.amount // 0')
     amount_b=$(echo "${data_b:-{\}}" | jq -r '.amount // 0')
@@ -411,20 +421,20 @@ test_phase_a_reclaim() {
 
     # 验证回收逻辑正确性：模拟手动执行回收（通过直接 UPDATE 验证乐观锁）
     qs "UPDATE wisemodel_packages SET reclaimed_at=NOW() WHERE package_id='$PKG_EXPIRE' AND reclaimed_at IS NULL"
-    rows=$(qs "SELECT ROW_COUNT()")
+    rows=$(qs "SELECT COUNT(*) FROM wisemodel_packages WHERE package_id='$PKG_EXPIRE' AND reclaimed_at IS NOT NULL")
     if [ "${rows:-0}" = "1" ]; then
-        pass "乐观锁 UPDATE (WHERE reclaimed_at IS NULL) 成功，RowsAffected=1"
+        pass "乐观锁 UPDATE (WHERE reclaimed_at IS NULL) 成功，reclaimed_at 已设置"
     else
-        info "ROW_COUNT=$rows（可能已被其他操作回收）"
+        info "第一次 UPDATE 后 reclaimed_at NOT NULL count=$rows（可能已被其他操作回收）"
     fi
 
-    # 再次执行，验证幂等性（RowsAffected 应为 0）
+    # 再次执行，验证幂等性（WHERE reclaimed_at IS NULL 不匹配任何行）
     qs "UPDATE wisemodel_packages SET reclaimed_at=NOW() WHERE package_id='$PKG_EXPIRE' AND reclaimed_at IS NULL"
-    rows2=$(qs "SELECT ROW_COUNT()")
-    if [ "${rows2:-1}" = "0" ]; then
-        pass "幂等性验证：重复执行 RowsAffected=0（防止重复回收）"
+    remaining_null=$(qs "SELECT COUNT(*) FROM wisemodel_packages WHERE package_id='$PKG_EXPIRE' AND reclaimed_at IS NULL")
+    if [ "${remaining_null:-1}" = "0" ]; then
+        pass "幂等性验证：重复执行后 reclaimed_at 仍已设置（防止重复回收）"
     else
-        fail "幂等性失败：重复执行 RowsAffected=${rows2}（可能重复回收）"
+        fail "幂等性失败：重复执行后 reclaimed_at IS NULL count=${remaining_null}（可能重复回收）"
     fi
 
     # 恢复 quota（清理）
@@ -437,6 +447,9 @@ test_phase_a_reclaim() {
 test_phase_b_mixed_query() {
     section "Phase B — 精确+FIFO 混合查询验证"
 
+    # PREC_MIX 到期时间设为1个月后（比 Phase C 中 PKG-A 的3个月更早），
+    # 确保 FIFO 排序时 PREC_MIX 优先被选中
+    EXPIRE_MIX=$(date -u -v+1m +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+1 month" +"%Y-%m-%dT%H:%M:%SZ")
     PKG_MIX="PREC_MIX_$(date +%s)"
     resp=$(api POST /api/wisemodel/orders/record "{
         \"order_id\": \"ORDER_MIX_$(date +%s)\",
@@ -448,7 +461,7 @@ test_phase_b_mixed_query() {
             \"amount\": 1.00,
             \"phone\": \"$TEST_PHONE\",
             \"is_free\": false,
-            \"valid_until\": \"2027-12-31T23:59:59Z\",
+            \"valid_until\": \"$EXPIRE_MIX\",
             \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
         }]
     }")
@@ -457,26 +470,28 @@ test_phase_b_mixed_query() {
     fi
 
     INTERNAL_MIX=$(qs "SELECT package_id FROM wisemodel_packages WHERE user_id='$TEST_USER_ID' AND package_id LIKE '${PKG_MIX}_%' ORDER BY created_at DESC LIMIT 1")
-    pass "创建混合测试包 $INTERNAL_MIX"
+    pass "创建混合测试包 $INTERNAL_MIX（到期: $EXPIRE_MIX，最早到期确保 FIFO 优先）"
     info "场景：一条旧 log（无 package_id，FIFO归因）+ 一条新 log（有 package_id，精确归因）"
 
+    # 注意：旧 log 的 created_at 必须 >= pkg.CreatedAt，否则 FIFO 条件不满足被忽略
+    # 使用当前时间（包已存在），新 log 晚 1 秒
     NOW_UNIX=$(date +%s)
 
-    # 旧 log：wisemodel_package_id = ''（FIFO）
+    # 旧 log：wisemodel_package_id = ''（FIFO 归因到 PREC_MIX，因为它最早到期）
     qs "INSERT INTO logs (user_id, type, model_name, quota, created_at, wisemodel_package_id, other)
-        VALUES ('$TEST_USER_ID', 4, 'deepseek-chat', 500000, $((NOW_UNIX-100)), '', 'old_log')"
+        VALUES ('$TEST_USER_ID', 2, 'deepseek-chat', 500000, $NOW_UNIX, '', 'old_log')"
     OLD_LOG_ID=$(qs "SELECT LAST_INSERT_ID()")
 
     # 新 log：wisemodel_package_id = INTERNAL_MIX（精确）
     qs "INSERT INTO logs (user_id, type, model_name, quota, created_at, wisemodel_package_id, other)
-        VALUES ('$TEST_USER_ID', 4, 'deepseek-chat', 500000, $NOW_UNIX, '$INTERNAL_MIX', 'new_log')"
+        VALUES ('$TEST_USER_ID', 2, 'deepseek-chat', 500000, $NOW_UNIX, '$INTERNAL_MIX', 'new_log')"
     NEW_LOG_ID=$(qs "SELECT LAST_INSERT_ID()")
 
     info "注入旧 log id=$OLD_LOG_ID (quota=500000, pkg_id='') + 新 log id=$NEW_LOG_ID (quota=500000, pkg_id=$INTERNAL_MIX)"
 
     # 调用 package_usage，期望 amount = 2（旧+新 各 1 point，合计 2）
     resp=$(api POST /api/wisemodel/user/package_usage "{\"phone\": \"$TEST_PHONE\"}")
-    pkg_data=$(echo "$resp" | jq -r --arg pid "$INTERNAL_MIX" '.data[] | select(.package_id == $pid)')
+    pkg_data=$(echo "$resp" | jq -r --arg pid "$INTERNAL_MIX" '.data[] | select((.package_record_id // .package_id) == $pid)')
     amount=$(echo "${pkg_data:-{\}}" | jq -r '.amount // 0')
     info "package_usage amount = $amount（期望 ≥ 2，旧+新各 500000 quota = 1 point 各）"
 

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/model"
@@ -25,14 +24,14 @@ func CreateOrder(c *gin.Context) {
 		OrderId      string `json:"order_id" binding:"required"`
 		PackageCount int    `json:"package_count" binding:"required"`
 		Packages     []struct {
-			Id         string `json:"id" binding:"required"`
-			Points     int    `json:"points"`
-			Tokens     int    `json:"tokens"`
+			Id         string  `json:"id" binding:"required"`
+			Points     int     `json:"points"`
+			Tokens     int     `json:"tokens"`
 			Amount     float64 `json:"amount" binding:"required"`
-			Phone      string `json:"phone" binding:"required"`
-			IsFree     bool   `json:"is_free"`
-			ValidUntil string `json:"valid_until" binding:"required"`
-			CreatedAt  string `json:"created_at" binding:"required"`
+			Phone      string  `json:"phone" binding:"required"`
+			IsFree     bool    `json:"is_free"`
+			ValidUntil string  `json:"valid_until" binding:"required"`
+			CreatedAt  string  `json:"created_at" binding:"required"`
 		} `json:"packages" binding:"required"`
 	}
 
@@ -115,16 +114,17 @@ func CreateOrder(c *gin.Context) {
 
 		// Fix 2：将quota更新和包记录创建包在同一事务中，保证原子性
 		wisemodelPkg := &model.WisemodelPackage{
-			UserId:          user.Id,
-			PackageId:       internalPackageId,
-			OrderId:         req.OrderId,
-			OriginalPoints:  originalPoints,
-			OriginalTokens:  originalTokens,
-			QuotaGranted:    quota,
-			AvailableModels: availableModels,
-			Amount:          pkg.Amount,
-			IsFree:          pkg.IsFree,
-			ValidUntil:      &validUntil,
+			UserId:            user.Id,
+			PackageId:         internalPackageId,
+			OriginalPackageId: pkg.Id,
+			OrderId:           req.OrderId,
+			OriginalPoints:    originalPoints,
+			OriginalTokens:    originalTokens,
+			QuotaGranted:      quota,
+			AvailableModels:   availableModels,
+			Amount:            pkg.Amount,
+			IsFree:            pkg.IsFree,
+			ValidUntil:        &validUntil,
 		}
 
 		err = model.DB.Transaction(func(tx *gorm.DB) error {
@@ -188,92 +188,14 @@ func GetPackageUsage(c *gin.Context) {
 		return
 	}
 
-	// 按 valid_until ASC 排序（nil 排最后）
-	model.SortPackagesByValidUntil(packages)
-
-	// 计算查询时间范围
-	minTime := packages[0].CreatedAt.Unix()
-	maxTime := time.Now().Unix()
-	for _, pkg := range packages {
-		if pkg.ValidUntil != nil && pkg.ValidUntil.Unix() > maxTime {
-			maxTime = pkg.ValidUntil.Unix()
-		}
-	}
-
-	// 分两步统计：新 log 用 wisemodel_package_id 精确查询，旧 log 用 FIFO 兜底
-
-	// Step1: 新 log（wisemodel_package_id 非空）按包 ID 精确统计
-	preciseAttribution := make(map[string]int64)
-	for _, pkg := range packages {
-		var sum int64
-		if err := model.LOG_DB.Model(&model.Log{}).
-			Where("wisemodel_package_id = ? AND type = ?", pkg.PackageId, model.LogTypeConsume).
-			Select("COALESCE(SUM(quota), 0)").Scan(&sum).Error; err != nil {
-			c.JSON(500, gin.H{"message": "精确查询消费失败: " + err.Error(), "success": false})
-			return
-		}
-		preciseAttribution[pkg.PackageId] = sum
-	}
-
-	// Step2: 旧 log（wisemodel_package_id 为 NULL 或空字符串）用 FIFO 兜底
-	var oldLogs []model.Log
-	if err := model.LOG_DB.
-		Where("user_id = ? AND type = ? AND (wisemodel_package_id IS NULL OR wisemodel_package_id = '') AND created_at >= ? AND created_at <= ?",
-			user.Id, model.LogTypeConsume, minTime, maxTime).
-		Order("created_at ASC").
-		Find(&oldLogs).Error; err != nil {
-		c.JSON(500, gin.H{"message": "查询旧消费日志失败: " + err.Error(), "success": false})
+	attribution, err := model.CalculatePackageAttribution(user.Id, packages)
+	if err != nil {
+		c.JSON(500, gin.H{"message": "查询资源包消费失败: " + err.Error(), "success": false})
 		return
-	}
-	fifoAttribution := model.AttributeLogsToPackages(packages, oldLogs)
-
-	// 合并两部分
-	attribution := make(map[string]int64)
-	for _, pkg := range packages {
-		attribution[pkg.PackageId] = preciseAttribution[pkg.PackageId] + fifoAttribution[pkg.PackageId]
 	}
 
 	// 构建响应
-	data := make([]map[string]interface{}, 0, len(packages))
-	for _, pkg := range packages {
-		consumed := attribution[pkg.PackageId]
-
-		// 解析可用模型
-		availableModels := []string{}
-		if pkg.AvailableModels != "" {
-			for _, m := range strings.Split(pkg.AvailableModels, ",") {
-				if m = strings.TrimSpace(m); m != "" {
-					availableModels = append(availableModels, m)
-				}
-			}
-		}
-
-		packageData := map[string]interface{}{
-			"package_id":       pkg.PackageId,
-			"available_models": availableModels,
-			"details":          []interface{}{},
-		}
-
-		if pkg.OriginalPoints > 0 {
-			remainPoints := (pkg.QuotaGranted - consumed) / 500000
-			if remainPoints < 0 {
-				remainPoints = 0
-			}
-			packageData["points"] = pkg.OriginalPoints
-			packageData["remain_points"] = remainPoints
-			packageData["amount"] = int64(pkg.OriginalPoints) - remainPoints
-		} else {
-			remainTokens := (pkg.QuotaGranted - consumed) / 500000
-			if remainTokens < 0 {
-				remainTokens = 0
-			}
-			packageData["tokens"] = pkg.OriginalTokens
-			packageData["remain_tokens"] = remainTokens
-			packageData["amount_tokens"] = int64(pkg.OriginalTokens) - remainTokens
-		}
-
-		data = append(data, packageData)
-	}
+	data := model.BuildPackageUsageRows(packages, attribution)
 
 	c.JSON(200, gin.H{"code": 200, "data": data, "msg": "success"})
 }
