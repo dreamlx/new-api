@@ -237,11 +237,17 @@ func GetPackageUsage(c *gin.Context) {
 
 		if pkg.OriginalPoints > 0 {
 			remainPoints := (pkg.QuotaGranted - consumed) / 500000
+			if remainPoints < 0 {
+				remainPoints = 0
+			}
 			packageData["points"] = pkg.OriginalPoints
 			packageData["remain_points"] = remainPoints
 			packageData["amount"] = int64(pkg.OriginalPoints) - remainPoints
 		} else {
 			remainTokens := (pkg.QuotaGranted - consumed) / 500000
+			if remainTokens < 0 {
+				remainTokens = 0
+			}
 			packageData["tokens"] = pkg.OriginalTokens
 			packageData["remain_tokens"] = remainTokens
 			packageData["amount_tokens"] = int64(pkg.OriginalTokens) - remainTokens
