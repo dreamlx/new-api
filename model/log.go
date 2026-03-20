@@ -35,7 +35,8 @@ type Log struct {
 	TokenId          int    `json:"token_id" gorm:"default:0;index"`
 	Group            string `json:"group" gorm:"index"`
 	Ip               string `json:"ip" gorm:"index;default:''"`
-	Other            string `json:"other"`
+	Other                string `json:"other"`
+	WisemodelPackageId   string `json:"wisemodel_package_id" gorm:"type:varchar(100);default:''"`
 }
 
 // don't use iota, avoid change log type value
@@ -143,7 +144,8 @@ type RecordConsumeLogParams struct {
 	UseTimeSeconds   int                    `json:"use_time_seconds"`
 	IsStream         bool                   `json:"is_stream"`
 	Group            string                 `json:"group"`
-	Other            map[string]interface{} `json:"other"`
+	Other              map[string]interface{} `json:"other"`
+	WisemodelPackageId string                 `json:"wisemodel_package_id"`
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
@@ -182,7 +184,8 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			}
 			return ""
 		}(),
-		Other: otherStr,
+		Other:              otherStr,
+		WisemodelPackageId: params.WisemodelPackageId,
 	}
 	err := LOG_DB.Create(log).Error
 	if err != nil {
