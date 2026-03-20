@@ -24,6 +24,20 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// getWisemodelPackageIdForLog 若当前请求来自 wisemodel token，
+// 返回该用户最早到期的有效包 ID；否则返回空字符串。
+func getWisemodelPackageIdForLog(relayInfo *relaycommon.RelayInfo, tokenName string) string {
+	if tokenName != "wisemodel-token" && !strings.HasPrefix(relayInfo.TokenKey, "wisemodel-") {
+		return ""
+	}
+	packages, err := model.GetActiveWisemodelPackages(relayInfo.UserId)
+	if err != nil || len(packages) == 0 {
+		return ""
+	}
+	model.SortPackagesByValidUntil(packages)
+	return packages[0].PackageId
+}
+
 type TokenDetails struct {
 	TextTokens  int
 	AudioTokens int
@@ -220,18 +234,19 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	other := GenerateWssOtherInfo(ctx, relayInfo, usage, modelRatio, groupRatio,
 		completionRatio.InexactFloat64(), audioRatio.InexactFloat64(), audioCompletionRatio.InexactFloat64(), modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:        relayInfo.ChannelId,
-		PromptTokens:     usage.InputTokens,
-		CompletionTokens: usage.OutputTokens,
-		ModelName:        logModel,
-		TokenName:        tokenName,
-		Quota:            quota,
-		Content:          logContent,
-		TokenId:          relayInfo.TokenId,
-		UseTimeSeconds:   int(useTimeSeconds),
-		IsStream:         relayInfo.IsStream,
-		Group:            relayInfo.UsingGroup,
-		Other:            other,
+		ChannelId:          relayInfo.ChannelId,
+		PromptTokens:       usage.InputTokens,
+		CompletionTokens:   usage.OutputTokens,
+		ModelName:          logModel,
+		TokenName:          tokenName,
+		Quota:              quota,
+		Content:            logContent,
+		TokenId:            relayInfo.TokenId,
+		UseTimeSeconds:     int(useTimeSeconds),
+		IsStream:           relayInfo.IsStream,
+		Group:              relayInfo.UsingGroup,
+		Other:              other,
+		WisemodelPackageId: getWisemodelPackageIdForLog(relayInfo, tokenName),
 	})
 }
 
@@ -340,18 +355,19 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		cacheCreationTokens1h, cacheCreationRatio1h,
 		modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:        relayInfo.ChannelId,
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
-		ModelName:        modelName,
-		TokenName:        tokenName,
-		Quota:            quota,
-		Content:          logContent,
-		TokenId:          relayInfo.TokenId,
-		UseTimeSeconds:   int(useTimeSeconds),
-		IsStream:         relayInfo.IsStream,
-		Group:            relayInfo.UsingGroup,
-		Other:            other,
+		ChannelId:          relayInfo.ChannelId,
+		PromptTokens:       promptTokens,
+		CompletionTokens:   completionTokens,
+		ModelName:          modelName,
+		TokenName:          tokenName,
+		Quota:              quota,
+		Content:            logContent,
+		TokenId:            relayInfo.TokenId,
+		UseTimeSeconds:     int(useTimeSeconds),
+		IsStream:           relayInfo.IsStream,
+		Group:              relayInfo.UsingGroup,
+		Other:              other,
+		WisemodelPackageId: getWisemodelPackageIdForLog(relayInfo, tokenName),
 	})
 
 }
@@ -465,18 +481,19 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	other := GenerateAudioOtherInfo(ctx, relayInfo, usage, modelRatio, groupRatio,
 		completionRatio.InexactFloat64(), audioRatio.InexactFloat64(), audioCompletionRatio.InexactFloat64(), modelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
-		ChannelId:        relayInfo.ChannelId,
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		ModelName:        logModel,
-		TokenName:        tokenName,
-		Quota:            quota,
-		Content:          logContent,
-		TokenId:          relayInfo.TokenId,
-		UseTimeSeconds:   int(useTimeSeconds),
-		IsStream:         relayInfo.IsStream,
-		Group:            relayInfo.UsingGroup,
-		Other:            other,
+		ChannelId:          relayInfo.ChannelId,
+		PromptTokens:       usage.PromptTokens,
+		CompletionTokens:   usage.CompletionTokens,
+		ModelName:          logModel,
+		TokenName:          tokenName,
+		Quota:              quota,
+		Content:            logContent,
+		TokenId:            relayInfo.TokenId,
+		UseTimeSeconds:     int(useTimeSeconds),
+		IsStream:           relayInfo.IsStream,
+		Group:              relayInfo.UsingGroup,
+		Other:              other,
+		WisemodelPackageId: getWisemodelPackageIdForLog(relayInfo, tokenName),
 	})
 }
 
