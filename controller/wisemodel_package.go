@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // PackageModels 资源包ID与可用模型的映射
@@ -83,22 +84,21 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
-		// 充值到用户quota
-		user.Quota += int(quota)
-		err := model.DB.Save(user).Error
+		// 解析时间（Fix 1：在事务之前校验，避免无效数据入库）
+		validUntil, err := time.Parse(time.RFC3339, pkg.ValidUntil)
 		if err != nil {
-			c.JSON(500, gin.H{
-				"message": "充值失败: " + err.Error(),
+			c.JSON(400, gin.H{
+				"message": "valid_until格式错误，应为RFC3339格式: " + err.Error(),
 				"success": false,
 			})
 			return
 		}
 
-		// 解析时间
-		validUntil, err := time.Parse(time.RFC3339, pkg.ValidUntil)
-		if err != nil {
+		// Fix 1：valid_until 必须是未来时间
+		now := time.Now()
+		if !validUntil.After(now) {
 			c.JSON(400, gin.H{
-				"message": "valid_until格式错误，应为RFC3339格式: " + err.Error(),
+				"message": fmt.Sprintf("资源包 %s 的valid_until必须是未来时间，当前值: %s", pkg.Id, pkg.ValidUntil),
 				"success": false,
 			})
 			return
@@ -110,7 +110,7 @@ func CreateOrder(c *gin.Context) {
 			availableModels = models
 		}
 
-		// 创建资源包记录
+		// Fix 2：将quota更新和包记录创建包在同一事务中，保证原子性
 		wisemodelPkg := &model.WisemodelPackage{
 			UserId:          user.Id,
 			PackageId:       pkg.Id,
@@ -124,10 +124,18 @@ func CreateOrder(c *gin.Context) {
 			ValidUntil:      &validUntil,
 		}
 
-		err = model.CreateWisemodelPackage(wisemodelPkg)
+		err = model.DB.Transaction(func(tx *gorm.DB) error {
+			// 步骤1：更新用户quota
+			if err := tx.Model(&model.User{}).Where("id = ?", user.Id).
+				UpdateColumn("quota", gorm.Expr("quota + ?", quota)).Error; err != nil {
+				return err
+			}
+			// 步骤2：创建资源包记录
+			return tx.Create(wisemodelPkg).Error
+		})
 		if err != nil {
 			c.JSON(500, gin.H{
-				"message": "创建资源包记录失败: " + err.Error(),
+				"message": "创建订单失败（事务回滚）: " + err.Error(),
 				"success": false,
 			})
 			return

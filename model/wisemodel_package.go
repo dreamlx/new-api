@@ -25,8 +25,8 @@ type WisemodelPackage struct {
 
 	Amount          float64    `json:"amount" gorm:"type:decimal(10,2);not null"`
 	IsFree          bool       `json:"is_free" gorm:"type:boolean;default:false"`
-	ValidUntil      *time.Time `json:"valid_until" gorm:"type:timestamp"`
-	CreatedAt       time.Time  `json:"created_at" gorm:"type:timestamp;default:CURRENT_TIMESTAMP"`
+	ValidUntil      *time.Time `json:"valid_until" gorm:"type:datetime"`
+	CreatedAt       time.Time  `json:"created_at" gorm:"type:datetime;default:CURRENT_TIMESTAMP"`
 }
 
 // TableName 指定表名
