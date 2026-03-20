@@ -158,7 +158,7 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		IsStream:           relayInfo.IsStream,
 		Group:              relayInfo.UsingGroup,
 		Other:              other,
-		WisemodelPackageId: getWisemodelPackageIdForLog(relayInfo, tokenName),
+		WisemodelPackageId: GetWisemodelPackageIdForLog(relayInfo, tokenName),
 	})
 
 	return true
