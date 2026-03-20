@@ -86,16 +86,16 @@ main() {
     qt "SELECT
           u.phone                                                                        AS phone,
           u.id                                                                           AS user_id,
-          t.status                                                                       AS token_status,
-          COUNT(p.id)                                                                    AS total_pkgs,
-          SUM(CASE WHEN p.valid_until IS NULL OR p.valid_until > NOW() THEN 1 ELSE 0 END) AS active_pkgs,
-          SUM(CASE WHEN p.valid_until IS NOT NULL AND p.valid_until <= NOW() THEN 1 ELSE 0 END) AS expired_pkgs,
+          GROUP_CONCAT(DISTINCT t.status ORDER BY t.status)                             AS token_statuses,
+          COUNT(DISTINCT p.id)                                                           AS total_pkgs,
+          SUM(CASE WHEN p.id IS NOT NULL AND (p.valid_until IS NULL OR p.valid_until > NOW()) THEN 1 ELSE 0 END) AS active_pkgs,
+          SUM(CASE WHEN p.id IS NOT NULL AND p.valid_until IS NOT NULL AND p.valid_until <= NOW() THEN 1 ELSE 0 END) AS expired_pkgs,
           IFNULL(MAX(p.valid_until), 'no_package')                                      AS max_valid_until
         FROM tokens t
         JOIN users u ON t.user_id = u.id
         LEFT JOIN wisemodel_packages p ON p.user_id = t.user_id
         WHERE t.name = 'wisemodel-token'
-        GROUP BY u.id, u.phone, t.status
+        GROUP BY u.id, u.phone
         ORDER BY 5 DESC, 4 DESC, u.phone;"
 
     echo ""
