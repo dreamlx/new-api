@@ -84,15 +84,13 @@ main() {
     echo -e "${BLUE}[ 用户资源包明细 ]${NC}"
     echo ""
     qt "SELECT
-          u.phone                                          AS 手机号,
-          u.id                                             AS user_id,
-          t.status                                         AS token状态,
-          COUNT(p.id)                                      AS 总包数,
-          SUM(CASE WHEN p.valid_until IS NULL OR p.valid_until > NOW() THEN 1 ELSE 0 END)
-                                                           AS 有效包数,
-          SUM(CASE WHEN p.valid_until IS NOT NULL AND p.valid_until <= NOW() THEN 1 ELSE 0 END)
-                                                           AS 已过期包数,
-          IFNULL(MAX(p.valid_until), '无资源包')           AS 最远有效期
+          u.phone                                                                        AS phone,
+          u.id                                                                           AS user_id,
+          t.status                                                                       AS token_status,
+          COUNT(p.id)                                                                    AS total_pkgs,
+          SUM(CASE WHEN p.valid_until IS NULL OR p.valid_until > NOW() THEN 1 ELSE 0 END) AS active_pkgs,
+          SUM(CASE WHEN p.valid_until IS NOT NULL AND p.valid_until <= NOW() THEN 1 ELSE 0 END) AS expired_pkgs,
+          IFNULL(MAX(p.valid_until), 'no_package')                                      AS max_valid_until
         FROM tokens t
         JOIN users u ON t.user_id = u.id
         LEFT JOIN wisemodel_packages p ON p.user_id = t.user_id
@@ -116,7 +114,7 @@ main() {
         echo -e "${RED}[ 警告：${blocked} 个启用中的 token 无有效资源包，请求将被拦截 ]${NC}"
         echo ""
         qt "SELECT u.phone, u.id AS user_id,
-                   COUNT(p.id) AS 历史包数
+                   COUNT(p.id) AS history_pkgs
             FROM tokens t
             JOIN users u ON t.user_id = u.id
             LEFT JOIN wisemodel_packages p ON p.user_id = t.user_id
