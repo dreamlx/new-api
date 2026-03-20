@@ -1,8 +1,11 @@
 package model
 
 import (
+	"fmt"
+	"sort"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
 
@@ -27,6 +30,7 @@ type WisemodelPackage struct {
 	IsFree          bool       `json:"is_free" gorm:"type:boolean;default:false"`
 	ValidUntil      *time.Time `json:"valid_until" gorm:"type:datetime"`
 	CreatedAt       time.Time  `json:"created_at" gorm:"type:datetime;default:CURRENT_TIMESTAMP"`
+	ReclaimedAt     *time.Time `json:"reclaimed_at" gorm:"type:datetime"`
 }
 
 // TableName 指定表名
@@ -80,4 +84,84 @@ func DeleteWisemodelPackagesByUserId(userId int) error {
 // MigrateWisemodelPackage 数据库迁移
 func MigrateWisemodelPackage(db *gorm.DB) error {
 	return db.AutoMigrate(&WisemodelPackage{})
+}
+
+// SortPackagesByValidUntil 按 ValidUntil ASC 排序，nil（永久包）排最后
+func SortPackagesByValidUntil(packages []*WisemodelPackage) {
+	sort.Slice(packages, func(i, j int) bool {
+		if packages[i].ValidUntil == nil {
+			return false
+		}
+		if packages[j].ValidUntil == nil {
+			return true
+		}
+		return packages[i].ValidUntil.Before(*packages[j].ValidUntil)
+	})
+}
+
+// ReclaimExpiredPackages 回收指定用户所有已过期但未回收包的剩余 quota。
+// 使用乐观锁（UPDATE WHERE reclaimed_at IS NULL）防止并发重复回收。
+func ReclaimExpiredPackages(userId int) error {
+	now := time.Now()
+	var packages []*WisemodelPackage
+	if err := DB.Where("user_id = ? AND valid_until < ? AND reclaimed_at IS NULL", userId, now).
+		Find(&packages).Error; err != nil {
+		return err
+	}
+	for _, pkg := range packages {
+		// 1. 估算该包时间窗口内的消费（近似值）
+		var consumed int64
+		if err := DB.Model(&Log{}).
+			Where("user_id = ? AND type = ? AND created_at >= ? AND created_at < ?",
+				userId, LogTypeConsume, pkg.CreatedAt.Unix(), pkg.ValidUntil.Unix()).
+			Select("COALESCE(SUM(quota), 0)").Scan(&consumed).Error; err != nil {
+			return err
+		}
+
+		refund := pkg.QuotaGranted - consumed
+		if refund < 0 {
+			refund = 0
+		}
+
+		// 2. 事务内：先原子抢占 reclaimed_at，再扣 quota
+		err := DB.Transaction(func(tx *gorm.DB) error {
+			result := tx.Model(&WisemodelPackage{}).
+				Where("id = ? AND reclaimed_at IS NULL", pkg.Id).
+				Update("reclaimed_at", now)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				// 已被其他 goroutine 处理，跳过
+				return nil
+			}
+			if refund > 0 {
+				return tx.Model(&User{}).Where("id = ?", userId).
+					UpdateColumn("quota", gorm.Expr("quota - ?", refund)).Error
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ReclaimAllExpiredPackages 全局扫描所有用户的过期未回收包，供后台定时任务调用。
+func ReclaimAllExpiredPackages() error {
+	var userIds []int
+	if err := DB.Model(&WisemodelPackage{}).
+		Where("valid_until < ? AND reclaimed_at IS NULL", time.Now()).
+		Distinct("user_id").Pluck("user_id", &userIds).Error; err != nil {
+		return err
+	}
+	var lastErr error
+	for _, userId := range userIds {
+		if err := ReclaimExpiredPackages(userId); err != nil {
+			common.SysError(fmt.Sprintf("ReclaimAllExpiredPackages: userId %d failed: %v", userId, err))
+			lastErr = err
+		}
+	}
+	return lastErr
 }
