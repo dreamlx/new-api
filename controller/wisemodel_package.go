@@ -200,19 +200,38 @@ func GetPackageUsage(c *gin.Context) {
 		}
 	}
 
-	// 查询该用户在此时间范围内的所有消费 log，按 created_at ASC
-	var logs []model.Log
-	if err := model.LOG_DB.
-		Where("user_id = ? AND type = ? AND created_at >= ? AND created_at <= ?",
-			user.Id, model.LogTypeConsume, minTime, maxTime).
-		Order("created_at ASC").
-		Find(&logs).Error; err != nil {
-		c.JSON(500, gin.H{"message": "查询消费日志失败: " + err.Error(), "success": false})
-		return
+	// 分两步统计：新 log 用 wisemodel_package_id 精确查询，旧 log 用 FIFO 兜底
+
+	// Step1: 新 log（wisemodel_package_id 非空）按包 ID 精确统计
+	preciseAttribution := make(map[string]int64)
+	for _, pkg := range packages {
+		var sum int64
+		if err := model.LOG_DB.Model(&model.Log{}).
+			Where("wisemodel_package_id = ? AND type = ?", pkg.PackageId, model.LogTypeConsume).
+			Select("COALESCE(SUM(quota), 0)").Scan(&sum).Error; err != nil {
+			c.JSON(500, gin.H{"message": "精确查询消费失败: " + err.Error(), "success": false})
+			return
+		}
+		preciseAttribution[pkg.PackageId] = sum
 	}
 
-	// FIFO 归因
-	attribution := model.AttributeLogsToPackages(packages, logs)
+	// Step2: 旧 log（wisemodel_package_id 为 NULL 或空字符串）用 FIFO 兜底
+	var oldLogs []model.Log
+	if err := model.LOG_DB.
+		Where("user_id = ? AND type = ? AND (wisemodel_package_id IS NULL OR wisemodel_package_id = '') AND created_at >= ? AND created_at <= ?",
+			user.Id, model.LogTypeConsume, minTime, maxTime).
+		Order("created_at ASC").
+		Find(&oldLogs).Error; err != nil {
+		c.JSON(500, gin.H{"message": "查询旧消费日志失败: " + err.Error(), "success": false})
+		return
+	}
+	fifoAttribution := model.AttributeLogsToPackages(packages, oldLogs)
+
+	// 合并两部分
+	attribution := make(map[string]int64)
+	for _, pkg := range packages {
+		attribution[pkg.PackageId] = preciseAttribution[pkg.PackageId] + fifoAttribution[pkg.PackageId]
+	}
 
 	// 构建响应
 	data := make([]map[string]interface{}, 0, len(packages))
