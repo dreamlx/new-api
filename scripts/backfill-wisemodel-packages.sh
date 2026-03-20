@@ -131,12 +131,12 @@ PKG_VALID_UNTIL="${VALID_UNTIL:-2178-04-08T06:25:14+08:00}"
 # 查询需要补录的用户
 # ──────────────────────────────────────────────
 get_phones_without_packages() {
-    # 有效 wisemodel-token 但无任何有效资源包的用户手机号
+    # 只处理 status=1 的启用 token（禁用 token 不在此处补录）
     qs "SELECT DISTINCT u.phone
         FROM tokens t
         JOIN users u ON t.user_id = u.id
         WHERE t.name = 'wisemodel-token'
-          AND t.status IN (1, 2)
+          AND t.status = 1
           AND u.phone != ''
           AND t.user_id NOT IN (
               SELECT user_id FROM wisemodel_packages
@@ -155,13 +155,16 @@ call_create_order() {
     local created_at
     created_at=$(date '+%Y-%m-%dT%H:%M:%S+08:00')
 
+    # package_id 加上手机号后缀保证全表唯一（原始 package_id 是全局唯一索引）
+    local pkg_id_unique="${PKG_ID}_${phone}"
+
     local payload
     payload=$(cat <<EOF
 {
   "order_id": "${order_id}",
   "package_count": 1,
   "packages": [{
-    "id": "${PKG_ID}",
+    "id": "${pkg_id_unique}",
     "amount": ${PKG_AMOUNT},
     "points": ${PKG_POINTS},
     "is_free": false,
