@@ -148,6 +148,33 @@ func ReclaimExpiredPackages(userId int) error {
 	return nil
 }
 
+// AttributeLogsToPackages 按 FIFO 规则将 logs 归属到 packages。
+// packages 必须已按 ValidUntil ASC（nil 排最后）排序。
+// logs 必须已按 CreatedAt ASC 排序。
+// 返回 map[packageId] -> 归属消费 quota 之和。
+func AttributeLogsToPackages(packages []*WisemodelPackage, logs []Log) map[string]int64 {
+	result := make(map[string]int64, len(packages))
+	for _, pkg := range packages {
+		result[pkg.PackageId] = 0
+	}
+	for _, log := range logs {
+		logTime := log.CreatedAt // Unix 秒
+		for _, pkg := range packages {
+			if logTime < pkg.CreatedAt.Unix() {
+				continue // log 早于此包创建时间
+			}
+			if pkg.ValidUntil != nil && logTime >= pkg.ValidUntil.Unix() {
+				continue // log 晚于此包到期时间
+			}
+			// 此包在 log 时刻有效，FIFO：归属第一个匹配包
+			result[pkg.PackageId] += int64(log.Quota)
+			break
+		}
+		// 若无匹配包，此 log 忽略
+	}
+	return result
+}
+
 // ReclaimAllExpiredPackages 全局扫描所有用户的过期未回收包，供后台定时任务调用。
 func ReclaimAllExpiredPackages() error {
 	var userIds []int

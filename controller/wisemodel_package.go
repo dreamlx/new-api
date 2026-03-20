@@ -110,10 +110,13 @@ func CreateOrder(c *gin.Context) {
 			availableModels = models
 		}
 
+		// 追加纳秒时间戳确保 DB 唯一性，允许同一 package_id 多次合法提交
+		internalPackageId := fmt.Sprintf("%s_%d", pkg.Id, time.Now().UnixNano())
+
 		// Fix 2：将quota更新和包记录创建包在同一事务中，保证原子性
 		wisemodelPkg := &model.WisemodelPackage{
 			UserId:          user.Id,
-			PackageId:       pkg.Id,
+			PackageId:       internalPackageId,
 			OrderId:         req.OrderId,
 			OriginalPoints:  originalPoints,
 			OriginalTokens:  originalTokens,
@@ -164,130 +167,81 @@ func GetPackageUsage(c *gin.Context) {
 	var req struct {
 		Phone string `json:"phone" binding:"required"`
 	}
-
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{
-			"message": "参数错误: " + err.Error(),
-			"success": false,
-		})
+		c.JSON(400, gin.H{"message": "参数错误: " + err.Error(), "success": false})
 		return
 	}
 
-	// 查找用户
 	user := model.GetUserByPhone(req.Phone)
 	if user == nil {
-		c.JSON(404, gin.H{
-			"message": "用户不存在",
-			"success": false,
-		})
+		c.JSON(404, gin.H{"message": "用户不存在", "success": false})
 		return
 	}
 
-	// 获取用户的所有资源包
 	packages, err := model.GetWisemodelPackagesByUserId(user.Id)
 	if err != nil {
-		c.JSON(500, gin.H{
-			"message": "查询资源包失败: " + err.Error(),
-			"success": false,
-		})
+		c.JSON(500, gin.H{"message": "查询资源包失败: " + err.Error(), "success": false})
+		return
+	}
+	if len(packages) == 0 {
+		c.JSON(200, gin.H{"code": 200, "data": []interface{}{}, "msg": "success"})
 		return
 	}
 
-	data := make([]map[string]interface{}, 0)
+	// 按 valid_until ASC 排序（nil 排最后）
+	model.SortPackagesByValidUntil(packages)
 
+	// 计算查询时间范围
+	minTime := packages[0].CreatedAt.Unix()
+	maxTime := time.Now().Unix()
 	for _, pkg := range packages {
-		// 解析 available_models（供查询过滤和响应使用）
+		if pkg.ValidUntil != nil && pkg.ValidUntil.Unix() > maxTime {
+			maxTime = pkg.ValidUntil.Unix()
+		}
+	}
+
+	// 查询该用户在此时间范围内的所有消费 log，按 created_at ASC
+	var logs []model.Log
+	if err := model.LOG_DB.
+		Where("user_id = ? AND type = ? AND created_at >= ? AND created_at <= ?",
+			user.Id, model.LogTypeConsume, minTime, maxTime).
+		Order("created_at ASC").
+		Find(&logs).Error; err != nil {
+		c.JSON(500, gin.H{"message": "查询消费日志失败: " + err.Error(), "success": false})
+		return
+	}
+
+	// FIFO 归因
+	attribution := model.AttributeLogsToPackages(packages, logs)
+
+	// 构建响应
+	data := make([]map[string]interface{}, 0, len(packages))
+	for _, pkg := range packages {
+		consumed := attribution[pkg.PackageId]
+
+		// 解析可用模型
 		availableModels := []string{}
 		if pkg.AvailableModels != "" {
 			for _, m := range strings.Split(pkg.AvailableModels, ",") {
-				m = strings.TrimSpace(m)
-				if m != "" {
+				if m = strings.TrimSpace(m); m != "" {
 					availableModels = append(availableModels, m)
 				}
 			}
 		}
 
-		// 从 logs 表统计该资源包时间窗口内的消费
-		// BUG-1 修复: Log.CreatedAt 是 bigint（Unix 秒时间戳），必须用 .Unix() 转换后比较
-		var logs []model.Log
-		query := model.LOG_DB.Where("user_id = ? AND type = ?", user.Id, model.LogTypeConsume)
-		if !pkg.CreatedAt.IsZero() {
-			query = query.Where("created_at >= ?", pkg.CreatedAt.Unix())
+		packageData := map[string]interface{}{
+			"package_id":       pkg.PackageId,
+			"available_models": availableModels,
+			"details":          []interface{}{},
 		}
-		// BUG-2 修复: 加上 ValidUntil 作为上边界，避免多包消费重叠
-		if pkg.ValidUntil != nil {
-			query = query.Where("created_at < ?", pkg.ValidUntil.Unix())
-		}
-		// BUG-3 修复: 按资源包可用模型过滤（为空则计入所有模型消费）
-		if len(availableModels) > 0 {
-			query = query.Where("model_name IN ?", availableModels)
-		}
-		if err := query.Find(&logs).Error; err != nil {
-			c.JSON(500, gin.H{
-				"message": "查询消费日志失败: " + err.Error(),
-				"success": false,
-			})
-			return
-		}
-
-		// 按模型聚合使用量
-		modelUsage := make(map[string]int)
-		totalUsed := int(0)
-
-		for _, log := range logs {
-			modelName := log.ModelName
-			if modelName == "" {
-				modelName = "unknown"
-			}
-			modelUsage[modelName] += log.Quota
-			totalUsed += log.Quota
-		}
-
-		// BUG-6 修复: 先计算顶层 remain/amount，再按模型 quota 占比分配 details
-		// 用 "总量 - 剩余" 得到 amount，保证 remain + amount = OriginalTokens/Points
-		var totalAmount int64 // 实际已消费的 token/point 数（展示单位）
-		if pkg.OriginalPoints > 0 {
-			remainPoints := (pkg.QuotaGranted - int64(totalUsed)) / 500000
-			totalAmount = int64(pkg.OriginalPoints) - remainPoints
-		} else {
-			remainTokens := (pkg.QuotaGranted - int64(totalUsed)) / 500000
-			totalAmount = int64(pkg.OriginalTokens) - remainTokens
-		}
-
-		// 构建 details 数组：各模型按 quota 占比分配 totalAmount
-		details := []map[string]interface{}{}
-		for modelName, quotaUsed := range modelUsage {
-			detail := make(map[string]interface{})
-			detail["model_name"] = modelName
-
-			var modelAmount int64
-			if totalUsed > 0 {
-				// 按 quota 占比分配已消费 token/point 数
-				modelAmount = int64(quotaUsed) * totalAmount / int64(totalUsed)
-			}
-
-			if pkg.OriginalPoints > 0 {
-				detail["used_amount"] = modelAmount
-			} else {
-				detail["used_amount_tokens"] = modelAmount
-			}
-
-			details = append(details, detail)
-		}
-
-		// 构建响应数据
-		packageData := make(map[string]interface{})
-		packageData["package_id"] = pkg.PackageId
-		packageData["available_models"] = availableModels
-		packageData["details"] = details
 
 		if pkg.OriginalPoints > 0 {
-			remainPoints := (pkg.QuotaGranted - int64(totalUsed)) / 500000
+			remainPoints := (pkg.QuotaGranted - consumed) / 500000
 			packageData["points"] = pkg.OriginalPoints
 			packageData["remain_points"] = remainPoints
 			packageData["amount"] = int64(pkg.OriginalPoints) - remainPoints
 		} else {
-			remainTokens := (pkg.QuotaGranted - int64(totalUsed)) / 500000
+			remainTokens := (pkg.QuotaGranted - consumed) / 500000
 			packageData["tokens"] = pkg.OriginalTokens
 			packageData["remain_tokens"] = remainTokens
 			packageData["amount_tokens"] = int64(pkg.OriginalTokens) - remainTokens
@@ -296,9 +250,5 @@ func GetPackageUsage(c *gin.Context) {
 		data = append(data, packageData)
 	}
 
-	c.JSON(200, gin.H{
-		"code": 200,
-		"data": data,
-		"msg":  "success",
-	})
+	c.JSON(200, gin.H{"code": 200, "data": data, "msg": "success"})
 }
