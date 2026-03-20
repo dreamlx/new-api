@@ -36,7 +36,7 @@ type Log struct {
 	Group            string `json:"group" gorm:"index"`
 	Ip               string `json:"ip" gorm:"index;default:''"`
 	Other                string `json:"other"`
-	WisemodelPackageId   string `json:"wisemodel_package_id" gorm:"type:varchar(100);default:''"`
+	WisemodelPackageId   string `json:"wisemodel_package_id" gorm:"type:varchar(100);default:'';index"`
 }
 
 // don't use iota, avoid change log type value
