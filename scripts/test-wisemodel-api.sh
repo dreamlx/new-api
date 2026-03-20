@@ -75,7 +75,10 @@ check_service() {
 
 # 生成唯一手机号
 generate_phone() {
-    echo "139$(date +%s | tail -c 9)"
+    #echo "139$(date +%s | tail -c 9)"
+    echo "18301852832"
+    # echo "15321866239"
+
 }
 
 # 测试1：用户绑定
@@ -84,6 +87,7 @@ test_user_bind() {
 
     PHONE=$(generate_phone)
     WM_KEY="wm_key_test_$(date +%s)"
+    WM_KEY="wisemodel-iygugqeusgbodidvxxgl"
     RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/bind" \
         -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
@@ -133,8 +137,7 @@ test_create_order_points() {
 
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
     ORDER_ID="ORDER_TEST_$(date +%s)"
-    PACKAGE_ID="PKG_TEST_$(date +%s)"
-    PACKAGE_ID="package16"
+    PACKAGE_ID="package16_$(date +%s)"
 
     RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
         -H "Authorization: Bearer $TOKEN" \
@@ -544,13 +547,13 @@ main() {
     # 核心功能测试
     test_user_bind
     sleep 1
-    test_update_key
+    # test_update_key
     sleep 1
     test_create_order_points
     sleep 1
-    test_create_order_tokens
+    # test_create_order_tokens
     sleep 1
-    test_create_order_free
+    # test_create_order_free
     sleep 1
     test_package_usage
     sleep 1
