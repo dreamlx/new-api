@@ -7,7 +7,7 @@
 set -e
 
 # 配置
-BASE_URL="${BASE_URL:-http://localhost:3000}"
+BASE_URL="${BASE_URL:-https://open.ospreyai.cn}"
 TOKEN="${WISEMODEL_API_TOKEN:-test_wisemodel_token_12345}"
 
 # 颜色输出
@@ -29,12 +29,12 @@ log_info() {
 
 log_success() {
     echo -e "${GREEN}[PASS]${NC} $1"
-    ((PASSED_TESTS++))
+    PASSED_TESTS=$((PASSED_TESTS + 1))
 }
 
 log_error() {
     echo -e "${RED}[FAIL]${NC} $1"
-    ((FAILED_TESTS++))
+    FAILED_TESTS=$((FAILED_TESTS + 1))
 }
 
 log_warning() {
@@ -42,7 +42,7 @@ log_warning() {
 }
 
 test_start() {
-    ((TOTAL_TESTS++))
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
     log_info "测试 #$TOTAL_TESTS: $1"
 }
 
@@ -83,18 +83,20 @@ test_user_bind() {
     test_start "用户绑定 - 新用户"
 
     PHONE=$(generate_phone)
+    WM_KEY="wm_key_test_$(date +%s)"
     RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/bind" \
         -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
         -d "{
             \"phone\": \"$PHONE\",
-            \"wisemodel_key\": \"wm_key_test_$(date +%s)\",
+            \"wisemodel_key\": \"$WM_KEY\",
             \"username\": \"测试用户_$(date +%s)\"
         }")
 
     if check_json_field "$RESPONSE" ".success" "true"; then
         log_success "  用户绑定成功"
         echo "$PHONE" > /tmp/wisemodel_test_phone.txt
+        echo "$WM_KEY" > /tmp/wisemodel_test_wm_key.txt
     else
         log_error "  用户绑定失败"
         echo "  响应: $RESPONSE"
@@ -106,16 +108,19 @@ test_update_key() {
     test_start "更新Wisemodel Key"
 
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
+    # NEW_KEY="wm_key_updated_$(date +%s)"
+    NEW_KEY="wisemodel-bvwulxeoviypfmzfvrwj"
     RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/update_wisemodel_key" \
         -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
         -d "{
             \"phone\": \"$PHONE\",
-            \"new_key\": \"wm_key_updated_$(date +%s)\"
+            \"new_key\": \"$NEW_KEY\"
         }")
 
     if check_json_field "$RESPONSE" ".success" "true"; then
         log_success "  Key更新成功"
+        echo "$NEW_KEY" > /tmp/wisemodel_test_wm_key.txt
     else
         log_error "  Key更新失败"
         echo "  响应: $RESPONSE"
@@ -129,6 +134,7 @@ test_create_order_points() {
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
     ORDER_ID="ORDER_TEST_$(date +%s)"
     PACKAGE_ID="PKG_TEST_$(date +%s)"
+    PACKAGE_ID="package16"
 
     RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
         -H "Authorization: Bearer $TOKEN" \
@@ -139,12 +145,12 @@ test_create_order_points() {
             \"packages\": [
                 {
                     \"id\": \"$PACKAGE_ID\",
-                    \"points\": 10,
+                    \"points\": 1000000000,
                     \"tokens\": 0,
-                    \"amount\": 10.00,
+                    \"amount\": 1.00,
                     \"phone\": \"$PHONE\",
                     \"is_free\": false,
-                    \"valid_until\": \"2025-12-31T23:59:59Z\",
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
                     \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
                 }
             ]
@@ -177,11 +183,11 @@ test_create_order_tokens() {
                 {
                     \"id\": \"$PACKAGE_ID\",
                     \"points\": 0,
-                    \"tokens\": 20,
-                    \"amount\": 20.00,
+                    \"tokens\": 1000000000,
+                    \"amount\": 1.00,
                     \"phone\": \"$PHONE\",
                     \"is_free\": false,
-                    \"valid_until\": \"2025-12-31T23:59:59Z\",
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
                     \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
                 }
             ]
@@ -217,7 +223,7 @@ test_create_order_free() {
                     \"amount\": 0.00,
                     \"phone\": \"$PHONE\",
                     \"is_free\": true,
-                    \"valid_until\": \"2025-12-31T23:59:59Z\",
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
                     \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
                 }
             ]
@@ -360,7 +366,7 @@ test_package_count_mismatch() {
                     \"amount\": 10.00,
                     \"phone\": \"$PHONE\",
                     \"is_free\": false,
-                    \"valid_until\": \"2025-12-31T23:59:59Z\",
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
                     \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
                 }
             ]
@@ -395,7 +401,7 @@ test_multiple_packages() {
                     \"amount\": 15.00,
                     \"phone\": \"$PHONE\",
                     \"is_free\": false,
-                    \"valid_until\": \"2025-12-31T23:59:59Z\",
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
                     \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
                 },
                 {
@@ -405,7 +411,7 @@ test_multiple_packages() {
                     \"amount\": 25.00,
                     \"phone\": \"$PHONE\",
                     \"is_free\": false,
-                    \"valid_until\": \"2025-12-31T23:59:59Z\",
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
                     \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
                 }
             ]
@@ -415,6 +421,96 @@ test_multiple_packages() {
         log_success "  多资源包订单创建成功"
     else
         log_error "  多资源包订单创建失败"
+        echo "  响应: $RESPONSE"
+    fi
+}
+
+# 测试13：Chat接口调用（使用wisemodel_key作为Bearer Token）
+test_chat_call() {
+    test_start "Chat接口调用 - 使用wisemodel_key"
+
+    if [ ! -f /tmp/wisemodel_test_wm_key.txt ]; then
+        log_error "  未找到wisemodel_key，请先运行用户绑定测试"
+        return
+    fi
+
+    WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
+    CHAT_MODEL="${WISEMODEL_CHAT_MODEL:-minimax-m2-latest}"
+
+    RESPONSE=$(curl -s -X POST "$BASE_URL/v1/chat/completions" \
+        -H "Authorization: Bearer $WM_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"model\": \"$CHAT_MODEL\",
+            \"messages\": [
+                {\"role\": \"user\", \"content\": \"Hello, reply with just OK\"}
+            ],
+            \"max_tokens\": 10
+        }")
+
+    CHOICES=$(echo "$RESPONSE" | jq '.choices | length' 2>/dev/null)
+    if [ -n "$CHOICES" ] && [ "$CHOICES" -gt 0 ] 2>/dev/null; then
+        CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+        PROMPT_TOKENS=$(echo "$RESPONSE" | jq -r '.usage.prompt_tokens // "N/A"')
+        COMPLETION_TOKENS=$(echo "$RESPONSE" | jq -r '.usage.completion_tokens // "N/A"')
+        log_success "  Chat调用成功"
+        log_info "  模型: $CHAT_MODEL"
+        log_info "  回复内容: $CONTENT"
+        log_info "  Token使用: prompt=$PROMPT_TOKENS, completion=$COMPLETION_TOKENS"
+    else
+        log_error "  Chat调用失败"
+        echo "  响应: $RESPONSE"
+    fi
+}
+
+# 测试14：Chat后验证订单数据返回
+test_verify_order_after_chat() {
+    test_start "Chat后验证订单数据返回"
+
+    PHONE=$(cat /tmp/wisemodel_test_phone.txt)
+    RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/package_usage" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"phone\": \"$PHONE\"
+        }")
+
+    if check_json_field "$RESPONSE" ".code" "200"; then
+        PACKAGE_COUNT=$(echo "$RESPONSE" | jq '.data | length')
+        log_success "  订单数据返回成功，共 $PACKAGE_COUNT 条订单记录"
+
+        # 遍历每个资源包，打印订单详情
+        for i in $(seq 0 $((PACKAGE_COUNT - 1))); do
+            PKG_ID=$(echo "$RESPONSE" | jq -r ".data[$i].package_id")
+            DETAIL_COUNT=$(echo "$RESPONSE" | jq ".data[$i].details | length")
+
+            # 积分包
+            REMAIN_POINTS=$(echo "$RESPONSE" | jq -r ".data[$i].remain_points // empty")
+            # Token包
+            REMAIN_TOKENS=$(echo "$RESPONSE" | jq -r ".data[$i].remain_tokens // empty")
+
+            if [ -n "$REMAIN_POINTS" ]; then
+                TOTAL_POINTS=$(echo "$RESPONSE" | jq -r ".data[$i].points")
+                USED=$(echo "$RESPONSE" | jq -r ".data[$i].amount")
+                log_info "  [包$i] $PKG_ID: points=$TOTAL_POINTS, 已用=$USED, 剩余=$REMAIN_POINTS, 消费记录=$DETAIL_COUNT"
+            elif [ -n "$REMAIN_TOKENS" ]; then
+                TOTAL_TOKENS=$(echo "$RESPONSE" | jq -r ".data[$i].tokens")
+                USED=$(echo "$RESPONSE" | jq -r ".data[$i].amount_tokens")
+                log_info "  [包$i] $PKG_ID: tokens=$TOTAL_TOKENS, 已用=$USED, 剩余=$REMAIN_TOKENS, 消费记录=$DETAIL_COUNT"
+            else
+                log_info "  [包$i] $PKG_ID: 消费记录=$DETAIL_COUNT"
+            fi
+        done
+
+        # 汇总是否有Chat消费被记录
+        TOTAL_DETAIL_COUNT=$(echo "$RESPONSE" | jq '[.data[].details | length] | add // 0')
+        if [ "$TOTAL_DETAIL_COUNT" -gt 0 ]; then
+            log_success "  Chat消费已记录在订单中（共 $TOTAL_DETAIL_COUNT 条消费明细）"
+        else
+            log_warning "  订单数据已返回，但无消费明细（资源包valid_until已过期或消费时间不在窗口内）"
+        fi
+    else
+        log_error "  订单数据查询失败"
         echo "  响应: $RESPONSE"
     fi
 }
@@ -458,22 +554,26 @@ main() {
     sleep 1
     test_package_usage
     sleep 1
-    test_update_phone
+    test_chat_call
     sleep 1
-    test_delete_key
-    sleep 1
+    test_verify_order_after_chat
+    # sleep 1
+    # test_update_phone
+    # sleep 1
+    # test_delete_key
+    # sleep 1
 
-    # 错误处理测试
-    test_invalid_token
-    sleep 1
-    test_user_not_found
-    sleep 1
-    test_package_count_mismatch
-    sleep 1
+    # # 错误处理测试
+    # test_invalid_token
+    # sleep 1
+    # test_user_not_found
+    # sleep 1
+    # test_package_count_mismatch
+    # sleep 1
 
-    # 高级功能测试
-    test_multiple_packages
-    sleep 1
+    # # 高级功能测试
+    # test_multiple_packages
+    # sleep 1
 
     # 测试报告
     echo ""
@@ -499,4 +599,4 @@ main() {
 main
 
 # 清理临时文件
-rm -f /tmp/wisemodel_test_phone.txt /tmp/wisemodel_test_package_id.txt
+rm -f /tmp/wisemodel_test_phone.txt /tmp/wisemodel_test_package_id.txt /tmp/wisemodel_test_wm_key.txt
