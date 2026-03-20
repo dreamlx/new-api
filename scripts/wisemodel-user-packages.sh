@@ -53,10 +53,10 @@ qt() {
         docker exec "$MYSQL_CONTAINER" mysql \
             -h"${DB_HOST_INNER}" -P"${DB_PORT_INNER}" \
             -u"${DB_USER}" -p"${DB_PASS}" "${DB_NAME}" \
-            -e "$1" 2>/dev/null
+            -e "$1" 2>&1
     else
         mysql -h"${DB_HOST}" -P"${DB_PORT}" -u"${DB_USER}" -p"${DB_PASS}" "${DB_NAME}" \
-            -e "$1" 2>/dev/null
+            -e "$1" 2>&1
     fi
 }
 
@@ -98,7 +98,7 @@ main() {
         LEFT JOIN wisemodel_packages p ON p.user_id = t.user_id
         WHERE t.name = 'wisemodel-token'
         GROUP BY u.id, u.phone, t.status
-        ORDER BY 有效包数 DESC, 总包数 DESC, u.phone;"
+        ORDER BY 5 DESC, 4 DESC, u.phone;"
 
     echo ""
 
