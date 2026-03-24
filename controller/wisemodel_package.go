@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -64,16 +65,16 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
-		// 转换：1 point/token = 500,000 quota = $1
+		// 转换：1,000,000 points = $1 = QuotaPerUnit quota（非 1 point = $1）
 		quota := int64(0)
 		originalPoints := 0
 		originalTokens := 0
 
 		if pkg.Points > 0 {
-			quota = int64(pkg.Points) * 500000
+			quota = int64(float64(pkg.Points) / model.WisemodelPointsPerUnit * common.QuotaPerUnit)
 			originalPoints = pkg.Points
 		} else if pkg.Tokens > 0 {
-			quota = int64(pkg.Tokens) * 500000
+			quota = int64(float64(pkg.Tokens) / model.WisemodelTokensPerUnit * common.QuotaPerUnit)
 			originalTokens = pkg.Tokens
 		} else {
 			c.JSON(400, gin.H{

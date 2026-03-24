@@ -10,6 +10,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// Wisemodel Points/Tokens 换算常量
+// 定价: 100,000,000 points = $100 USD → 1,000,000 points = $1 = QuotaPerUnit quota
+const (
+	WisemodelPointsPerUnit = 1_000_000
+	WisemodelTokensPerUnit = 1_000_000
+)
+
 // WisemodelPackage Wisemodel资源包模型
 type WisemodelPackage struct {
 	Id                int    `json:"id" gorm:"primaryKey"`
@@ -257,7 +264,7 @@ func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]
 		}
 
 		if pkg.OriginalPoints > 0 {
-			remainPoints := (pkg.QuotaGranted - consumed) / 500000
+			remainPoints := (pkg.QuotaGranted - consumed) * WisemodelPointsPerUnit / int64(common.QuotaPerUnit)
 			if remainPoints < 0 {
 				remainPoints = 0
 			}
@@ -265,7 +272,7 @@ func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]
 			row["remain_points"] = remainPoints
 			row["amount"] = int64(pkg.OriginalPoints) - remainPoints
 		} else {
-			remainTokens := (pkg.QuotaGranted - consumed) / 500000
+			remainTokens := (pkg.QuotaGranted - consumed) * WisemodelTokensPerUnit / int64(common.QuotaPerUnit)
 			if remainTokens < 0 {
 				remainTokens = 0
 			}

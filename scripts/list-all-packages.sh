@@ -105,6 +105,13 @@ main() {
 
     # ── 检查 users 表是否存在 ──────────────────────────────────────────
     has_users=$(qs "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}' AND table_name='users'" || echo "0")
+    has_ori_pkg_id=$(qs "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='${DB_NAME}' AND table_name='wisemodel_packages' AND column_name='original_package_id'" || echo "0")
+
+    if [ "${has_ori_pkg_id:-0}" != "0" ]; then
+        original_pkg_select="CASE WHEN p.original_package_id IS NULL OR p.original_package_id = '' THEN '(empty)' ELSE p.original_package_id END"
+    else
+        original_pkg_select="'(no-column)'"
+    fi
 
     # ── 资源包明细 ───────────────────────────────────────────────────
     echo -e "${BLUE}[ 资源包明细 ]${NC}"
@@ -112,6 +119,7 @@ main() {
     if [ "${has_users:-0}" != "0" ]; then
         qt "SELECT
               p.id                                                        AS id,
+              ${original_pkg_select}                                      AS original_package_id,
               p.package_id                                                AS package_id,
               p.order_id                                                  AS order_id,
               u.phone                                                     AS user_phone,
@@ -132,6 +140,7 @@ main() {
     else
         qt "SELECT
               p.id                                                        AS id,
+              ${original_pkg_select}                                      AS original_package_id,
               p.package_id                                                AS package_id,
               p.order_id                                                  AS order_id,
               p.user_id                                                   AS user_id,
