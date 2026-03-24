@@ -195,8 +195,19 @@ func GetPackageUsage(c *gin.Context) {
 		return
 	}
 
+	// 收集所有 pkgId，批量查询 per-model 消费明细
+	pkgIds := make([]string, len(packages))
+	for i, p := range packages {
+		pkgIds[i] = p.PackageId
+	}
+	modelMap, err := model.GetModelUsageByPackages(pkgIds)
+	if err != nil {
+		c.JSON(500, gin.H{"message": "查询模型使用明细失败: " + err.Error(), "success": false})
+		return
+	}
+
 	// 构建响应
-	data := model.BuildPackageUsageRows(packages, attribution)
+	data := model.BuildPackageUsageRows(packages, attribution, modelMap)
 
 	c.JSON(200, gin.H{"code": 200, "data": data, "msg": "success"})
 }

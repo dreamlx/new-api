@@ -242,7 +242,39 @@ func AttributeLogsToPackagesWithBaseline(packages []*WisemodelPackage, logs []Lo
 	return result
 }
 
-func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]int64) []map[string]interface{} {
+// ModelUsageRow 用于 GetModelUsageByPackages 的数据库扫描结果。
+// 导出供 controller 包引用。
+type ModelUsageRow struct {
+	WisemodelPackageId string `gorm:"column:wisemodel_package_id"`
+	ModelName          string `gorm:"column:model_name"`
+	UsedQuota          int64  `gorm:"column:used_quota"`
+}
+
+// GetModelUsageByPackages 批量查询多个资源包的 per-model quota 消费。
+// 返回 map[pkgId] → 按 used_quota DESC 排序的消费明细列表。
+// 只统计 wisemodel_package_id 精确匹配的日志（精确归因），FIFO 历史日志不纳入。
+func GetModelUsageByPackages(pkgIds []string) (map[string][]ModelUsageRow, error) {
+	if len(pkgIds) == 0 {
+		return map[string][]ModelUsageRow{}, nil
+	}
+	var rows []ModelUsageRow
+	err := LOG_DB.Model(&Log{}).
+		Where("wisemodel_package_id IN ? AND type = ?", pkgIds, LogTypeConsume).
+		Group("wisemodel_package_id, model_name").
+		Select("wisemodel_package_id, model_name, COALESCE(SUM(quota), 0) AS used_quota").
+		Order("used_quota DESC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]ModelUsageRow, len(pkgIds))
+	for _, r := range rows {
+		result[r.WisemodelPackageId] = append(result[r.WisemodelPackageId], r)
+	}
+	return result, nil
+}
+
+func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]int64, modelMap map[string][]ModelUsageRow) []map[string]interface{} {
 	rows := make([]map[string]interface{}, 0, len(packages))
 	for _, pkg := range packages {
 		consumed := attribution[pkg.PackageId]
@@ -256,11 +288,29 @@ func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]
 			}
 		}
 
+		// 构建 per-model details
+		details := []interface{}{}
+		for _, u := range modelMap[pkg.PackageId] {
+			if pkg.OriginalPoints > 0 {
+				usedAmount := u.UsedQuota * WisemodelPointsPerUnit / int64(common.QuotaPerUnit)
+				details = append(details, map[string]interface{}{
+					"model_name":  u.ModelName,
+					"used_amount": usedAmount,
+				})
+			} else {
+				usedAmount := u.UsedQuota * WisemodelTokensPerUnit / int64(common.QuotaPerUnit)
+				details = append(details, map[string]interface{}{
+					"model_name":         u.ModelName,
+					"used_amount_tokens": usedAmount,
+				})
+			}
+		}
+
 		row := map[string]interface{}{
 			"package_id":        pkg.DisplayPackageId(),
 			"package_record_id": pkg.PackageId,
 			"available_models":  availableModels,
-			"details":           []interface{}{},
+			"details":           details,
 		}
 
 		if pkg.OriginalPoints > 0 {

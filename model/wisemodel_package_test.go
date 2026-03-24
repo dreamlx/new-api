@@ -149,11 +149,16 @@ func TestAttributeLogsToPackages(t *testing.T) {
 
 func TestBuildPackageUsageRows(t *testing.T) {
 	expire := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	// QuotaPerUnit=500_000, WisemodelPointsPerUnit=1_000_000
+	// 1 point = QuotaPerUnit/WisemodelPointsPerUnit quota = 0.5 quota (use integer multiples)
+	// 3_000_000 points → QuotaGranted = 3_000_000 * 500_000 / 1_000_000 = 1_500_000
+	// consumed=500_000 → remain_quota=1_000_000 → remain_points=1_000_000*1_000_000/500_000=2_000_000
+	// amount = 3_000_000 - 2_000_000 = 1_000_000
 	pkg := &WisemodelPackage{
 		PackageId:         "PKG001_1742457600000000000",
 		OriginalPackageId: "PKG001",
-		OriginalPoints:    3,
-		QuotaGranted:      1500000,
+		OriginalPoints:    3_000_000,
+		QuotaGranted:      1_500_000,
 		AvailableModels:   "DeepSeek-V3,DeepSeek-R1",
 		CreatedAt:         time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 		ValidUntil:        &expire,
@@ -161,7 +166,7 @@ func TestBuildPackageUsageRows(t *testing.T) {
 
 	rows := BuildPackageUsageRows([]*WisemodelPackage{pkg}, map[string]int64{
 		pkg.PackageId: 500000,
-	})
+	}, map[string][]ModelUsageRow{})
 	if len(rows) != 1 {
 		t.Fatalf("want 1 row, got %d", len(rows))
 	}
@@ -173,11 +178,11 @@ func TestBuildPackageUsageRows(t *testing.T) {
 	if row["package_record_id"] != pkg.PackageId {
 		t.Fatalf("package_record_id want internal id %s, got %#v", pkg.PackageId, row["package_record_id"])
 	}
-	if row["remain_points"] != int64(2) {
-		t.Fatalf("remain_points want 2, got %#v", row["remain_points"])
+	if row["remain_points"] != int64(2_000_000) {
+		t.Fatalf("remain_points want 2_000_000, got %#v", row["remain_points"])
 	}
-	if row["amount"] != int64(1) {
-		t.Fatalf("amount want 1, got %#v", row["amount"])
+	if row["amount"] != int64(1_000_000) {
+		t.Fatalf("amount want 1_000_000, got %#v", row["amount"])
 	}
 }
 
@@ -228,5 +233,113 @@ func TestSelectPackageWithRemainingQuota(t *testing.T) {
 	})
 	if selected == nil || selected.PackageId != "PKG-B" {
 		t.Fatalf("want PKG-B, got %#v", selected)
+	}
+}
+
+// TestBuildPackageUsageRowsDetails 验证 details 字段按模型正确填充
+func TestBuildPackageUsageRowsDetails(t *testing.T) {
+	expire := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Points 包
+	pkgPoints := &WisemodelPackage{
+		PackageId:      "PKG001_ts",
+		OriginalPoints: 10000,
+		QuotaGranted:   5000000, // 10000 * 0.5
+		ValidUntil:     &expire,
+	}
+	// Tokens 包
+	pkgTokens := &WisemodelPackage{
+		PackageId:      "PKG002_ts",
+		OriginalTokens: 500000,
+		QuotaGranted:   250000, // 500000 * 0.5
+		ValidUntil:     &expire,
+	}
+
+	packages := []*WisemodelPackage{pkgPoints, pkgTokens}
+
+	attribution := map[string]int64{
+		"PKG001_ts": 9000,
+		"PKG002_ts": 150000,
+	}
+
+	modelMap := map[string][]ModelUsageRow{
+		"PKG001_ts": {
+			{ModelName: "DeepSeek-V3", UsedQuota: 6000},
+			{ModelName: "DeepSeek-R1", UsedQuota: 3000},
+		},
+		"PKG002_ts": {
+			{ModelName: "BAAI/bge-large-zh-v1.5", UsedQuota: 150000},
+		},
+	}
+
+	rows := BuildPackageUsageRows(packages, attribution, modelMap)
+
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
+	}
+
+	// 验证 points 包的 details
+	row0 := rows[0]
+	details0, ok := row0["details"].([]interface{})
+	if !ok {
+		t.Fatalf("details is not []interface{}: %T", row0["details"])
+	}
+	if len(details0) != 2 {
+		t.Fatalf("expected 2 detail entries for points pkg, got %d", len(details0))
+	}
+	d0 := details0[0].(map[string]interface{})
+	if d0["model_name"] != "DeepSeek-V3" {
+		t.Errorf("expected model_name DeepSeek-V3, got %v", d0["model_name"])
+	}
+	// 6000 quota * 1_000_000 / 500_000 = 12_000 points
+	if d0["used_amount"] != int64(12_000) {
+		t.Errorf("expected used_amount 12_000, got %v", d0["used_amount"])
+	}
+	if _, exists := d0["used_amount_tokens"]; exists {
+		t.Error("points package detail should not have used_amount_tokens field")
+	}
+
+	// 验证 tokens 包的 details
+	row1 := rows[1]
+	details1, ok := row1["details"].([]interface{})
+	if !ok {
+		t.Fatalf("details is not []interface{}: %T", row1["details"])
+	}
+	if len(details1) != 1 {
+		t.Fatalf("expected 1 detail entry for tokens pkg, got %d", len(details1))
+	}
+	d1 := details1[0].(map[string]interface{})
+	if d1["model_name"] != "BAAI/bge-large-zh-v1.5" {
+		t.Errorf("expected model_name BAAI/bge-large-zh-v1.5, got %v", d1["model_name"])
+	}
+	// 150000 quota * 1_000_000 / 500_000 = 300000 tokens
+	if d1["used_amount_tokens"] != int64(300000) {
+		t.Errorf("expected used_amount_tokens 300000, got %v", d1["used_amount_tokens"])
+	}
+	if _, exists := d1["used_amount"]; exists {
+		t.Error("tokens package detail should not have used_amount field")
+	}
+}
+
+// TestBuildPackageUsageRowsDetailsEmpty 验证无消费时 details 为空数组
+func TestBuildPackageUsageRowsDetailsEmpty(t *testing.T) {
+	expire := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	pkg := &WisemodelPackage{
+		PackageId:      "PKG003_ts",
+		OriginalPoints: 5000,
+		QuotaGranted:   2500,
+		ValidUntil:     &expire,
+	}
+	attribution := map[string]int64{"PKG003_ts": 0}
+	modelMap := map[string][]ModelUsageRow{}
+
+	rows := BuildPackageUsageRows([]*WisemodelPackage{pkg}, attribution, modelMap)
+
+	details, ok := rows[0]["details"].([]interface{})
+	if !ok {
+		t.Fatalf("details is not []interface{}")
+	}
+	if len(details) != 0 {
+		t.Errorf("expected empty details, got %d entries", len(details))
 	}
 }
