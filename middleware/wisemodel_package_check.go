@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
@@ -50,6 +51,32 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 				},
 			})
 			return
+		}
+
+		// 模型名称校验：检查请求的模型是否在资源包允许范围内
+		var modelReq struct {
+			Model string `json:"model"`
+		}
+		if err := common.UnmarshalBodyReusable(c, &modelReq); err != nil {
+			// 解析失败不阻断请求（如音频转录等非 JSON body）
+			logger.LogWarn(c, fmt.Sprintf(
+				"WisemodelPackageCheck: failed to extract model name for user %d: %s", userId, err.Error(),
+			))
+		} else if modelReq.Model != "" {
+			if !model.IsModelAllowedByPackages(packages, modelReq.Model) {
+				logger.LogWarn(c, fmt.Sprintf(
+					"WisemodelPackageCheck: user %d requested model '%s' not allowed by any active package",
+					userId, modelReq.Model,
+				))
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+					"error": gin.H{
+						"message": fmt.Sprintf("您的 Wisemodel 资源包不支持模型 %s，请检查资源包的可用模型列表", modelReq.Model),
+						"type":    "permission_denied",
+						"code":    "model_not_allowed_by_wisemodel_package",
+					},
+				})
+				return
+			}
 		}
 
 		c.Next()

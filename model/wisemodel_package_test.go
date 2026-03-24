@@ -343,3 +343,83 @@ func TestBuildPackageUsageRowsDetailsEmpty(t *testing.T) {
 		t.Errorf("expected empty details, got %d entries", len(details))
 	}
 }
+
+func TestIsModelAllowedByPackages(t *testing.T) {
+	cases := []struct {
+		name      string
+		packages  []*WisemodelPackage
+		model     string
+		wantAllow bool
+	}{
+		{
+			name:      "empty package list allows all",
+			packages:  []*WisemodelPackage{},
+			model:     "deepseek-chat",
+			wantAllow: true,
+		},
+		{
+			name:      "all packages have empty AvailableModels → no restriction",
+			packages:  []*WisemodelPackage{{AvailableModels: ""}, {AvailableModels: ""}},
+			model:     "deepseek-chat",
+			wantAllow: true,
+		},
+		{
+			name:      "exact match",
+			packages:  []*WisemodelPackage{{AvailableModels: "minimax-m2"}},
+			model:     "minimax-m2",
+			wantAllow: true,
+		},
+		{
+			name:      "case-insensitive match",
+			packages:  []*WisemodelPackage{{AvailableModels: "MiniMax-M2"}},
+			model:     "minimax-m2",
+			wantAllow: true,
+		},
+		{
+			name:      "stored value with surrounding spaces",
+			packages:  []*WisemodelPackage{{AvailableModels: " minimax-m2 "}},
+			model:     "minimax-m2",
+			wantAllow: true,
+		},
+		{
+			name:      "model in multi-model list",
+			packages:  []*WisemodelPackage{{AvailableModels: "deepseek-v3,minimax-m2"}},
+			model:     "minimax-m2",
+			wantAllow: true,
+		},
+		{
+			name:      "model not in list",
+			packages:  []*WisemodelPackage{{AvailableModels: "deepseek-v3"}},
+			model:     "minimax-m2",
+			wantAllow: false,
+		},
+		{
+			name: "multiple packages, model in one of them",
+			packages: []*WisemodelPackage{
+				{AvailableModels: "deepseek-v3"},
+				{AvailableModels: "minimax-m2"},
+			},
+			model:     "minimax-m2",
+			wantAllow: true,
+		},
+		{
+			name: "mixed: one restricted, one empty → restricted wins",
+			packages: []*WisemodelPackage{
+				{AvailableModels: "deepseek-v3"},
+				{AvailableModels: ""},
+			},
+			model:     "minimax-m2",
+			wantAllow: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsModelAllowedByPackages(tc.packages, tc.model)
+			if got != tc.wantAllow {
+				t.Errorf("IsModelAllowedByPackages(%v, %q) = %v, want %v",
+					tc.packages, tc.model, got, tc.wantAllow)
+			}
+		})
+	}
+}

@@ -392,6 +392,29 @@ func SelectPackageWithRemainingQuota(packages []*WisemodelPackage, attribution m
 	return nil
 }
 
+// IsModelAllowedByPackages 检查请求的模型是否被用户活跃资源包允许。
+// 规则：
+//   - 所有包 AvailableModels 均为空 → 不限制，返回 true
+//   - 任意包有非空 AvailableModels → 模型须出现在至少一个包的列表中（大小写不敏感）
+func IsModelAllowedByPackages(packages []*WisemodelPackage, requestedModel string) bool {
+	requestedModelLower := strings.ToLower(strings.TrimSpace(requestedModel))
+	hasAnyRestriction := false
+
+	for _, pkg := range packages {
+		if pkg.AvailableModels == "" {
+			continue
+		}
+		hasAnyRestriction = true
+		for _, m := range strings.Split(pkg.AvailableModels, ",") {
+			if strings.ToLower(strings.TrimSpace(m)) == requestedModelLower {
+				return true
+			}
+		}
+	}
+
+	return !hasAnyRestriction // 无任何限制 → 放行
+}
+
 // ReclaimAllExpiredPackages 全局扫描所有用户的过期未回收包，供后台定时任务调用。
 func ReclaimAllExpiredPackages() error {
 	var userIds []int

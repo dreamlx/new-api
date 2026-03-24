@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -9,14 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
-
-// PackageModels 资源包ID与可用模型的映射
-// 可后续迁移到数据库配置
-var PackageModels = map[string]string{
-	"PKG001": "DeepSeek-V3,DeepSeek-R1",
-	"PKG002": "BAAI/bge-large-zh-v1.5,BAAI/bge-reranker-large",
-	// 可以添加更多资源包配置
-}
 
 // CreateOrder 创建订单接口（资源包充值）
 // POST /api/wisemodel/orders/record
@@ -31,6 +24,7 @@ func CreateOrder(c *gin.Context) {
 			Amount     float64 `json:"amount" binding:"required"`
 			Phone      string  `json:"phone" binding:"required"`
 			IsFree     bool    `json:"is_free"`
+			ModelNames string  `json:"model_names"`
 			ValidUntil string  `json:"valid_until" binding:"required"`
 			CreatedAt  string  `json:"created_at" binding:"required"`
 		} `json:"packages" binding:"required"`
@@ -104,11 +98,8 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
-		// 获取可用模型列表
-		availableModels := ""
-		if models, exists := PackageModels[pkg.Id]; exists {
-			availableModels = models
-		}
+		// 获取可用模型列表（由调用方通过 model_names 字段传入）
+		availableModels := strings.TrimSpace(pkg.ModelNames)
 
 		// 追加纳秒时间戳确保 DB 唯一性，允许同一 package_id 多次合法提交
 		internalPackageId := fmt.Sprintf("%s_%d", pkg.Id, time.Now().UnixNano())
