@@ -8,10 +8,12 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -136,6 +138,19 @@ func VideoProxy(c *gin.Context) {
 	default:
 		// Video URL is directly in task.FailReason
 		videoURL = task.FailReason
+	}
+
+	// SSRF防护：验证视频URL
+	fetchSetting := system_setting.GetFetchSetting()
+	if err := common.ValidateURLWithFetchSetting(videoURL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Video URL blocked for task %s: %v", taskID, err))
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": gin.H{
+				"message": fmt.Sprintf("request blocked: %v", err),
+				"type":    "security_error",
+			},
+		})
+		return
 	}
 
 	req.URL, err = url.Parse(videoURL)
