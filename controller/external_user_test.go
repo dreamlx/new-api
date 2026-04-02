@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"github.com/QuantumNous/new-api/common"
@@ -47,7 +48,10 @@ func setupTestDB() *gorm.DB {
 	
 	// 初始化ratio setting
 	ratio_setting.InitRatioSettings()
-	
+
+	// 测试环境禁用Redis（默认为true，未初始化RDB会panic）
+	common.RedisEnabled = false
+
 	return db
 }
 
@@ -61,7 +65,7 @@ func setupTestRouter() *gin.Engine {
 	model.DB = testDB
 	model.LOG_DB = testDB
 	
-	// 注册外部用户路由
+	// 注册外部用户路由（与 router/api-router.go 保持一致）
 	api := router.Group("/api")
 	{
 		externalUser := api.Group("/user/external")
@@ -69,7 +73,9 @@ func setupTestRouter() *gin.Engine {
 			externalUser.POST("/sync", SyncExternalUser)
 			externalUser.POST("/topup", ExternalUserTopUp)
 			externalUser.POST("/token", CreateExternalUserToken)
-			externalUser.DELETE("/token", DeleteExternalUserToken)
+			externalUser.DELETE("/:external_user_id/token/:token_id", DeleteExternalUserToken) // RESTful路径参数
+			externalUser.GET("/:external_user_id/tokens", GetExternalUserTokens)
+			externalUser.POST("/token/verify", VerifyExternalUserToken)
 			externalUser.GET("/:external_user_id/stats", GetExternalUserStats)
 			externalUser.GET("/:external_user_id/logs", GetExternalUserLogs)
 			externalUser.DELETE("/:external_user_id", DeleteExternalUser) // 注销外部用户
@@ -260,6 +266,7 @@ func TestCreateExternalUserToken(t *testing.T) {
 			requestBody: map[string]interface{}{
 				"external_user_id": "test_user_token",
 				"token_name":       "Test Token",
+				"allocated_quota":  100000,
 				"expires_in_days":  365,
 			},
 			expectedStatus: 200,
@@ -541,7 +548,7 @@ func TestGetExternalUserStats(t *testing.T) {
 	}
 }
 
-// 测试删除外部用户Token
+// 测试删除外部用户Token（RESTful路径参数风格）
 func TestDeleteExternalUserToken(t *testing.T) {
 	router := setupTestRouter()
 
@@ -568,60 +575,33 @@ func TestDeleteExternalUserToken(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		requestBody    map[string]interface{}
+		url            string
 		expectedStatus int
 		expectedMsg    string
 	}{
 		{
-			name: "删除Token成功",
-			requestBody: map[string]interface{}{
-				"external_user_id": "test_token_user",
-				"token_id":         token.Id,
-			},
+			name:           "删除Token成功",
+			url:            fmt.Sprintf("/api/user/external/test_token_user/token/%d", token.Id),
 			expectedStatus: 200,
 			expectedMsg:    "Token删除成功",
 		},
 		{
-			name: "用户不存在",
-			requestBody: map[string]interface{}{
-				"external_user_id": "nonexistent_user",
-				"token_id":         999,
-			},
+			name:           "用户不存在",
+			url:            "/api/user/external/nonexistent_user/token/999",
 			expectedStatus: 404,
 			expectedMsg:    "用户不存在",
 		},
 		{
-			name: "Token不存在",
-			requestBody: map[string]interface{}{
-				"external_user_id": "test_token_user",
-				"token_id":         999999,
-			},
+			name:           "Token不存在",
+			url:            "/api/user/external/test_token_user/token/999999",
 			expectedStatus: 404,
 			expectedMsg:    "Token不存在或无权删除",
-		},
-		{
-			name: "缺少必需字段 - external_user_id",
-			requestBody: map[string]interface{}{
-				"token_id": token.Id,
-			},
-			expectedStatus: 400,
-			expectedMsg:    "ExternalUserId",
-		},
-		{
-			name: "缺少必需字段 - token_id",
-			requestBody: map[string]interface{}{
-				"external_user_id": "test_token_user",
-			},
-			expectedStatus: 400,
-			expectedMsg:    "TokenId",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			jsonBody, _ := json.Marshal(tt.requestBody)
-			req, _ := http.NewRequest("DELETE", "/api/user/external/token", bytes.NewBuffer(jsonBody))
-			req.Header.Set("Content-Type", "application/json")
+			req, _ := http.NewRequest("DELETE", tt.url, nil)
 
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
@@ -635,12 +615,12 @@ func TestDeleteExternalUserToken(t *testing.T) {
 			if tt.expectedStatus == 200 {
 				assert.Equal(t, true, response["success"])
 				assert.Equal(t, tt.expectedMsg, response["message"])
-				
+
 				// 验证响应数据
 				data := response["data"].(map[string]interface{})
 				assert.Equal(t, float64(token.Id), data["token_id"])
 				assert.Equal(t, "test_token_user", data["external_user_id"])
-				
+
 				// 验证Token确实被删除
 				var deletedToken model.Token
 				err := model.DB.Where("id = ?", token.Id).First(&deletedToken).Error
