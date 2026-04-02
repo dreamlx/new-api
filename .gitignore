@@ -28,6 +28,10 @@ logs/
 
 # 数据库备份文件
 backup_*.sql
+backup/
+
+# 压缩包
+docs.zip
 
 # Go cache
 .gocache
