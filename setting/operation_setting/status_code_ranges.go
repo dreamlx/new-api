@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/QuantumNous/new-api/types"
 )
 
 type StatusCodeRange struct {
@@ -181,4 +183,15 @@ func parseHTTPStatusCodeToken(token string) (StatusCodeRange, error) {
 		return StatusCodeRange{}, fmt.Errorf("status code out of bounds: %s", token)
 	}
 	return StatusCodeRange{Start: code, End: code}, nil
+}
+
+// alwaysSkipRetryCodes defines error codes that should never trigger a retry,
+// regardless of status code, because the response body is fundamentally broken.
+var alwaysSkipRetryCodes = map[types.ErrorCode]struct{}{
+	types.ErrorCodeBadResponseBody: {},
+}
+
+func IsAlwaysSkipRetryCode(errorCode types.ErrorCode) bool {
+	_, exists := alwaysSkipRetryCodes[errorCode]
+	return exists
 }
