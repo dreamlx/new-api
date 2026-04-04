@@ -46,8 +46,9 @@ func setupTestDB() *gorm.DB {
 		"deepseek-chat", // 设置默认测试模型
 		1640995200) // 2022-01-01 的时间戳
 	
-	// 初始化ratio setting
+	// 初始化ratio setting和列名
 	ratio_setting.InitRatioSettings()
+	model.InitColumns()
 
 	// 测试环境禁用Redis（默认为true，未初始化RDB会panic）
 	common.RedisEnabled = false

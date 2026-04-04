@@ -61,6 +61,11 @@ func initCol() {
 	//common.SysLog("Using Log SQL Type: " + common.LogSqlType)
 }
 
+// InitColumns exports initCol for test environments where chooseDB is not called.
+func InitColumns() {
+	initCol()
+}
+
 var DB *gorm.DB
 
 var LOG_DB *gorm.DB
