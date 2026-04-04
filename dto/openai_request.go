@@ -54,7 +54,7 @@ type GeneralOpenAIRequest struct {
 	ParallelTooCalls    *bool             `json:"parallel_tool_calls,omitempty"`
 	Tools               []ToolCallRequest `json:"tools,omitempty"`
 	ToolChoice          any               `json:"tool_choice,omitempty"`
-	User                string            `json:"user,omitempty"`
+	User                json.RawMessage   `json:"user,omitempty"`
 	LogProbs            bool              `json:"logprobs,omitempty"`
 	TopLogProbs         int               `json:"top_logprobs,omitempty"`
 	Dimensions          int               `json:"dimensions,omitempty"`
@@ -62,7 +62,7 @@ type GeneralOpenAIRequest struct {
 	Audio               json.RawMessage   `json:"audio,omitempty"`
 	// 安全标识符，用于帮助 OpenAI 检测可能违反使用政策的应用程序用户
 	// 注意：此字段会向 OpenAI 发送用户标识信息，默认过滤以保护用户隐私
-	SafetyIdentifier string `json:"safety_identifier,omitempty"`
+	SafetyIdentifier json.RawMessage `json:"safety_identifier,omitempty"`
 	// Whether or not to store the output of this chat completion request for use in our model distillation or evals products.
 	// 是否存储此次请求数据供 OpenAI 用于评估和优化产品
 	// 注意：默认过滤此字段以保护用户隐私，但过滤后可能导致 Codex 无法正常使用
@@ -95,10 +95,23 @@ type GeneralOpenAIRequest struct {
 	THINKING json.RawMessage `json:"thinking,omitempty"`
 	// pplx Params
 	SearchDomainFilter     json.RawMessage `json:"search_domain_filter,omitempty"`
-	SearchRecencyFilter    string          `json:"search_recency_filter,omitempty"`
+	SearchRecencyFilter    json.RawMessage `json:"search_recency_filter,omitempty"`
 	ReturnImages           bool            `json:"return_images,omitempty"`
 	ReturnRelatedQuestions bool            `json:"return_related_questions,omitempty"`
-	SearchMode             string          `json:"search_mode,omitempty"`
+	SearchMode             json.RawMessage `json:"search_mode,omitempty"`
+}
+
+// GetUserString extracts User field as a plain string from json.RawMessage.
+// Returns empty string if User is nil or cannot be unmarshalled.
+func (r *GeneralOpenAIRequest) GetUserString() string {
+	if len(r.User) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(r.User, &s); err != nil {
+		return ""
+	}
+	return s
 }
 
 func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
@@ -803,7 +816,7 @@ type OpenAIResponsesRequest struct {
 	PreviousResponseID string          `json:"previous_response_id,omitempty"`
 	Reasoning          *Reasoning      `json:"reasoning,omitempty"`
 	// 服务层级字段，用于指定 API 服务等级。允许透传可能导致实际计费高于预期，默认应过滤
-	ServiceTier          string          `json:"service_tier,omitempty"`
+	ServiceTier          json.RawMessage `json:"service_tier,omitempty"`
 	Store                json.RawMessage `json:"store,omitempty"`
 	PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
@@ -813,8 +826,8 @@ type OpenAIResponsesRequest struct {
 	ToolChoice           json.RawMessage `json:"tool_choice,omitempty"`
 	Tools                json.RawMessage `json:"tools,omitempty"` // 需要处理的参数很少，MCP 参数太多不确定，所以用 map
 	TopP                 *float64        `json:"top_p,omitempty"`
-	Truncation           string          `json:"truncation,omitempty"`
-	User                 string          `json:"user,omitempty"`
+	Truncation           json.RawMessage `json:"truncation,omitempty"`
+	User                 json.RawMessage `json:"user,omitempty"`
 	MaxToolCalls         uint            `json:"max_tool_calls,omitempty"`
 	Prompt               json.RawMessage `json:"prompt,omitempty"`
 }

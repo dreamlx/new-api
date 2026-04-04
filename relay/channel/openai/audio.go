@@ -35,11 +35,12 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 	c.Writer.WriteHeader(resp.StatusCode)
 
 	if info.IsStream {
-		helper.StreamScannerHandler(c, resp, info, func(data string) bool {
+		helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 			if service.SundaySearch(data, "usage") {
 				var simpleResponse dto.SimpleResponse
 				err := common.Unmarshal([]byte(data), &simpleResponse)
 				if err != nil {
+					sr.Error(err)
 					logger.LogError(c, err.Error())
 				}
 				if simpleResponse.Usage.TotalTokens != 0 {
@@ -49,7 +50,6 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 				}
 			}
 			_ = helper.StringData(c, data)
-			return true
 		})
 	} else {
 		common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)

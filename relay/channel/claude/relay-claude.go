@@ -1,10 +1,12 @@
 package claude
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -27,6 +29,67 @@ const (
 	WebSearchMaxUsesMedium = 5
 	WebSearchMaxUsesHigh   = 10
 )
+
+// buildClaudeFileMessage converts an OpenAI file content to a Claude-compatible message block.
+// Supports PDF (→ document type) and text files (→ text type). Unsupported types are skipped.
+func buildClaudeFileMessage(c *gin.Context, file *dto.MessageFile) (*dto.ClaudeMediaMessage, error) {
+	var data, mimeType string
+
+	if file.FileData != "" {
+		// Inline base64 data
+		if strings.Contains(file.FileData, ",") {
+			parts := strings.SplitN(file.FileData, ",", 2)
+			data = parts[1]
+			// Extract mime from data URI: data:application/pdf;base64,...
+			if strings.HasPrefix(parts[0], "data:") {
+				mt := strings.TrimPrefix(parts[0], "data:")
+				mt = strings.TrimSuffix(mt, ";base64")
+				mimeType = mt
+			}
+		} else {
+			data = file.FileData
+		}
+		if mimeType == "" && file.FileName != "" {
+			ext := strings.TrimPrefix(filepath.Ext(file.FileName), ".")
+			mimeType = service.GetMimeTypeByExtension(ext)
+		}
+	} else if file.FileId != "" {
+		// File ID references are not supported for Claude inline conversion
+		return nil, fmt.Errorf("file_id references not supported for Claude, only inline base64")
+	} else {
+		return nil, nil
+	}
+
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	switch {
+	case mimeType == "application/pdf":
+		return &dto.ClaudeMediaMessage{
+			Type: "document",
+			Source: &dto.ClaudeMessageSource{
+				Type:      "base64",
+				MediaType: mimeType,
+				Data:      data,
+			},
+		}, nil
+	case strings.HasPrefix(mimeType, "text/"):
+		// Decode base64 to plain text
+		decoded, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode text file: %w", err)
+		}
+		text := string(decoded)
+		return &dto.ClaudeMediaMessage{
+			Type: "text",
+			Text: &text,
+		}, nil
+	default:
+		logger.LogError(c.Request.Context(), fmt.Sprintf("unsupported file type for Claude: %s (file: %s)", mimeType, file.FileName))
+		return nil, nil
+	}
+}
 
 func stopReasonClaude2OpenAI(reason string) string {
 	return reasonmap.ClaudeStopReasonToOpenAIFinishReason(reason)
@@ -353,20 +416,21 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 			} else {
 				claudeMediaMessages := make([]dto.ClaudeMediaMessage, 0)
 				for _, mediaMessage := range message.ParseContent() {
-					claudeMediaMessage := dto.ClaudeMediaMessage{
-						Type: mediaMessage.Type,
-					}
-					if mediaMessage.Type == "text" {
-						claudeMediaMessage.Text = common.GetPointer[string](mediaMessage.Text)
-					} else {
+					switch mediaMessage.Type {
+					case "text":
+						claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
+							Type: "text",
+							Text: common.GetPointer[string](mediaMessage.Text),
+						})
+					case dto.ContentTypeImageURL:
 						imageUrl := mediaMessage.GetImageMedia()
-						claudeMediaMessage.Type = "image"
-						claudeMediaMessage.Source = &dto.ClaudeMessageSource{
-							Type: "base64",
+						claudeMediaMessage := dto.ClaudeMediaMessage{
+							Type: "image",
+							Source: &dto.ClaudeMessageSource{
+								Type: "base64",
+							},
 						}
-						// 判断是否是url
 						if strings.HasPrefix(imageUrl.Url, "http") {
-							// 是url，获取图片的类型和base64编码的数据
 							fileData, err := service.GetFileBase64FromUrl(c, imageUrl.Url, "formatting image for Claude")
 							if err != nil {
 								return nil, fmt.Errorf("get file base64 from url failed: %s", err.Error())
@@ -381,8 +445,23 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 							claudeMediaMessage.Source.MediaType = "image/" + format
 							claudeMediaMessage.Source.Data = base64String
 						}
+						claudeMediaMessages = append(claudeMediaMessages, claudeMediaMessage)
+					case dto.ContentTypeFile:
+						file := mediaMessage.GetFile()
+						if file == nil {
+							continue
+						}
+						fileMsg, err := buildClaudeFileMessage(c, file)
+						if err != nil {
+							logger.LogError(c.Request.Context(), fmt.Sprintf("build claude file message failed: %s", err.Error()))
+							continue
+						}
+						if fileMsg != nil {
+							claudeMediaMessages = append(claudeMediaMessages, *fileMsg)
+						}
+					default:
+						// skip unsupported content types
 					}
-					claudeMediaMessages = append(claudeMediaMessages, claudeMediaMessage)
 				}
 				if message.ToolCalls != nil {
 					for _, toolCall := range message.ParseToolCalls() {
@@ -717,12 +796,12 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		Usage:        &dto.Usage{},
 	}
 	var err *types.NewAPIError
-	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		err = HandleStreamResponseData(c, info, claudeInfo, data, requestMode)
 		if err != nil {
-			return false
+			sr.Stop(fmt.Errorf("claude stream error: %v", err.Err))
+			return
 		}
-		return true
 	})
 	if err != nil {
 		return nil, err

@@ -129,7 +129,7 @@ func requestOpenAI2Dify(c *gin.Context, info *relaycommon.RelayInfo, request dto
 		AutoGenerateName: false,
 	}
 
-	user := request.User
+	user := request.GetUserString()
 	if user == "" {
 		user = helper.GetResponseID(c)
 	}
@@ -216,19 +216,22 @@ func difyStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	usage := &dto.Usage{}
 	var nodeToken int
 	helper.SetEventStreamHeaders(c)
-	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		var difyResponse DifyChunkChatCompletionResponse
 		err := json.Unmarshal([]byte(data), &difyResponse)
 		if err != nil {
+			sr.Error(err)
 			common.SysLog("error unmarshalling stream response: " + err.Error())
-			return true
+			return
 		}
 		var openaiResponse dto.ChatCompletionsStreamResponse
 		if difyResponse.Event == "message_end" {
 			usage = &difyResponse.MetaData.Usage
-			return false
+			sr.Done()
+			return
 		} else if difyResponse.Event == "error" {
-			return false
+			sr.Stop(fmt.Errorf("dify error event"))
+			return
 		} else {
 			openaiResponse = *streamResponseDify2OpenAI(difyResponse)
 			if len(openaiResponse.Choices) != 0 {
@@ -240,9 +243,9 @@ func difyStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		}
 		err = helper.ObjectData(c, openaiResponse)
 		if err != nil {
+			sr.Error(err)
 			common.SysLog(err.Error())
 		}
-		return true
 	})
 	helper.Done(c)
 	if usage.TotalTokens == 0 {

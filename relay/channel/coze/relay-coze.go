@@ -32,7 +32,7 @@ func convertCozeChatRequest(c *gin.Context, request dto.GeneralOpenAIRequest) *C
 			})
 		}
 	}
-	user := request.User
+	user := request.GetUserString()
 	if user == "" {
 		user = helper.GetResponseID(c)
 	}
