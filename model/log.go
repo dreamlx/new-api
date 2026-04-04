@@ -144,8 +144,7 @@ type RecordConsumeLogParams struct {
 	UseTimeSeconds   int                    `json:"use_time_seconds"`
 	IsStream         bool                   `json:"is_stream"`
 	Group            string                 `json:"group"`
-	Other              map[string]interface{} `json:"other"`
-	WisemodelPackageId string                 `json:"wisemodel_package_id"`
+	Other map[string]interface{} `json:"other"`
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
@@ -184,8 +183,9 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			}
 			return ""
 		}(),
-		Other:              otherStr,
-		WisemodelPackageId: params.WisemodelPackageId,
+		Other: otherStr,
+		// Auto-filled from gin.Context (set by WisemodelPackageCheck middleware).
+		WisemodelPackageId: c.GetString("wisemodel_package_id"),
 	}
 	err := LOG_DB.Create(log).Error
 	if err != nil {

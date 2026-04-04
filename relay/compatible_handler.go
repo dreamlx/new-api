@@ -523,7 +523,6 @@ func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage 
 		UseTimeSeconds:     int(useTimeSeconds),
 		IsStream:           relayInfo.IsStream,
 		Group:              relayInfo.UsingGroup,
-		Other:              other,
-		WisemodelPackageId: service.GetWisemodelPackageIdForLog(relayInfo, tokenName),
+		Other: other,
 	})
 }

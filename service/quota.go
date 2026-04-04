@@ -24,27 +24,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// GetWisemodelPackageIdForLog 若当前请求来自 wisemodel token，
-// 返回该用户最早到期的有效包 ID；否则返回空字符串。
-func GetWisemodelPackageIdForLog(relayInfo *relaycommon.RelayInfo, tokenName string) string {
-	if tokenName != "wisemodel-token" && !strings.HasPrefix(relayInfo.TokenKey, "wisemodel-") {
-		return ""
-	}
-	packages, err := model.GetActiveWisemodelPackages(relayInfo.UserId)
-	if err != nil || len(packages) == 0 {
-		return ""
-	}
-	attribution, err := model.CalculatePackageAttribution(relayInfo.UserId, packages)
-	if err != nil {
-		return ""
-	}
-	selected := model.SelectPackageWithRemainingQuota(packages, attribution)
-	if selected == nil {
-		return ""
-	}
-	return selected.PackageId
-}
-
 type TokenDetails struct {
 	TextTokens  int
 	AudioTokens int
@@ -253,7 +232,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		IsStream:           relayInfo.IsStream,
 		Group:              relayInfo.UsingGroup,
 		Other:              other,
-		WisemodelPackageId: GetWisemodelPackageIdForLog(relayInfo, tokenName),
+
 	})
 }
 
@@ -374,7 +353,7 @@ func PostClaudeConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, 
 		IsStream:           relayInfo.IsStream,
 		Group:              relayInfo.UsingGroup,
 		Other:              other,
-		WisemodelPackageId: GetWisemodelPackageIdForLog(relayInfo, tokenName),
+
 	})
 
 }
@@ -500,7 +479,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		IsStream:           relayInfo.IsStream,
 		Group:              relayInfo.UsingGroup,
 		Other:              other,
-		WisemodelPackageId: GetWisemodelPackageIdForLog(relayInfo, tokenName),
+
 	})
 }
 

@@ -79,6 +79,16 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 			}
 		}
 
+		// Set wisemodel_package_id in context for automatic log attribution.
+		// RecordConsumeLog reads this value, so callers don't need to pass it explicitly.
+		attribution, err := model.CalculatePackageAttribution(userId, packages)
+		if err == nil {
+			selected := model.SelectPackageWithRemainingQuota(packages, attribution)
+			if selected != nil {
+				c.Set("wisemodel_package_id", selected.PackageId)
+			}
+		}
+
 		c.Next()
 	}
 }
