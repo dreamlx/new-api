@@ -61,6 +61,11 @@ func initCol() {
 	//common.SysLog("Using Log SQL Type: " + common.LogSqlType)
 }
 
+// InitColumnsForTest exports initCol for use in test packages.
+func InitColumnsForTest() {
+	initCol()
+}
+
 var DB *gorm.DB
 
 var LOG_DB *gorm.DB

@@ -165,6 +165,22 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", controller.SubscriptionEpayReturn)
+		// External user API (V1)
+		externalRoute := apiRouter.Group("/user/external")
+		{
+			externalRoute.POST("/sync", controller.SyncExternalUser)
+			externalRoute.POST("/topup", controller.ExternalUserTopUp)
+			externalRoute.POST("/deduct", controller.ExternalUserDeduct)
+			externalRoute.POST("/token", controller.CreateExternalUserToken)
+			externalRoute.POST("/token/verify", controller.VerifyExternalUserToken)
+			externalRoute.GET("/models", controller.GetExternalUserModels)
+			externalRoute.GET("/:external_user_id/tokens", controller.GetExternalUserTokens)
+			externalRoute.GET("/:external_user_id/stats", controller.GetExternalUserStats)
+			externalRoute.GET("/:external_user_id/logs", controller.GetExternalUserLogs)
+			externalRoute.DELETE("/:external_user_id", controller.DeleteExternalUser)
+			externalRoute.DELETE("/:external_user_id/token/:token_id", controller.DeleteExternalUserToken)
+		}
+
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{
