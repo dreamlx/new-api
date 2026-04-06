@@ -102,6 +102,11 @@ func SendConsumeCallback(userId int, tokenId int, log *Log) {
 }
 
 // generateHMACSignature 生成HMAC-SHA256签名
+// GenerateHMACSignatureForTest is an exported alias for testing.
+func GenerateHMACSignatureForTest(data []byte, secret string) string {
+	return generateHMACSignature(data, secret)
+}
+
 func generateHMACSignature(data []byte, secret string) string {
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write(data)

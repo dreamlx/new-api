@@ -73,13 +73,15 @@ func setupTestRouter() *gin.Engine {
 		{
 			externalUser.POST("/sync", SyncExternalUser)
 			externalUser.POST("/topup", ExternalUserTopUp)
+			externalUser.POST("/deduct", ExternalUserDeduct)
 			externalUser.POST("/token", CreateExternalUserToken)
-			externalUser.DELETE("/:external_user_id/token/:token_id", DeleteExternalUserToken) // RESTful路径参数
+			externalUser.DELETE("/:external_user_id/token/:token_id", DeleteExternalUserToken)
 			externalUser.GET("/:external_user_id/tokens", GetExternalUserTokens)
 			externalUser.POST("/token/verify", VerifyExternalUserToken)
 			externalUser.GET("/:external_user_id/stats", GetExternalUserStats)
 			externalUser.GET("/:external_user_id/logs", GetExternalUserLogs)
-			externalUser.DELETE("/:external_user_id", DeleteExternalUser) // 注销外部用户
+			externalUser.GET("/models", GetExternalUserModels)
+			externalUser.DELETE("/:external_user_id", DeleteExternalUser)
 		}
 	}
 	
@@ -833,3 +835,256 @@ func TestDeleteExternalUserThenReregister(t *testing.T) {
 	model.DB.Unscoped().Delete(&model.User{}, "id = ?", userId)
 	model.DB.Unscoped().Delete(&model.User{}, "id = ?", newUserId)
 }
+
+// ============================================================
+// Golden Test Suite — 重建验收测试
+// ============================================================
+
+// TestExternalUserDeduct 验证扣除余额接口的核心行为契约
+func TestExternalUserDeduct(t *testing.T) {
+	router := setupTestRouter()
+
+	// 创建测试用户并充值
+	user := &model.User{
+		Username:       "deduct_test_user",
+		ExternalUserId: "ext_deduct_001",
+		Role:           common.RoleCommonUser,
+		Status:         common.UserStatusEnabled,
+		Quota:          int(10.0 * common.QuotaPerUnit), // $10
+	}
+	model.DB.Create(user)
+	t.Cleanup(func() {
+		model.DB.Unscoped().Delete(user)
+		model.LOG_DB.Where("user_id = ?", user.Id).Delete(&model.Log{})
+	})
+
+	tests := []struct {
+		name           string
+		body           map[string]interface{}
+		expectedStatus int
+		checkFunc      func(t *testing.T, body map[string]interface{})
+	}{
+		{
+			name: "正常扣除",
+			body: map[string]interface{}{
+				"external_user_id": "ext_deduct_001",
+				"amount_usd":       2.5,
+				"reason":           "退款",
+			},
+			expectedStatus: 200,
+			checkFunc: func(t *testing.T, body map[string]interface{}) {
+				assert.Equal(t, true, body["success"])
+				data := body["data"].(map[string]interface{})
+				assert.Equal(t, 2.5, data["amount_usd"])
+				assert.Equal(t, float64(int(2.5*common.QuotaPerUnit)), data["quota_deducted"])
+			},
+		},
+		{
+			name: "余额不足",
+			body: map[string]interface{}{
+				"external_user_id": "ext_deduct_001",
+				"amount_usd":       999.0,
+				"reason":           "大额扣除",
+			},
+			expectedStatus: 400,
+			checkFunc: func(t *testing.T, body map[string]interface{}) {
+				assert.Equal(t, false, body["success"])
+				assert.Contains(t, body["message"], "余额不足")
+			},
+		},
+		{
+			name: "用户不存在",
+			body: map[string]interface{}{
+				"external_user_id": "nonexistent_user",
+				"amount_usd":       1.0,
+				"reason":           "test",
+			},
+			expectedStatus: 404,
+			checkFunc: func(t *testing.T, body map[string]interface{}) {
+				assert.Equal(t, false, body["success"])
+			},
+		},
+		{
+			name: "缺少reason字段",
+			body: map[string]interface{}{
+				"external_user_id": "ext_deduct_001",
+				"amount_usd":       1.0,
+			},
+			expectedStatus: 400,
+			checkFunc:      nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jsonData, _ := json.Marshal(tt.body)
+			req, _ := http.NewRequest("POST", "/api/user/external/deduct", bytes.NewBuffer(jsonData))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.checkFunc != nil {
+				var resp map[string]interface{}
+				json.Unmarshal(w.Body.Bytes(), &resp)
+				tt.checkFunc(t, resp)
+			}
+		})
+	}
+}
+
+// TestVerifyExternalUserToken 验证Token验证接口的多种状态判断
+func TestVerifyExternalUserToken(t *testing.T) {
+	router := setupTestRouter()
+
+	// 创建用户
+	user := &model.User{
+		Username:       "verify_user",
+		ExternalUserId: "ext_verify_001",
+		Role:           common.RoleCommonUser,
+		Status:         common.UserStatusEnabled,
+	}
+	model.DB.Create(user)
+
+	// 创建有效Token
+	validToken := &model.Token{
+		UserId:         user.Id,
+		Name:           "valid-token",
+		Key:            "verifyvalid_" + fmt.Sprintf("%d", common.GetTimestamp()),
+		Status:         common.TokenStatusEnabled,
+		RemainQuota:    500000,
+		UnlimitedQuota: false,
+		ExpiredTime:    -1, // 永不过期
+	}
+	model.DB.Create(validToken)
+
+	// 创建已禁用Token
+	disabledToken := &model.Token{
+		UserId:         user.Id,
+		Name:           "disabled-token",
+		Key:            "verifydis_" + fmt.Sprintf("%d", common.GetTimestamp()),
+		Status:         common.TokenStatusDisabled,
+		RemainQuota:    500000,
+		UnlimitedQuota: false,
+		ExpiredTime:    -1,
+	}
+	model.DB.Create(disabledToken)
+
+	// 创建已过期Token
+	expiredToken := &model.Token{
+		UserId:         user.Id,
+		Name:           "expired-token",
+		Key:            "verifyexp_" + fmt.Sprintf("%d", common.GetTimestamp()),
+		Status:         common.TokenStatusEnabled,
+		RemainQuota:    500000,
+		UnlimitedQuota: false,
+		ExpiredTime:    1000, // 很久以前就过期了
+	}
+	model.DB.Create(expiredToken)
+
+	t.Cleanup(func() {
+		model.DB.Unscoped().Delete(validToken)
+		model.DB.Unscoped().Delete(disabledToken)
+		model.DB.Unscoped().Delete(expiredToken)
+		model.DB.Unscoped().Delete(user)
+	})
+
+	tests := []struct {
+		name          string
+		accessKey     string
+		expectValid   bool
+		expectReason  string
+	}{
+		{
+			name:        "有效Token（带sk-前缀）",
+			accessKey:   "sk-" + validToken.Key,
+			expectValid: true,
+		},
+		{
+			name:        "有效Token（不带前缀）",
+			accessKey:   validToken.Key,
+			expectValid: true,
+		},
+		{
+			name:         "已禁用Token",
+			accessKey:    disabledToken.Key,
+			expectValid:  false,
+			expectReason: "禁用",
+		},
+		{
+			name:         "已过期Token",
+			accessKey:    expiredToken.Key,
+			expectValid:  false,
+			expectReason: "过期",
+		},
+		{
+			name:         "不存在的Token",
+			accessKey:    "nonexistent_key_12345678",
+			expectValid:  false,
+			expectReason: "不存在",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]string{"access_key": tt.accessKey})
+			req, _ := http.NewRequest("POST", "/api/user/external/token/verify", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, 200, w.Code) // verify always returns 200
+
+			var resp map[string]interface{}
+			json.Unmarshal(w.Body.Bytes(), &resp)
+			assert.Equal(t, true, resp["success"])
+
+			data := resp["data"].(map[string]interface{})
+			assert.Equal(t, tt.expectValid, data["is_valid"])
+			if tt.expectReason != "" {
+				reason, _ := data["error_reason"].(string)
+				assert.Contains(t, reason, tt.expectReason)
+			}
+		})
+	}
+}
+
+// TestGetExternalUserModels 验证模型列表接口返回格式
+func TestGetExternalUserModels(t *testing.T) {
+	router := setupTestRouter()
+
+	req, _ := http.NewRequest("GET", "/api/user/external/models", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+
+	var resp map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.Equal(t, true, resp["success"])
+
+	data := resp["data"].(map[string]interface{})
+	// 契约：返回 models map, quota_per_unit, currency
+	assert.NotNil(t, data["models"])
+	assert.Equal(t, float64(common.QuotaPerUnit), data["quota_per_unit"])
+	assert.Equal(t, "USD", data["currency"])
+}
+
+// TestCallbackHMACSignature 验证回调签名生成的确定性
+func TestCallbackHMACSignature(t *testing.T) {
+	// 这个测试验证 HMAC-SHA256 签名的正确性，确保重建后签名兼容
+	data := []byte(`{"event":"token_consumed","token_id":42}`)
+	secret := "test-secret-key"
+
+	sig := model.GenerateHMACSignatureForTest(data, secret)
+
+	// 签名应该是确定性的
+	assert.Equal(t, sig, model.GenerateHMACSignatureForTest(data, secret))
+	// 不同secret应产生不同签名
+	assert.NotEqual(t, sig, model.GenerateHMACSignatureForTest(data, "different-secret"))
+	// 不同data应产生不同签名
+	assert.NotEqual(t, sig, model.GenerateHMACSignatureForTest([]byte(`{}`), secret))
+	// 签名是hex编码的64字符（SHA256 = 32 bytes = 64 hex chars）
+	assert.Len(t, sig, 64)
+}
+
