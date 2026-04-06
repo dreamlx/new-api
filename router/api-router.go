@@ -181,6 +181,13 @@ func SetApiRouter(router *gin.Engine) {
 			externalRoute.DELETE("/:external_user_id/token/:token_id", controller.DeleteExternalUserToken)
 		}
 
+		// External platform API (V2)
+		v2ExternalRoute := apiRouter.Group("/v2/external")
+		{
+			v2ExternalRoute.POST("/tokens/authorize", controller.V2AuthorizeToken)
+			v2ExternalRoute.GET("/platforms/:platform_id/logs", controller.V2GetPlatformLogs)
+		}
+
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{
