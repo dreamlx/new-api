@@ -60,6 +60,19 @@ type User struct {
 	LoginType      string `json:"login_type" gorm:"type:varchar(20);column:login_type;default:'email'"`
 	IsExternal     bool   `json:"is_external" gorm:"default:false"`
 	ExternalData   string `json:"external_data" gorm:"type:text;column:external_data"`
+	WisemodelKey   string `json:"wisemodel_key" gorm:"type:varchar(100);column:wisemodel_key;index"`
+}
+
+// GetUserByPhone returns user by phone number (used by WiseModel integration).
+func GetUserByPhone(phone string) *User {
+	if phone == "" {
+		return nil
+	}
+	var user User
+	if err := DB.Where("phone = ?", phone).First(&user).Error; err != nil {
+		return nil
+	}
+	return &user
 }
 
 func (user *User) ToBaseUser() *UserBase {

@@ -343,6 +343,24 @@ func (token *Token) Delete() (err error) {
 	return err
 }
 
+func DisableTokenByKey(key string) error {
+	err := DB.Model(&Token{}).Where(commonKeyCol+" = ?", key).
+		Update("status", common.TokenStatusDisabled).Error
+	if err == nil {
+		gopool.Go(func() { _ = cacheDeleteToken(key) })
+	}
+	return err
+}
+
+func EnableTokenByKey(key string) error {
+	err := DB.Model(&Token{}).Where(commonKeyCol+" = ?", key).
+		Update("status", common.TokenStatusEnabled).Error
+	if err == nil {
+		gopool.Go(func() { _ = cacheDeleteToken(key) })
+	}
+	return err
+}
+
 func (token *Token) IsModelLimitsEnabled() bool {
 	return token.ModelLimitsEnabled
 }
