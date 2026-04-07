@@ -195,6 +195,13 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	err := LOG_DB.Create(log).Error
 	if err != nil {
 		logger.LogError(c, "failed to record log: "+err.Error())
+		return
+	}
+	// Async callback notification (if token has callback configured)
+	if params.TokenId > 0 {
+		gopool.Go(func() {
+			SendConsumeCallback(userId, params.TokenId, log)
+		})
 	}
 	if common.DataExportEnabled {
 		gopool.Go(func() {
