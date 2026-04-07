@@ -24,7 +24,7 @@ func createWisemodelToken(user *model.User, wisemodelKey string) error {
 	err := newToken.Insert()
 	if err != nil {
 		// duplicate key：token 已存在（可能是 disabled 状态），重新启用
-		if strings.Contains(err.Error(), "Duplicate") || strings.Contains(err.Error(), "duplicate") {
+		if strings.Contains(err.Error(), "Duplicate") || strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "UNIQUE") {
 			return model.EnableTokenByKey(wisemodelKey)
 		}
 		return err
@@ -55,13 +55,15 @@ func WisemodelBind(c *gin.Context) {
 	if user == nil {
 		// 用户不存在，创建新用户
 		user = &model.User{
-			Phone:        req.Phone,
-			Username:     req.Username,
-			DisplayName:  req.Username,
-			WisemodelKey: req.WisemodelKey,
-			Role:         common.RoleCommonUser,
-			Status:       common.UserStatusEnabled,
-			Quota:        0,
+			Phone:          req.Phone,
+			Username:        req.Username,
+			DisplayName:     req.Username,
+			WisemodelKey:    req.WisemodelKey,
+			AffCode:         common.GetRandomString(16),
+			ExternalUserId:  "wm_" + req.Phone,
+			Role:            common.RoleCommonUser,
+			Status:          common.UserStatusEnabled,
+			Quota:           0,
 		}
 
 		// 生成随机密码（Wisemodel用户不使用密码登录）
