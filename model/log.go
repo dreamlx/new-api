@@ -35,8 +35,9 @@ type Log struct {
 	TokenId          int    `json:"token_id" gorm:"default:0;index"`
 	Group            string `json:"group" gorm:"index"`
 	Ip               string `json:"ip" gorm:"index;default:''"`
-	RequestId        string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
-	Other            string `json:"other"`
+	RequestId          string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
+	Other              string `json:"other"`
+	WisemodelPackageId string `json:"wisemodel_package_id" gorm:"type:varchar(100);default:'';index"`
 }
 
 // don't use iota, avoid change log type value
@@ -188,10 +189,19 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		}(),
 		RequestId: requestId,
 		Other:     otherStr,
+		// Auto-filled from gin.Context (set by WisemodelPackageCheck middleware).
+		WisemodelPackageId: c.GetString("wisemodel_package_id"),
 	}
 	err := LOG_DB.Create(log).Error
 	if err != nil {
 		logger.LogError(c, "failed to record log: "+err.Error())
+		return
+	}
+	// Async callback notification (if token has callback configured)
+	if params.TokenId > 0 {
+		gopool.Go(func() {
+			SendConsumeCallback(userId, params.TokenId, log)
+		})
 	}
 	if common.DataExportEnabled {
 		gopool.Go(func() {

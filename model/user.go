@@ -50,6 +50,29 @@ type User struct {
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
 	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+
+	// External user integration fields
+	Phone          string `json:"phone" gorm:"type:varchar(20);column:phone;default:''"`
+	WechatOpenId   string `json:"wechat_openid" gorm:"type:varchar(100);column:wechat_openid;default:''"`
+	WechatUnionId  string `json:"wechat_unionid" gorm:"type:varchar(100);column:wechat_unionid;default:''"`
+	AlipayUserId   string `json:"alipay_userid" gorm:"type:varchar(100);column:alipay_userid;default:''"`
+	ExternalUserId string `json:"external_user_id" gorm:"type:varchar(100);column:external_user_id;uniqueIndex"`
+	LoginType      string `json:"login_type" gorm:"type:varchar(20);column:login_type;default:'email'"`
+	IsExternal     bool   `json:"is_external" gorm:"default:false"`
+	ExternalData   string `json:"external_data" gorm:"type:text;column:external_data"`
+	WisemodelKey   string `json:"wisemodel_key" gorm:"type:varchar(100);column:wisemodel_key;index"`
+}
+
+// GetUserByPhone returns user by phone number (used by WiseModel integration).
+func GetUserByPhone(phone string) *User {
+	if phone == "" {
+		return nil
+	}
+	var user User
+	if err := DB.Where("phone = ?", phone).First(&user).Error; err != nil {
+		return nil
+	}
+	return &user
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -300,6 +323,15 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 	} else {
 		err = DB.Omit("password").First(&user, "id = ?", id).Error
 	}
+	return &user, err
+}
+
+func GetUserByExternalId(externalUserId string) (*User, error) {
+	if externalUserId == "" {
+		return nil, errors.New("external_user_id is empty")
+	}
+	var user User
+	err := DB.Where("external_user_id = ?", externalUserId).First(&user).Error
 	return &user, err
 }
 

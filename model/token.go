@@ -29,6 +29,11 @@ type Token struct {
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
+
+	// Callback fields for external platform integration
+	CallbackUrl     string `json:"callback_url" gorm:"type:varchar(500);column:callback_url;default:''"`
+	CallbackSecret  string `json:"callback_secret" gorm:"type:varchar(200);column:callback_secret;default:''"`
+	CallbackEnabled bool   `json:"callback_enabled" gorm:"column:callback_enabled;default:false"`
 }
 
 func (token *Token) Clean() {
@@ -335,6 +340,24 @@ func (token *Token) Delete() (err error) {
 		}
 	}()
 	err = DB.Delete(token).Error
+	return err
+}
+
+func DisableTokenByKey(key string) error {
+	err := DB.Model(&Token{}).Where(commonKeyCol+" = ?", key).
+		Update("status", common.TokenStatusDisabled).Error
+	if err == nil {
+		gopool.Go(func() { _ = cacheDeleteToken(key) })
+	}
+	return err
+}
+
+func EnableTokenByKey(key string) error {
+	err := DB.Model(&Token{}).Where(commonKeyCol+" = ?", key).
+		Update("status", common.TokenStatusEnabled).Error
+	if err == nil {
+		gopool.Go(func() { _ = cacheDeleteToken(key) })
+	}
 	return err
 }
 
