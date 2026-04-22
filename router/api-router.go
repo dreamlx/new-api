@@ -46,6 +46,13 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/oauth/:provider", middleware.CriticalRateLimit(), controller.HandleOAuth)
 		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), controller.GetRatioConfig)
 
+		// OpenRouter-compatible model list API (public, no auth required)
+		openrouterRouter := apiRouter.Group("/openrouter/v1")
+		{
+			openrouterRouter.GET("/models", controller.ListOpenRouterModels)
+			openrouterRouter.GET("/models/:model", controller.GetOpenRouterModelByID)
+		}
+
 		apiRouter.POST("/stripe/webhook", controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", controller.CreemWebhook)
 		apiRouter.POST("/waffo/webhook", controller.WaffoWebhook)
