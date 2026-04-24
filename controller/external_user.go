@@ -45,7 +45,8 @@ type ExternalUserDeductRequest struct {
 type ExternalUserTokenRequest struct {
 	ExternalUserId  string   `json:"external_user_id" binding:"required,min=1,max=100"`
 	TokenName       string   `json:"token_name" binding:"required,min=1,max=100"`
-	AllocatedQuota  int      `json:"allocated_quota" binding:"required,min=1"`
+	AllocatedQuota  int      `json:"allocated_quota"` // 独立额度模式必填（非无限额度时）
+	UnlimitedQuota  bool     `json:"unlimited_quota"` // 无限额度模式（消耗用户余额）
 	ExpiresInDays   int      `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
 	ModelLimits     []string `json:"model_limits" binding:"omitempty"`
 	Group           string   `json:"group" binding:"omitempty,max=50"`
@@ -335,6 +336,12 @@ func CreateExternalUserToken(c *gin.Context) {
 		return
 	}
 
+	// Validate: non-unlimited mode must provide allocated_quota > 0
+	if !req.UnlimitedQuota && req.AllocatedQuota <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "独立额度模式必须提供allocated_quota参数"})
+		return
+	}
+
 	expiresInDays := req.ExpiresInDays
 	if expiresInDays == 0 {
 		expiresInDays = 365
@@ -347,23 +354,25 @@ func CreateExternalUserToken(c *gin.Context) {
 		}
 	}()
 
-	// Atomic deduct from user quota with SQL-level balance check
-	deductResult := tx.Model(&model.User{}).
-		Where("id = ? AND quota >= ?", user.Id, req.AllocatedQuota).
-		Update("quota", gorm.Expr("quota - ?", req.AllocatedQuota))
-	if deductResult.Error != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "扣减用户额度失败"})
-		return
-	}
-	if deductResult.RowsAffected == 0 {
-		tx.Rollback()
-		model.DB.First(user, user.Id)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": fmt.Sprintf("用户余额不足，当前余额: %d，请求分配: %d", user.Quota, req.AllocatedQuota),
-		})
-		return
+	// Atomic deduct from user quota — only in independent quota mode
+	if !req.UnlimitedQuota {
+		deductResult := tx.Model(&model.User{}).
+			Where("id = ? AND quota >= ?", user.Id, req.AllocatedQuota).
+			Update("quota", gorm.Expr("quota - ?", req.AllocatedQuota))
+		if deductResult.Error != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "扣减用户额度失败"})
+			return
+		}
+		if deductResult.RowsAffected == 0 {
+			tx.Rollback()
+			model.DB.First(user, user.Id)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("用户余额不足，当前余额: %d，请求分配: %d", user.Quota, req.AllocatedQuota),
+			})
+			return
+		}
 	}
 
 	// Create token
@@ -375,8 +384,8 @@ func CreateExternalUserToken(c *gin.Context) {
 		AccessedTime:    common.GetTimestamp(),
 		ExpiredTime:     common.GetTimestamp() + int64(expiresInDays*24*3600),
 		Status:          common.TokenStatusEnabled,
-		RemainQuota:     req.AllocatedQuota,
-		UnlimitedQuota:  false,
+		RemainQuota:     req.AllocatedQuota, // 0 for unlimited mode
+		UnlimitedQuota:  req.UnlimitedQuota,
 		Group:           req.Group,
 		CallbackUrl:     req.CallbackUrl,
 		CallbackEnabled: req.CallbackEnabled,
@@ -408,6 +417,9 @@ func CreateExternalUserToken(c *gin.Context) {
 		"expires_at":   token.ExpiredTime,
 		"remain_quota": req.AllocatedQuota,
 	}
+	if req.UnlimitedQuota {
+		data["unlimited_quota"] = true
+	}
 	if token.Group != "" {
 		data["group"] = token.Group
 	}
@@ -426,7 +438,7 @@ func CreateExternalUserToken(c *gin.Context) {
 	})
 }
 
-// DeleteExternalUserToken soft-deletes a token and refunds remaining quota.
+// DeleteExternalUserToken soft-deletes a token. Remaining quota is NOT refunded.
 // DELETE /api/user/external/:external_user_id/token/:token_id
 func DeleteExternalUserToken(c *gin.Context) {
 	externalUserId := c.Param("external_user_id")
@@ -454,34 +466,9 @@ func DeleteExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	refundQuota := token.RemainQuota
-
-	tx := model.DB.Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	// Refund remaining quota to user
-	if refundQuota > 0 {
-		if err := tx.Model(&model.User{}).Where("id = ?", user.Id).
-			Update("quota", gorm.Expr("quota + ?", refundQuota)).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "退还额度失败"})
-			return
-		}
-	}
-
-	// Soft-delete token
-	if err := tx.Delete(token).Error; err != nil {
-		tx.Rollback()
+	// Soft-delete token (no quota refund — remaining quota stays consumed)
+	if err := model.DB.Delete(token).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "删除Token失败"})
-		return
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "事务提交失败"})
 		return
 	}
 
@@ -491,7 +478,6 @@ func DeleteExternalUserToken(c *gin.Context) {
 		"data": gin.H{
 			"token_id":         tokenId,
 			"external_user_id": externalUserId,
-			"refunded_quota":   refundQuota,
 		},
 	})
 }

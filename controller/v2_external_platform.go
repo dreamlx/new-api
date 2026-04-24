@@ -67,6 +67,14 @@ func V2AuthorizeToken(c *gin.Context) {
 			return
 		}
 
+		// 幂等健康保证：若 token 被禁用或额度被修改，自动恢复为无限额度启用状态
+		if existingToken.Status != common.TokenStatusEnabled || !existingToken.UnlimitedQuota {
+			model.DB.Model(existingToken).Updates(map[string]interface{}{
+				"status":          common.TokenStatusEnabled,
+				"unlimited_quota": true,
+			})
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "密钥已存在",
@@ -188,10 +196,11 @@ func V2GetPlatformLogs(c *gin.Context) {
 		}
 	}
 
-	// Build query
+	// Build paginated query
 	tx := model.LOG_DB.Where("user_id = ? AND type = ?", user.Id, model.LogTypeConsume)
 
-	// Optional token_key filter
+	// Optional token_key filter — hoist filterTokenId so aggregate can reuse it
+	var filterTokenId int
 	if tokenKeyFilter != "" {
 		tokenKeyBody := strings.TrimPrefix(tokenKeyFilter, "sk-")
 		filterToken, err := model.GetTokenByKey(tokenKeyBody, true)
@@ -208,7 +217,8 @@ func V2GetPlatformLogs(c *gin.Context) {
 			})
 			return
 		}
-		tx = tx.Where("token_id = ?", filterToken.Id)
+		filterTokenId = filterToken.Id
+		tx = tx.Where("token_id = ?", filterTokenId)
 	}
 
 	if startTimestamp > 0 {
@@ -225,7 +235,33 @@ func V2GetPlatformLogs(c *gin.Context) {
 		return
 	}
 
-	// Fetch logs
+	// Global aggregate — independent chain from model.LOG_DB to avoid GORM statement state sharing
+	// 使用独立查询链（非 tx），保证聚合 SELECT 不污染后续分页 Find 的 Statement
+	var agg struct {
+		TotalQuota            int
+		TotalPromptTokens     int
+		TotalCompletionTokens int
+		UniqueTokens          int
+	}
+	aggDB := model.LOG_DB.Model(&model.Log{}).
+		Where("user_id = ? AND type = ?", user.Id, model.LogTypeConsume)
+	if filterTokenId > 0 {
+		aggDB = aggDB.Where("token_id = ?", filterTokenId)
+	}
+	if startTimestamp > 0 {
+		aggDB = aggDB.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp > 0 {
+		aggDB = aggDB.Where("created_at <= ?", endTimestamp)
+	}
+	aggDB.Select(
+		"COALESCE(SUM(quota), 0) AS total_quota, " +
+			"COALESCE(SUM(prompt_tokens), 0) AS total_prompt_tokens, " +
+			"COALESCE(SUM(completion_tokens), 0) AS total_completion_tokens, " +
+			"COUNT(DISTINCT token_id) AS unique_tokens",
+	).Scan(&agg)
+
+	// Fetch logs (paginated)
 	var logs []*model.Log
 	offset := (page - 1) * pageSize
 	if err := tx.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&logs).Error; err != nil {
@@ -233,25 +269,15 @@ func V2GetPlatformLogs(c *gin.Context) {
 		return
 	}
 
-	// Build response
-	var totalPromptTokens, totalCompletionTokens, totalQuotaConsumed int
-	uniqueTokens := make(map[int]bool)
+	// Build log items
 	logItems := make([]gin.H, 0, len(logs))
-
 	for _, log := range logs {
-		totalPromptTokens += log.PromptTokens
-		totalCompletionTokens += log.CompletionTokens
-		totalQuotaConsumed += log.Quota
-
-		// Resolve full token_key
 		var tokenKey string
 		if log.TokenId > 0 {
-			uniqueTokens[log.TokenId] = true
 			if t, err := model.GetTokenById(log.TokenId); err == nil {
 				tokenKey = "sk-" + t.Key
 			}
 		}
-
 		logItems = append(logItems, gin.H{
 			"log_id":            log.Id,
 			"time":              time.Unix(log.CreatedAt, 0).UTC().Format(time.RFC3339),
@@ -278,12 +304,12 @@ func V2GetPlatformLogs(c *gin.Context) {
 				"total_pages": totalPages,
 			},
 			"summary": gin.H{
-				"total_requests":          len(logItems),
-				"total_prompt_tokens":     totalPromptTokens,
-				"total_completion_tokens": totalCompletionTokens,
-				"total_tokens":            totalPromptTokens + totalCompletionTokens,
-				"total_quota_consumed":    totalQuotaConsumed,
-				"unique_tokens":           len(uniqueTokens),
+				"total_requests":          int(total),
+				"total_prompt_tokens":     agg.TotalPromptTokens,
+				"total_completion_tokens": agg.TotalCompletionTokens,
+				"total_tokens":            agg.TotalPromptTokens + agg.TotalCompletionTokens,
+				"total_quota_consumed":    agg.TotalQuota,
+				"unique_tokens":           agg.UniqueTokens,
 			},
 		},
 	})
@@ -312,6 +338,14 @@ func getOrCreatePlatformUser(username, platformId string) (*model.User, error) {
 	}
 
 	if err := model.DB.Create(&user).Error; err != nil {
+		// 并发场景：另一个 goroutine 已赢得竞争，重查即可
+		if strings.Contains(err.Error(), "Duplicate") ||
+			strings.Contains(err.Error(), "UNIQUE") ||
+			strings.Contains(err.Error(), "duplicate") {
+			if err2 := model.DB.Where("username = ?", username).First(&user).Error; err2 == nil {
+				return &user, nil
+			}
+		}
 		return nil, err
 	}
 	return &user, nil

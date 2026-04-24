@@ -646,13 +646,13 @@ func TestTopupIdempotency(t *testing.T) {
 
 // ==================== Token Delete Refund ====================
 
-func TestDeleteExternalUserTokenRefund(t *testing.T) {
+func TestDeleteExternalUserTokenNoRefund(t *testing.T) {
 	router := setupTestRouter()
 
 	initialQuota := 20000000
 	user := &model.User{
-		Username: "refund_user", Email: "refund@test.com",
-		ExternalUserId: "refund_001", IsExternal: true, Quota: initialQuota,
+		Username: "norefund_user", Email: "norefund@test.com",
+		ExternalUserId: "norefund_001", IsExternal: true, Quota: initialQuota,
 	}
 	model.DB.Create(user)
 
@@ -660,8 +660,8 @@ func TestDeleteExternalUserTokenRefund(t *testing.T) {
 
 	// Create token via API (deducts from user)
 	w := doRequest(router, "POST", "/api/user/external/token", map[string]interface{}{
-		"external_user_id": "refund_001",
-		"token_name":       "Refundable Token",
+		"external_user_id": "norefund_001",
+		"token_name":       "Non-Refundable Token",
 		"allocated_quota":  allocatedQuota,
 	})
 	assert.Equal(t, 200, w.Code)
@@ -673,16 +673,17 @@ func TestDeleteExternalUserTokenRefund(t *testing.T) {
 	model.DB.First(user, user.Id)
 	assert.Equal(t, initialQuota-allocatedQuota, user.Quota)
 
-	// Delete token — should refund
-	w = doRequest(router, "DELETE", fmt.Sprintf("/api/user/external/refund_001/token/%d", tokenId), nil)
+	// Delete token — NO refund (remaining quota stays consumed)
+	w = doRequest(router, "DELETE", fmt.Sprintf("/api/user/external/norefund_001/token/%d", tokenId), nil)
 	assert.Equal(t, 200, w.Code)
 	resp = parseResponse(t, w)
 	data = resp["data"].(map[string]interface{})
-	assert.Equal(t, float64(allocatedQuota), data["refunded_quota"])
+	assert.Nil(t, data["refunded_quota"]) // no refund field in response
+	assert.Equal(t, float64(tokenId), data["token_id"])
 
-	// Verify user quota was restored
+	// Verify user quota was NOT restored
 	model.DB.First(user, user.Id)
-	assert.Equal(t, initialQuota, user.Quota)
+	assert.Equal(t, initialQuota-allocatedQuota, user.Quota)
 }
 
 // ==================== Token with ModelLimits ====================
@@ -794,5 +795,52 @@ func TestGetExternalUserModelsWithGroup(t *testing.T) {
 		resp := parseResponse(t, w)
 		data := resp["data"].(map[string]interface{})
 		assert.Equal(t, "vip", data["group"])
+	})
+}
+
+// ==================== Unlimited Quota Token ====================
+
+func TestCreateExternalUserTokenUnlimitedQuota(t *testing.T) {
+	router := setupTestRouter()
+
+	initialQuota := 10000000
+	model.DB.Create(&model.User{
+		Username: "unl_user", Email: "unl@test.com",
+		ExternalUserId: "unl_001", IsExternal: true, Quota: initialQuota,
+	})
+
+	t.Run("无限额度模式-不扣用户余额", func(t *testing.T) {
+		w := doRequest(router, "POST", "/api/user/external/token", map[string]interface{}{
+			"external_user_id": "unl_001",
+			"token_name":       "Unlimited Token",
+			"unlimited_quota":  true,
+		})
+		assert.Equal(t, 200, w.Code)
+		resp := parseResponse(t, w)
+		assert.Equal(t, true, resp["success"])
+		data := resp["data"].(map[string]interface{})
+		assert.Equal(t, true, data["unlimited_quota"])
+
+		// User quota must NOT be deducted
+		var user model.User
+		model.DB.Where("external_user_id = ?", "unl_001").First(&user)
+		assert.Equal(t, initialQuota, user.Quota)
+
+		// Token must have UnlimitedQuota=true
+		var token model.Token
+		model.DB.Where("name = ?", "Unlimited Token").First(&token)
+		assert.True(t, token.UnlimitedQuota)
+		assert.Equal(t, 0, token.RemainQuota)
+	})
+
+	t.Run("独立额度模式-缺少allocated_quota报错", func(t *testing.T) {
+		w := doRequest(router, "POST", "/api/user/external/token", map[string]interface{}{
+			"external_user_id": "unl_001",
+			"token_name":       "Bad Token",
+			// unlimited_quota=false (default), allocated_quota missing
+		})
+		assert.Equal(t, 400, w.Code)
+		resp := parseResponse(t, w)
+		assert.Contains(t, resp["message"], "allocated_quota")
 	})
 }

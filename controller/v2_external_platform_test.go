@@ -85,6 +85,40 @@ func TestV2AuthorizeToken(t *testing.T) {
 		assert.Equal(t, "exists", data["status"])
 	})
 
+	t.Run("幂等性-被禁用token重授权后自动恢复", func(t *testing.T) {
+		// 先授权一个新 token
+		w := doV2Request(router, "POST", "/api/v2/external/tokens/authorize", map[string]interface{}{
+			"platform_id": "asd",
+			"token_key":   "sk-disabledtokenrecoverytest00000001",
+		})
+		require.Equal(t, 200, w.Code)
+
+		// 手动禁用该 token
+		model.DB.Model(&model.Token{}).
+			Where("key = ?", "disabledtokenrecoverytest00000001").
+			Updates(map[string]interface{}{"status": common.TokenStatusDisabled, "unlimited_quota": false})
+
+		// 验证已禁用
+		tk, err := model.GetTokenByKey("disabledtokenrecoverytest00000001", true)
+		require.NoError(t, err)
+		assert.Equal(t, common.TokenStatusDisabled, tk.Status)
+
+		// 重复授权 — 应自动恢复为启用+无限额度
+		w = doV2Request(router, "POST", "/api/v2/external/tokens/authorize", map[string]interface{}{
+			"platform_id": "asd",
+			"token_key":   "sk-disabledtokenrecoverytest00000001",
+		})
+		assert.Equal(t, 200, w.Code)
+		resp := parseV2Response(t, w)
+		assert.Equal(t, "exists", resp["data"].(map[string]interface{})["status"])
+
+		// 验证 token 已恢复
+		tk, err = model.GetTokenByKey("disabledtokenrecoverytest00000001", true)
+		require.NoError(t, err)
+		assert.Equal(t, common.TokenStatusEnabled, tk.Status)
+		assert.True(t, tk.UnlimitedQuota)
+	})
+
 	t.Run("带metadata授权", func(t *testing.T) {
 		w := doV2Request(router, "POST", "/api/v2/external/tokens/authorize", map[string]interface{}{
 			"platform_id": "asd",
