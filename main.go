@@ -106,6 +106,17 @@ func main() {
 
 	go controller.AutomaticallyTestChannels()
 
+	// Wisemodel 过期资源包 quota 回收（每5分钟扫描一次）
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := model.ReclaimAllExpiredPackages(); err != nil {
+				common.SysError("ReclaimAllExpiredPackages failed: " + err.Error())
+			}
+		}
+	}()
+
 	// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
 	service.StartCodexCredentialAutoRefreshTask()
 
