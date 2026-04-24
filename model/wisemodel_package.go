@@ -392,28 +392,33 @@ func SelectPackageWithRemainingQuota(packages []*WisemodelPackage, attribution m
 	return nil
 }
 
-// IsModelAllowedByPackages 检查请求的模型是否被用户活跃资源包允许。
-// 规则：
-//   - 所有包 AvailableModels 均为空 → 不限制，返回 true
-//   - 任意包有非空 AvailableModels → 模型须出现在至少一个包的列表中（大小写不敏感）
-func IsModelAllowedByPackages(packages []*WisemodelPackage, requestedModel string) bool {
+// FilterPackagesByModel 返回能承载指定模型请求的资源包子集。
+// 规则（按包逐个判断）：
+//   - 包的 AvailableModels 为空 → 通用包，能承载任意模型
+//   - 包的 AvailableModels 非空 → 仅当请求模型在列表中（大小写不敏感）才能承载
+//
+// requestedModel 为空时直接返回全部包（无法确定模型，不做限制）。
+func FilterPackagesByModel(packages []*WisemodelPackage, requestedModel string) []*WisemodelPackage {
+	if requestedModel == "" {
+		return packages
+	}
 	requestedModelLower := strings.ToLower(strings.TrimSpace(requestedModel))
-	hasAnyRestriction := false
-
+	eligible := make([]*WisemodelPackage, 0, len(packages))
 	for _, pkg := range packages {
 		if pkg.AvailableModels == "" {
+			eligible = append(eligible, pkg) // 通用包
 			continue
 		}
-		hasAnyRestriction = true
 		for _, m := range strings.Split(pkg.AvailableModels, ",") {
 			if strings.ToLower(strings.TrimSpace(m)) == requestedModelLower {
-				return true
+				eligible = append(eligible, pkg)
+				break
 			}
 		}
 	}
-
-	return !hasAnyRestriction // 无任何限制 → 放行
+	return eligible
 }
+
 
 // ReclaimAllExpiredPackages 全局扫描所有用户的过期未回收包，供后台定时任务调用。
 func ReclaimAllExpiredPackages() error {

@@ -53,19 +53,23 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 			return
 		}
 
-		// 模型名称校验：检查请求的模型是否在资源包允许范围内
+		// 按请求模型过滤出可承载该请求的资源包子集。
+		// 通用包（AvailableModels 为空）可承载任意模型；
+		// 专用包仅在请求模型出现在其列表中时才纳入候选。
 		var modelReq struct {
 			Model string `json:"model"`
 		}
+		eligiblePackages := packages // 默认全部可用（解析失败时不限制）
 		if err := common.UnmarshalBodyReusable(c, &modelReq); err != nil {
 			// 解析失败不阻断请求（如音频转录等非 JSON body）
 			logger.LogWarn(c, fmt.Sprintf(
 				"WisemodelPackageCheck: failed to extract model name for user %d: %s", userId, err.Error(),
 			))
 		} else if modelReq.Model != "" {
-			if !model.IsModelAllowedByPackages(packages, modelReq.Model) {
+			eligiblePackages = model.FilterPackagesByModel(packages, modelReq.Model)
+			if len(eligiblePackages) == 0 {
 				logger.LogWarn(c, fmt.Sprintf(
-					"WisemodelPackageCheck: user %d requested model '%s' not allowed by any active package",
+					"WisemodelPackageCheck: user %d requested model '%s' not covered by any active package",
 					userId, modelReq.Model,
 				))
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
@@ -79,11 +83,11 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 			}
 		}
 
-		// Set wisemodel_package_id in context for automatic log attribution.
-		// RecordConsumeLog reads this value, so callers don't need to pass it explicitly.
+		// 归因计算仍使用全部包（保证 FIFO 历史日志归因准确）；
+		// 包选择仅在 eligiblePackages 中进行，确保扣费归属到正确的资源包。
 		attribution, err := model.CalculatePackageAttribution(userId, packages)
 		if err == nil {
-			selected := model.SelectPackageWithRemainingQuota(packages, attribution)
+			selected := model.SelectPackageWithRemainingQuota(eligiblePackages, attribution)
 			if selected != nil {
 				c.Set("wisemodel_package_id", selected.PackageId)
 			}

@@ -344,54 +344,54 @@ func TestBuildPackageUsageRowsDetailsEmpty(t *testing.T) {
 	}
 }
 
-func TestIsModelAllowedByPackages(t *testing.T) {
+func TestFilterPackagesByModel(t *testing.T) {
 	cases := []struct {
-		name      string
-		packages  []*WisemodelPackage
-		model     string
-		wantAllow bool
+		name          string
+		packages      []*WisemodelPackage
+		model         string
+		wantEligible  int // 期望返回的包数量
 	}{
 		{
-			name:      "empty package list allows all",
-			packages:  []*WisemodelPackage{},
-			model:     "deepseek-chat",
-			wantAllow: true,
+			name:         "empty package list → no eligible packages",
+			packages:     []*WisemodelPackage{},
+			model:        "deepseek-chat",
+			wantEligible: 0,
 		},
 		{
-			name:      "all packages have empty AvailableModels → no restriction",
-			packages:  []*WisemodelPackage{{AvailableModels: ""}, {AvailableModels: ""}},
-			model:     "deepseek-chat",
-			wantAllow: true,
+			name:         "all universal packages → all eligible",
+			packages:     []*WisemodelPackage{{AvailableModels: ""}, {AvailableModels: ""}},
+			model:        "deepseek-chat",
+			wantEligible: 2,
 		},
 		{
-			name:      "exact match",
-			packages:  []*WisemodelPackage{{AvailableModels: "minimax-m2"}},
-			model:     "minimax-m2",
-			wantAllow: true,
+			name:         "exact match",
+			packages:     []*WisemodelPackage{{AvailableModels: "minimax-m2"}},
+			model:        "minimax-m2",
+			wantEligible: 1,
 		},
 		{
-			name:      "case-insensitive match",
-			packages:  []*WisemodelPackage{{AvailableModels: "MiniMax-M2"}},
-			model:     "minimax-m2",
-			wantAllow: true,
+			name:         "case-insensitive match",
+			packages:     []*WisemodelPackage{{AvailableModels: "MiniMax-M2"}},
+			model:        "minimax-m2",
+			wantEligible: 1,
 		},
 		{
-			name:      "stored value with surrounding spaces",
-			packages:  []*WisemodelPackage{{AvailableModels: " minimax-m2 "}},
-			model:     "minimax-m2",
-			wantAllow: true,
+			name:         "stored value with surrounding spaces",
+			packages:     []*WisemodelPackage{{AvailableModels: " minimax-m2 "}},
+			model:        "minimax-m2",
+			wantEligible: 1,
 		},
 		{
-			name:      "model in multi-model list",
-			packages:  []*WisemodelPackage{{AvailableModels: "deepseek-v3,minimax-m2"}},
-			model:     "minimax-m2",
-			wantAllow: true,
+			name:         "model in multi-model list",
+			packages:     []*WisemodelPackage{{AvailableModels: "deepseek-v3,minimax-m2"}},
+			model:        "minimax-m2",
+			wantEligible: 1,
 		},
 		{
-			name:      "model not in list",
-			packages:  []*WisemodelPackage{{AvailableModels: "deepseek-v3"}},
-			model:     "minimax-m2",
-			wantAllow: false,
+			name:         "model not in any package",
+			packages:     []*WisemodelPackage{{AvailableModels: "deepseek-v3"}},
+			model:        "minimax-m2",
+			wantEligible: 0,
 		},
 		{
 			name: "multiple packages, model in one of them",
@@ -399,26 +399,32 @@ func TestIsModelAllowedByPackages(t *testing.T) {
 				{AvailableModels: "deepseek-v3"},
 				{AvailableModels: "minimax-m2"},
 			},
-			model:     "minimax-m2",
-			wantAllow: true,
+			model:        "minimax-m2",
+			wantEligible: 1,
 		},
 		{
-			name: "mixed: one restricted, one empty → restricted wins",
+			name: "mixed: one restricted, one universal → universal covers any model",
 			packages: []*WisemodelPackage{
 				{AvailableModels: "deepseek-v3"},
 				{AvailableModels: ""},
 			},
-			model:     "minimax-m2",
-			wantAllow: false,
+			model:        "minimax-m2",
+			wantEligible: 1, // 空包（通用包）覆盖 minimax-m2
+		},
+		{
+			name:         "empty model string → all packages returned",
+			packages:     []*WisemodelPackage{{AvailableModels: "deepseek-v3"}, {AvailableModels: ""}},
+			model:        "",
+			wantEligible: 2,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := IsModelAllowedByPackages(tc.packages, tc.model)
-			if got != tc.wantAllow {
-				t.Errorf("IsModelAllowedByPackages(%v, %q) = %v, want %v",
-					tc.packages, tc.model, got, tc.wantAllow)
+			got := FilterPackagesByModel(tc.packages, tc.model)
+			if len(got) != tc.wantEligible {
+				t.Errorf("FilterPackagesByModel(%v, %q) returned %d packages, want %d",
+					tc.packages, tc.model, len(got), tc.wantEligible)
 			}
 		})
 	}
