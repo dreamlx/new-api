@@ -429,3 +429,105 @@ func TestFilterPackagesByModel(t *testing.T) {
 		})
 	}
 }
+
+// TestSelectPackageAfterFIFOSort_LargeOldPackageSelected is the regression test for the
+// bug where eligiblePackages was filtered before CalculatePackageAttribution sorted packages,
+// causing the newest (smallest) package to be selected instead of the oldest (largest).
+//
+// Setup:
+//   - oldLargePkg: created Jan, valid until Dec, QuotaGranted=500_000_000
+//   - newSmallPkg: created Feb, valid until Dec, QuotaGranted=7 (from 15 points)
+//
+// If filtering happens BEFORE sort: DB order is DESC, newSmallPkg comes first → selected.
+// If filtering happens AFTER sort:  FIFO order is ASC, oldLargePkg comes first → selected.
+func TestSelectPackageAfterFIFOSort_LargeOldPackageSelected(t *testing.T) {
+	expire := time.Date(2027, 12, 31, 23, 59, 59, 0, time.UTC)
+	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	oldLargePkg := &WisemodelPackage{
+		PackageId:    "pkg-old-large",
+		CreatedAt:    jan,
+		ValidUntil:   &expire,
+		QuotaGranted: 500_000_000,
+		// AvailableModels="" → universal
+	}
+	newSmallPkg := &WisemodelPackage{
+		PackageId:    "pkg-new-small",
+		CreatedAt:    feb,
+		ValidUntil:   &expire,
+		QuotaGranted: 7,
+		// AvailableModels="" → universal
+	}
+
+	// DB order (created_at DESC): newSmallPkg first, oldLargePkg second
+	packages := []*WisemodelPackage{newSmallPkg, oldLargePkg}
+
+	// Step 1: Sort via CalculatePackageAttribution (sorts in-place to FIFO order)
+	SortPackagesByValidUntil(packages)
+	// After sort (ValidUntil same, so CreatedAt ASC): oldLargePkg first, newSmallPkg second
+
+	// Step 2: Filter AFTER sort — eligible = both (both universal)
+	eligible := FilterPackagesByModel(packages, "any-model")
+
+	// Step 3: Select with zero attribution (neither has been consumed)
+	attribution := map[string]int64{
+		"pkg-old-large": 0,
+		"pkg-new-small": 0,
+	}
+	selected := SelectPackageWithRemainingQuota(eligible, attribution)
+
+	if selected == nil {
+		t.Fatal("expected a package to be selected, got nil")
+	}
+	if selected.PackageId != "pkg-old-large" {
+		t.Errorf("expected pkg-old-large (FIFO first), got %s (QuotaGranted=%d)",
+			selected.PackageId, selected.QuotaGranted)
+	}
+}
+
+// TestSelectPackageBeforeFIFOSort_SmallNewPackageWouldBeSelected documents the OLD
+// (buggy) behavior: filtering before sort causes the newest small package to win.
+// This test is intentionally named to show what WOULD happen without the fix.
+func TestSelectPackageBeforeFIFOSort_SmallNewPackageWouldBeSelected(t *testing.T) {
+	expire := time.Date(2027, 12, 31, 23, 59, 59, 0, time.UTC)
+	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	oldLargePkg := &WisemodelPackage{
+		PackageId:    "pkg-old-large",
+		CreatedAt:    jan,
+		ValidUntil:   &expire,
+		QuotaGranted: 500_000_000,
+	}
+	newSmallPkg := &WisemodelPackage{
+		PackageId:    "pkg-new-small",
+		CreatedAt:    feb,
+		ValidUntil:   &expire,
+		QuotaGranted: 7,
+	}
+
+	// DB order (created_at DESC): newSmallPkg first
+	packages := []*WisemodelPackage{newSmallPkg, oldLargePkg}
+
+	// OLD BUG: filter BEFORE sort
+	eligible := FilterPackagesByModel(packages, "any-model")
+	// eligible order: [newSmallPkg, oldLargePkg] — small one first
+
+	// Sort happens AFTER (in CalculatePackageAttribution), but eligible is already snapshotted
+	SortPackagesByValidUntil(packages)
+
+	attribution := map[string]int64{
+		"pkg-old-large": 0,
+		"pkg-new-small": 0,
+	}
+	selected := SelectPackageWithRemainingQuota(eligible, attribution)
+
+	// With the old order, newSmallPkg (QuotaGranted=7) would be selected — documenting the bug
+	if selected == nil {
+		t.Fatal("expected selection, got nil")
+	}
+	if selected.PackageId != "pkg-new-small" {
+		t.Errorf("this test documents buggy behavior: expected pkg-new-small, got %s", selected.PackageId)
+	}
+}
