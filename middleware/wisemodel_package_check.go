@@ -12,8 +12,7 @@ import (
 )
 
 // WisemodelPackageCheck 检查 wisemodel token 是否有有效资源包。
-// 阶段一（警告期）：仅打 WARNING 日志，不拦截请求。
-// 阶段二（强制期）：将 c.AbortWithStatusJSON(403, ...) 取消注释，删除 c.Next()。
+// DB 故障 → fail-closed (503)；无有效包/配额耗尽 → 403。
 func WisemodelPackageCheck() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenName, _ := c.Get("token_name")
@@ -37,7 +36,13 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 		packages, err := model.GetActiveWisemodelPackages(userId)
 		if err != nil {
 			logger.LogError(c, fmt.Sprintf("WisemodelPackageCheck: query failed for user %d: %s", userId, err.Error()))
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error": gin.H{
+					"message": "服务暂时不可用，请稍后重试",
+					"type":    "server_error",
+					"code":    "wisemodel_db_unavailable",
+				},
+			})
 			return
 		}
 
@@ -86,13 +91,30 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 		// 归因计算仍使用全部包（保证 FIFO 历史日志归因准确）；
 		// 包选择仅在 eligiblePackages 中进行，确保扣费归属到正确的资源包。
 		attribution, err := model.CalculatePackageAttribution(userId, packages)
-		if err == nil {
-			selected := model.SelectPackageWithRemainingQuota(eligiblePackages, attribution)
-			if selected != nil {
-				c.Set("wisemodel_package_id", selected.PackageId)
-			}
+		if err != nil {
+			logger.LogError(c, fmt.Sprintf("WisemodelPackageCheck: attribution failed for user %d: %s", userId, err.Error()))
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error": gin.H{
+					"message": "服务暂时不可用，请稍后重试",
+					"type":    "server_error",
+					"code":    "wisemodel_attribution_error",
+				},
+			})
+			return
 		}
-
+		selected := model.SelectPackageWithRemainingQuota(eligiblePackages, attribution)
+		if selected == nil {
+			logger.LogWarn(c, fmt.Sprintf("WisemodelPackageCheck: user %d has no remaining quota in any eligible package", userId))
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": gin.H{
+					"message": "Wisemodel 资源包配额已耗尽，请购买新的资源包",
+					"type":    "insufficient_quota",
+					"code":    "wisemodel_quota_exhausted",
+				},
+			})
+			return
+		}
+		c.Set("wisemodel_package_id", selected.PackageId)
 		c.Next()
 	}
 }

@@ -164,6 +164,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			return
 		}
+		// wisemodel 资源包原子预扣（在 user/token 预扣成功后执行）
+		// 失败时只设置 newAPIError+return，由下方 defer 统一回滚 user/token 预扣
+		if wErr := service.PreConsumeWisemodelPkg(c, priceData.QuotaToPreConsume); wErr != nil {
+			newAPIError = types.NewErrorWithStatusCode(wErr, "insufficient_quota", http.StatusForbidden, types.ErrOptionWithSkipRetry())
+			return
+		}
 	}
 
 	defer func() {
@@ -174,6 +180,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				relayInfo.Billing.Refund(c)
 			}
 			service.ChargeViolationFeeIfNeeded(c, relayInfo, newAPIError)
+			service.SettleWisemodelPkg(c, 0) // 失败路径：全额退还预扣
 		}
 	}()
 

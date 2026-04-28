@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -80,9 +81,14 @@ func HasPaidPackages(userId int) (bool, error) {
 	return count > 0, err
 }
 
-// CreateWisemodelPackage 创建资源包记录
+// CreateWisemodelPackage 创建资源包记录，并初始化 Redis 配额计数器。
 func CreateWisemodelPackage(pkg *WisemodelPackage) error {
-	return DB.Create(pkg).Error
+	if err := DB.Create(pkg).Error; err != nil {
+		return err
+	}
+	// 新包消费为零，计数器 = 总配额；供 Layer-2 原子预扣使用
+	common.RDB.Set(context.Background(), "wm:pkg:remain:"+pkg.PackageId, pkg.QuotaGranted, 0)
+	return nil
 }
 
 // DeleteWisemodelPackagesByUserId 删除用户的所有资源包
@@ -126,7 +132,7 @@ func ReclaimExpiredPackages(userId int) error {
 	for _, pkg := range packages {
 		// 1. 估算该包时间窗口内的消费（近似值）
 		var consumed int64
-		if err := DB.Model(&Log{}).
+		if err := LOG_DB.Model(&Log{}).
 			Where("user_id = ? AND type = ? AND created_at >= ? AND created_at < ?",
 				userId, LogTypeConsume, pkg.CreatedAt.Unix(), pkg.ValidUntil.Unix()).
 			Select("COALESCE(SUM(quota), 0)").Scan(&consumed).Error; err != nil {
@@ -159,6 +165,8 @@ func ReclaimExpiredPackages(userId int) error {
 		if err != nil {
 			return err
 		}
+		// 清理 Redis 计数器，防止过期包的残留计数影响统计
+		common.RDB.Del(context.Background(), "wm:pkg:remain:"+pkg.PackageId)
 	}
 	return nil
 }
@@ -355,15 +363,13 @@ func CalculatePackageAttribution(userId int, packages []*WisemodelPackage) (map[
 		}
 	}
 
-	preciseAttribution := make(map[string]int64, len(packages))
-	for _, pkg := range packages {
-		var sum int64
-		if err := LOG_DB.Model(&Log{}).
-			Where("wisemodel_package_id = ? AND type = ?", pkg.PackageId, LogTypeConsume).
-			Select("COALESCE(SUM(quota), 0)").Scan(&sum).Error; err != nil {
-			return nil, err
-		}
-		preciseAttribution[pkg.PackageId] = sum
+	pkgIds := make([]string, len(packages))
+	for i, pkg := range packages {
+		pkgIds[i] = pkg.PackageId
+	}
+	preciseAttribution, err := getPreciseAttributionByPackages(pkgIds)
+	if err != nil {
+		return nil, err
 	}
 
 	var oldLogs []Log
@@ -419,6 +425,50 @@ func FilterPackagesByModel(packages []*WisemodelPackage, requestedModel string) 
 	return eligible
 }
 
+
+// getPreciseAttributionByPackages 批量查询多个资源包的精确消费总和（一次 GROUP BY 替代 N 次单包查询）。
+func getPreciseAttributionByPackages(pkgIds []string) (map[string]int64, error) {
+	if len(pkgIds) == 0 {
+		return map[string]int64{}, nil
+	}
+	type row struct {
+		WisemodelPackageId string `gorm:"column:wisemodel_package_id"`
+		UsedQuota          int64  `gorm:"column:used_quota"`
+	}
+	var rows []row
+	err := LOG_DB.Model(&Log{}).
+		Where("wisemodel_package_id IN ? AND type = ?", pkgIds, LogTypeConsume).
+		Group("wisemodel_package_id").
+		Select("wisemodel_package_id, COALESCE(SUM(quota), 0) AS used_quota").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int64, len(pkgIds))
+	for _, r := range rows {
+		result[r.WisemodelPackageId] = r.UsedQuota
+	}
+	return result, nil
+}
+
+// ComputeWisemodelPackageRemain 计算单个资源包的剩余配额（精确归因），供 Redis 计数器懒初始化使用。
+func ComputeWisemodelPackageRemain(pkgId string) (int64, error) {
+	pkg, err := GetWisemodelPackageByPackageId(pkgId)
+	if err != nil {
+		return 0, err
+	}
+	var used int64
+	if err := LOG_DB.Model(&Log{}).
+		Where("wisemodel_package_id = ? AND type = ?", pkgId, LogTypeConsume).
+		Select("COALESCE(SUM(quota), 0)").Scan(&used).Error; err != nil {
+		return 0, err
+	}
+	remain := pkg.QuotaGranted - used
+	if remain < 0 {
+		remain = 0
+	}
+	return remain, nil
+}
 
 // ReclaimAllExpiredPackages 全局扫描所有用户的过期未回收包，供后台定时任务调用。
 func ReclaimAllExpiredPackages() error {
