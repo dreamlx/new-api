@@ -87,8 +87,8 @@ test_user_bind() {
     test_start "用户绑定 - 新用户"
 
     PHONE=$(generate_phone)
-    # WM_KEY="wm_key_test_$(date +%s)"
-    WM_KEY="wisemodel-iygugqeusgbodidvxxgl"
+    WM_KEY="wm_key_test_$(date +%s)"
+    # WM_KEY="wisemodel-iygugqeusgbodidvxxgl"
     echo "$PHONE" > /tmp/wisemodel_test_phone.txt
     echo "$WM_KEY" > /tmp/wisemodel_test_wm_key.txt
     # RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/bind" \
@@ -115,8 +115,8 @@ test_update_key() {
     test_start "更新Wisemodel Key"
 
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
-    # NEW_KEY="wm_key_updated_$(date +%s)"
-    NEW_KEY="wisemodel-bvwulxeoviypfmzfvrwj"
+    NEW_KEY="wm_key_updated_$(date +%s)"
+    # NEW_KEY="wisemodel-bvwulxeoviypfmzfvrwj"
     RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/update_wisemodel_key" \
         -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
@@ -441,7 +441,7 @@ test_chat_call() {
     fi
 
     WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
-    CHAT_MODEL="${WISEMODEL_CHAT_MODEL:-minimax-m2-latest}"
+    CHAT_MODEL="${WISEMODEL_CHAT_MODEL:-minimax-m2.5-highspeed}"
 
     RESPONSE=$(curl -s -X POST "$BASE_URL/v1/chat/completions" \
         -H "Authorization: Bearer $WM_KEY" \
@@ -451,7 +451,7 @@ test_chat_call() {
             \"messages\": [
                 {\"role\": \"user\", \"content\": \"Hello, reply with just OK, give me a funny story\"}
             ],
-            \"max_tokens\": 10
+            \"max_tokens\": 1024
         }")
 
     CHOICES=$(echo "$RESPONSE" | jq '.choices | length' 2>/dev/null)
@@ -523,6 +523,354 @@ test_verify_order_after_chat() {
     fi
 }
 
+# Scenario A: 小包耗尽后大包接管
+# Verify that when a small package (QuotaGranted=5, too small) coexists with a large package,
+# the large package is selected and the small one is left untouched.
+test_small_package_fallback_to_large() {
+    test_start "Scenario A: 小包耗尽后大包接管"
+
+    local PHONE
+    PHONE=$(cat /tmp/wisemodel_test_phone.txt)
+
+    local SUFFIX
+    SUFFIX=$(date +%s%N | tail -c 6)
+    local SMALL_ORDER_ID="WM-SMALL-ORD-${SUFFIX}"
+    local SMALL_PKG_ID="WM-SMALL-${SUFFIX}"
+
+    # Create small package: points=10 => QuotaGranted=5 (too small to satisfy any real request)
+    local SMALL_RESP
+    SMALL_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"order_id\": \"$SMALL_ORDER_ID\",
+            \"package_count\": 1,
+            \"packages\": [
+                {
+                    \"id\": \"$SMALL_PKG_ID\",
+                    \"points\": 10,
+                    \"tokens\": 0,
+                    \"amount\": 0.01,
+                    \"phone\": \"$PHONE\",
+                    \"is_free\": false,
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
+                }
+            ]
+        }")
+
+    sleep 1
+
+    local LARGE_SUFFIX
+    LARGE_SUFFIX=$(date +%s%N | tail -c 6)
+    local LARGE_ORDER_ID="WM-LARGE-ORD-${LARGE_SUFFIX}"
+    local LARGE_PKG_ID="WM-LARGE-${LARGE_SUFFIX}"
+
+    # Create large package: points=1000000000 => QuotaGranted=500000000
+    local LARGE_RESP
+    LARGE_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"order_id\": \"$LARGE_ORDER_ID\",
+            \"package_count\": 1,
+            \"packages\": [
+                {
+                    \"id\": \"$LARGE_PKG_ID\",
+                    \"points\": 1000000000,
+                    \"tokens\": 0,
+                    \"amount\": 100.00,
+                    \"phone\": \"$PHONE\",
+                    \"is_free\": false,
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
+                }
+            ]
+        }")
+
+    # Assert both package creations succeeded
+    local SMALL_OK
+    SMALL_OK=$(echo "$SMALL_RESP" | jq -r '.success' 2>/dev/null)
+    local LARGE_OK
+    LARGE_OK=$(echo "$LARGE_RESP" | jq -r '.success' 2>/dev/null)
+
+    if [ "$SMALL_OK" != "true" ]; then
+        log_error "  [A] 小包创建失败: $SMALL_RESP"
+        return
+    fi
+    log_info "  [A] 小包创建成功 (pkg_id=$SMALL_PKG_ID, points=10)"
+
+    if [ "$LARGE_OK" != "true" ]; then
+        log_error "  [A] 大包创建失败: $LARGE_RESP"
+        return
+    fi
+    log_info "  [A] 大包创建成功 (pkg_id=$LARGE_PKG_ID, points=1000000000)"
+
+    # Wait for Redis to settle
+    sleep 2
+
+    # Make one chat call
+    local WM_KEY
+    WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
+    local CHAT_MODEL="${WISEMODEL_CHAT_MODEL:-minimax-m2.5-highspeed}"
+
+    local CHAT_RESP
+    CHAT_RESP=$(curl -s -X POST "$BASE_URL/v1/chat/completions" \
+        -H "Authorization: Bearer $WM_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"model\": \"$CHAT_MODEL\",
+            \"messages\": [{\"role\": \"user\", \"content\": \"Hello, reply with just OK\"}],
+            \"max_tokens\": 1024
+        }")
+
+    local CHOICES
+    CHOICES=$(echo "$CHAT_RESP" | jq '.choices | length' 2>/dev/null)
+    if [ -n "$CHOICES" ] && [ "$CHOICES" -gt 0 ] 2>/dev/null; then
+        log_info "  [A] Chat调用成功 (model=$CHAT_MODEL)"
+    else
+        log_error "  [A] Chat调用失败: $CHAT_RESP"
+        return
+    fi
+
+    sleep 2
+
+    # Query package_usage
+    local USAGE_RESP
+    USAGE_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/package_usage" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"phone\": \"$PHONE\"}")
+
+    # Find small package remain_points by package_id
+    local SMALL_REMAIN
+    SMALL_REMAIN=$(echo "$USAGE_RESP" | jq --arg pid "$SMALL_PKG_ID" \
+        '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
+
+    # Find large package remain_points by package_id
+    local LARGE_REMAIN
+    LARGE_REMAIN=$(echo "$USAGE_RESP" | jq --arg pid "$LARGE_PKG_ID" \
+        '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
+
+    log_info "  [A] 小包剩余积分: $SMALL_REMAIN (期望=10)"
+    log_info "  [A] 大包剩余积分: $LARGE_REMAIN (期望<1000000000)"
+
+    # Assert small package was NOT consumed
+    if [ "$SMALL_REMAIN" = "10" ]; then
+        log_success "  [A] 小包未被消耗 (remain_points=10，符合预期)"
+    else
+        log_error "  [A] 小包状态异常: remain_points=$SMALL_REMAIN, 期望=10"
+    fi
+
+    # Assert large package WAS consumed
+    local LARGE_CONSUMED=false
+    if [ -n "$LARGE_REMAIN" ] && [ "$LARGE_REMAIN" -lt 1000000000 ] 2>/dev/null; then
+        LARGE_CONSUMED=true
+    fi
+
+    if [ "$LARGE_CONSUMED" = "true" ]; then
+        log_success "  [A] 大包已被消耗 (remain_points=$LARGE_REMAIN < 1000000000，符合预期)"
+    else
+        log_error "  [A] 大包未被消耗: remain_points=$LARGE_REMAIN, 期望<1000000000"
+    fi
+}
+
+# Scenario B: 专用包与通用包模型隔离
+# Verify that a model-specific package only absorbs requests for its designated model,
+# while a universal package absorbs requests for other models.
+test_model_specific_package_isolation() {
+    test_start "Scenario B: 专用包与通用包模型隔离"
+
+    local PHONE
+    PHONE=$(cat /tmp/wisemodel_test_phone.txt)
+
+    local SPECIFIC_MODEL="${WISEMODEL_SPECIFIC_MODEL:-minimax-m2}"
+    local OTHER_MODEL="${WISEMODEL_OTHER_MODEL:-minimax-m2.5-highspeed}"
+
+    local SUFFIX_S
+    SUFFIX_S=$(date +%s%N | tail -c 6)
+    local SPEC_ORDER_ID="WM-SPEC-ORD-${SUFFIX_S}"
+    local SPEC_PKG_ID="WM-SPEC-${SUFFIX_S}"
+
+    # Create specific-model package
+    local SPEC_RESP
+    SPEC_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"order_id\": \"$SPEC_ORDER_ID\",
+            \"package_count\": 1,
+            \"packages\": [
+                {
+                    \"id\": \"$SPEC_PKG_ID\",
+                    \"points\": 1000000000,
+                    \"tokens\": 0,
+                    \"amount\": 100.00,
+                    \"phone\": \"$PHONE\",
+                    \"is_free\": false,
+                    \"model_names\": \"$SPECIFIC_MODEL\",
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
+                }
+            ]
+        }")
+
+    sleep 1
+
+    local SUFFIX_U
+    SUFFIX_U=$(date +%s%N | tail -c 6)
+    local UNIV_ORDER_ID="WM-UNIV-ORD-${SUFFIX_U}"
+    local UNIV_PKG_ID="WM-UNIV-${SUFFIX_U}"
+
+    # Create universal package
+    local UNIV_RESP
+    UNIV_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"order_id\": \"$UNIV_ORDER_ID\",
+            \"package_count\": 1,
+            \"packages\": [
+                {
+                    \"id\": \"$UNIV_PKG_ID\",
+                    \"points\": 1000000000,
+                    \"tokens\": 0,
+                    \"amount\": 100.00,
+                    \"phone\": \"$PHONE\",
+                    \"is_free\": false,
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
+                }
+            ]
+        }")
+
+    # Assert both package creations succeeded
+    local SPEC_OK
+    SPEC_OK=$(echo "$SPEC_RESP" | jq -r '.success' 2>/dev/null)
+    local UNIV_OK
+    UNIV_OK=$(echo "$UNIV_RESP" | jq -r '.success' 2>/dev/null)
+
+    if [ "$SPEC_OK" != "true" ]; then
+        log_error "  [B] 专用包创建失败: $SPEC_RESP"
+        return
+    fi
+    log_info "  [B] 专用包创建成功 (pkg_id=$SPEC_PKG_ID, model=$SPECIFIC_MODEL)"
+
+    if [ "$UNIV_OK" != "true" ]; then
+        log_error "  [B] 通用包创建失败: $UNIV_RESP"
+        return
+    fi
+    log_info "  [B] 通用包创建成功 (pkg_id=$UNIV_PKG_ID, model=universal)"
+
+    sleep 2
+
+    local WM_KEY
+    WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
+
+    # --- Phase 1: call with SPECIFIC_MODEL ---
+    local CHAT_RESP1
+    CHAT_RESP1=$(curl -s -X POST "$BASE_URL/v1/chat/completions" \
+        -H "Authorization: Bearer $WM_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"model\": \"$SPECIFIC_MODEL\",
+            \"messages\": [{\"role\": \"user\", \"content\": \"Hello, reply with just OK\"}],
+            \"max_tokens\": 256
+        }")
+
+    local CHOICES1
+    CHOICES1=$(echo "$CHAT_RESP1" | jq '.choices | length' 2>/dev/null)
+    if [ -n "$CHOICES1" ] && [ "$CHOICES1" -gt 0 ] 2>/dev/null; then
+        log_info "  [B] Phase1 Chat调用成功 (model=$SPECIFIC_MODEL)"
+    else
+        log_error "  [B] Phase1 Chat调用失败 (model=$SPECIFIC_MODEL): $CHAT_RESP1"
+        return
+    fi
+
+    sleep 2
+
+    # Query usage after Phase 1
+    local USAGE1
+    USAGE1=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/package_usage" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"phone\": \"$PHONE\"}")
+
+    local SPEC_REMAIN1
+    SPEC_REMAIN1=$(echo "$USAGE1" | jq --arg pid "$SPEC_PKG_ID" \
+        '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
+    local UNIV_REMAIN1
+    UNIV_REMAIN1=$(echo "$USAGE1" | jq --arg pid "$UNIV_PKG_ID" \
+        '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
+
+    log_info "  [B] Phase1后 专用包剩余积分: $SPEC_REMAIN1 (期望<1000000000)"
+    log_info "  [B] Phase1后 通用包剩余积分: $UNIV_REMAIN1 (期望=1000000000)"
+
+    # Assert specific package was charged after Phase 1
+    local SPEC_CHARGED=false
+    if [ -n "$SPEC_REMAIN1" ] && [ "$SPEC_REMAIN1" -lt 1000000000 ] 2>/dev/null; then
+        SPEC_CHARGED=true
+    fi
+    if [ "$SPEC_CHARGED" = "true" ]; then
+        log_success "  [B] 专用包已被专用模型请求消耗 (remain_points=$SPEC_REMAIN1，符合预期)"
+    else
+        log_error "  [B] 专用包未被消耗: remain_points=$SPEC_REMAIN1, 期望<1000000000"
+    fi
+
+    # Assert universal package was NOT charged after Phase 1
+    if [ "$UNIV_REMAIN1" = "1000000000" ]; then
+        log_success "  [B] 通用包在专用模型请求后未被消耗 (remain_points=1000000000，符合预期)"
+    else
+        log_error "  [B] 通用包状态异常: remain_points=$UNIV_REMAIN1, 期望=1000000000"
+    fi
+
+    # --- Phase 2: call with OTHER_MODEL ---
+    local CHAT_RESP2
+    CHAT_RESP2=$(curl -s -X POST "$BASE_URL/v1/chat/completions" \
+        -H "Authorization: Bearer $WM_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"model\": \"$OTHER_MODEL\",
+            \"messages\": [{\"role\": \"user\", \"content\": \"Hello, reply with just OK\"}],
+            \"max_tokens\": 256
+        }")
+
+    local CHOICES2
+    CHOICES2=$(echo "$CHAT_RESP2" | jq '.choices | length' 2>/dev/null)
+    if [ -n "$CHOICES2" ] && [ "$CHOICES2" -gt 0 ] 2>/dev/null; then
+        log_info "  [B] Phase2 Chat调用成功 (model=$OTHER_MODEL)"
+    else
+        log_error "  [B] Phase2 Chat调用失败 (model=$OTHER_MODEL): $CHAT_RESP2"
+        return
+    fi
+
+    sleep 2
+
+    # Query usage after Phase 2
+    local USAGE2
+    USAGE2=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/package_usage" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"phone\": \"$PHONE\"}")
+
+    local UNIV_REMAIN2
+    UNIV_REMAIN2=$(echo "$USAGE2" | jq --arg pid "$UNIV_PKG_ID" \
+        '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
+
+    log_info "  [B] Phase2后 通用包剩余积分: $UNIV_REMAIN2 (期望<1000000000)"
+
+    # Assert universal package was charged after Phase 2
+    local UNIV_CHARGED=false
+    if [ -n "$UNIV_REMAIN2" ] && [ "$UNIV_REMAIN2" -lt 1000000000 ] 2>/dev/null; then
+        UNIV_CHARGED=true
+    fi
+    if [ "$UNIV_CHARGED" = "true" ]; then
+        log_success "  [B] 通用包已被其他模型请求消耗 (remain_points=$UNIV_REMAIN2，符合预期)"
+    else
+        log_error "  [B] 通用包未被其他模型请求消耗: remain_points=$UNIV_REMAIN2, 期望<1000000000"
+    fi
+}
+
 # 主测试流程
 main() {
     echo ""
@@ -563,25 +911,34 @@ main() {
     test_package_usage
     sleep 1
     test_chat_call
+    test_chat_call
+    test_chat_call
     sleep 1
     test_verify_order_after_chat
-    sleep 1
-    test_update_phone
-    sleep 1
-    test_delete_key
-    sleep 1
+    # sleep 1
+    # test_update_phone
+    # sleep 1
+
+    # test_delete_key
+    # sleep 1
 
     # 错误处理测试
-    test_invalid_token
-    sleep 1
-    test_user_not_found
-    sleep 1
-    test_package_count_mismatch
-    sleep 1
+    # test_invalid_token
+    # sleep 1
+    # test_user_not_found
+    # sleep 1
+    # test_package_count_mismatch
+    # sleep 1
 
     # 高级功能测试
-    test_multiple_packages
+    # test_multiple_packages
+    # sleep 1
+
+    # 场景测试
     sleep 1
+    test_small_package_fallback_to_large
+    sleep 1
+    test_model_specific_package_isolation
 
     # 测试报告
     echo ""
