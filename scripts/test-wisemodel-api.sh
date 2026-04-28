@@ -871,6 +871,404 @@ test_model_specific_package_isolation() {
     fi
 }
 
+# Scenario C: 新包首次调用成功（懒初始化验证）
+# Verify that a brand-new package (Redis key not yet seeded) works on first call —
+# lazy-init correctly computes remaining quota from DB.
+test_fresh_package_first_call_succeeds() {
+    test_start "Scenario C: 新包首次调用成功（懒初始化验证）"
+
+    local PHONE
+    PHONE=$(cat /tmp/wisemodel_test_phone.txt)
+    local WM_KEY
+    WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
+
+    local SUFFIX
+    SUFFIX=$(date +%s%N | tail -c 8)
+    local ORDER_ID="WM-FRESH-ORD-C-${SUFFIX}"
+    local PKG_ID="PKG_FRESH_C_${SUFFIX}"
+
+    # Step 2: Create fresh package with large points and a far-future expiry
+    local CREATE_RESP
+    CREATE_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"order_id\": \"$ORDER_ID\",
+            \"package_count\": 1,
+            \"packages\": [
+                {
+                    \"id\": \"$PKG_ID\",
+                    \"points\": 1000000000,
+                    \"tokens\": 0,
+                    \"amount\": 100.00,
+                    \"phone\": \"$PHONE\",
+                    \"is_free\": false,
+                    \"valid_until\": \"2028-12-31T23:59:59Z\",
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
+                    \"model_names\": \"\"
+                }
+            ]
+        }")
+
+    local CREATE_OK
+    CREATE_OK=$(echo "$CREATE_RESP" | jq -r '.success' 2>/dev/null)
+    if [ "$CREATE_OK" != "true" ]; then
+        log_error "  [C] 新包创建失败: $CREATE_RESP"
+        return
+    fi
+    log_info "  [C] 新包创建成功 (pkg_id=$PKG_ID, points=1000000000)"
+
+    # Step 4: Allow DB sync
+    sleep 1
+
+    # Step 5: Make chat call immediately — Redis key for this brand-new package doesn't exist yet
+    local CHAT_MODEL="${WISEMODEL_CHAT_MODEL:-minimax-m2.5-highspeed}"
+    local CHAT_RESP
+    CHAT_RESP=$(curl -s -X POST "$BASE_URL/v1/chat/completions" \
+        -H "Authorization: Bearer $WM_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"model\": \"$CHAT_MODEL\",
+            \"messages\": [{\"role\": \"user\", \"content\": \"Reply OK\"}],
+            \"max_tokens\": 512
+        }")
+
+    # Step 6: Assert HTTP 200, choices > 0
+    local CHOICES
+    CHOICES=$(echo "$CHAT_RESP" | jq '.choices | length' 2>/dev/null)
+    if [ -n "$CHOICES" ] && [ "$CHOICES" -gt 0 ] 2>/dev/null; then
+        log_success "  [C] Chat调用成功 (懒初始化正常工作)"
+    else
+        log_error "  [C] Chat调用失败（懒初始化可能失败）: $CHAT_RESP"
+        return
+    fi
+
+    # Step 7: Query package_usage
+    local USAGE
+    USAGE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/package_usage" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"phone\": \"$PHONE\"}")
+
+    # Step 8: Assert remain_points < 1000000000 (lazy-init succeeded, quota was consumed)
+    local REMAIN
+    REMAIN=$(echo "$USAGE" | jq --arg pid "$PKG_ID" \
+        '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
+
+    log_info "  [C] 新包剩余积分: $REMAIN (期望<1000000000)"
+
+    if [ -n "$REMAIN" ] && [ "$REMAIN" -lt 1000000000 ] 2>/dev/null; then
+        log_success "  [C] 懒初始化成功：新包积分已被消耗 (remain_points=$REMAIN)"
+    else
+        log_error "  [C] 懒初始化可能失败：remain_points=$REMAIN，期望<1000000000"
+    fi
+}
+
+# Scenario D: 零配额包被正确跳过，大包接管
+# Verify that a package with points=1 (QuotaGranted=0) is correctly skipped by
+# SelectPackageWithRemainingQuota, while a large package handles the request.
+test_small_quota_package_exhaustion() {
+    test_start "Scenario D: 零配额包被正确跳过，大包接管"
+
+    local PHONE
+    PHONE=$(cat /tmp/wisemodel_test_phone.txt)
+    local WM_KEY
+    WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
+
+    local SUFFIX
+    SUFFIX=$(date +%s%N | tail -c 8)
+
+    # Step 1: Create tiny package: points=1 => QuotaGranted=0 (pre-consume must skip it)
+    local TINY_ORDER_ID="WM-TINY-ORD-D-${SUFFIX}"
+    local TINY_PKG_ID="PKG_TINY_D_${SUFFIX}"
+
+    local TINY_RESP
+    TINY_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"order_id\": \"$TINY_ORDER_ID\",
+            \"package_count\": 1,
+            \"packages\": [
+                {
+                    \"id\": \"$TINY_PKG_ID\",
+                    \"points\": 1,
+                    \"tokens\": 0,
+                    \"amount\": 0.01,
+                    \"phone\": \"$PHONE\",
+                    \"is_free\": false,
+                    \"valid_until\": \"2026-01-01T23:59:59Z\",
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
+                    \"model_names\": \"\"
+                }
+            ]
+        }")
+
+    local TINY_OK
+    TINY_OK=$(echo "$TINY_RESP" | jq -r '.success' 2>/dev/null)
+    if [ "$TINY_OK" != "true" ]; then
+        log_error "  [D] 小包(points=1)创建失败: $TINY_RESP"
+        return
+    fi
+    log_info "  [D] 小包创建成功 (pkg_id=$TINY_PKG_ID, points=1)"
+
+    sleep 1
+
+    # Step 2: Create large package to absorb the request
+    local LARGE_SUFFIX
+    LARGE_SUFFIX=$(date +%s%N | tail -c 8)
+    local LARGE_ORDER_ID="WM-LARGE-ORD-D-${LARGE_SUFFIX}"
+    local LARGE_PKG_ID="PKG_LARGE_D_${LARGE_SUFFIX}"
+
+    local LARGE_RESP
+    LARGE_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"order_id\": \"$LARGE_ORDER_ID\",
+            \"package_count\": 1,
+            \"packages\": [
+                {
+                    \"id\": \"$LARGE_PKG_ID\",
+                    \"points\": 1000000000,
+                    \"tokens\": 0,
+                    \"amount\": 100.00,
+                    \"phone\": \"$PHONE\",
+                    \"is_free\": false,
+                    \"valid_until\": \"2027-12-31T23:59:59Z\",
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
+                    \"model_names\": \"\"
+                }
+            ]
+        }")
+
+    local LARGE_OK
+    LARGE_OK=$(echo "$LARGE_RESP" | jq -r '.success' 2>/dev/null)
+    if [ "$LARGE_OK" != "true" ]; then
+        log_error "  [D] 大包创建失败: $LARGE_RESP"
+        return
+    fi
+    log_info "  [D] 大包创建成功 (pkg_id=$LARGE_PKG_ID, points=1000000000)"
+
+    sleep 1
+
+    # Step 3: Make one chat call
+    local CHAT_MODEL="${WISEMODEL_CHAT_MODEL:-minimax-m2.5-highspeed}"
+    local CHAT_RESP
+    CHAT_RESP=$(curl -s -X POST "$BASE_URL/v1/chat/completions" \
+        -H "Authorization: Bearer $WM_KEY" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"model\": \"$CHAT_MODEL\",
+            \"messages\": [{\"role\": \"user\", \"content\": \"Reply OK\"}],
+            \"max_tokens\": 512
+        }")
+
+    # Step 4: Assert HTTP 200 (large package should handle it)
+    local CHOICES
+    CHOICES=$(echo "$CHAT_RESP" | jq '.choices | length' 2>/dev/null)
+    if [ -n "$CHOICES" ] && [ "$CHOICES" -gt 0 ] 2>/dev/null; then
+        log_info "  [D] Chat调用成功（大包接管）"
+    else
+        log_error "  [D] Chat调用失败: $CHAT_RESP"
+        return
+    fi
+
+    sleep 1
+
+    # Step 5: Query package_usage
+    local USAGE
+    USAGE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/package_usage" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"phone\": \"$PHONE\"}")
+
+    local TINY_REMAIN
+    TINY_REMAIN=$(echo "$USAGE" | jq --arg pid "$TINY_PKG_ID" \
+        '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
+
+    local LARGE_REMAIN
+    LARGE_REMAIN=$(echo "$USAGE" | jq --arg pid "$LARGE_PKG_ID" \
+        '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
+
+    log_info "  [D] 小包(points=1)剩余积分: $TINY_REMAIN (期望=1，未被消耗)"
+    log_info "  [D] 大包剩余积分: $LARGE_REMAIN (期望<1000000000)"
+
+    # Step 6: Assert tiny package remain_points is still 1 (pre-consume correctly skipped it)
+    if [ "$TINY_REMAIN" = "1" ]; then
+        log_success "  [D] 零配额包被正确跳过 (remain_points=1，未被消耗)"
+    else
+        log_error "  [D] 零配额包状态异常: remain_points=$TINY_REMAIN, 期望=1"
+    fi
+
+    # Step 7: Assert large package was consumed
+    if [ -n "$LARGE_REMAIN" ] && [ "$LARGE_REMAIN" -lt 1000000000 ] 2>/dev/null; then
+        log_success "  [D] 大包正确接管请求 (remain_points=$LARGE_REMAIN < 1000000000)"
+    else
+        log_error "  [D] 大包未被消耗: remain_points=$LARGE_REMAIN, 期望<1000000000"
+    fi
+}
+
+# Scenario E: FIFO顺序消费 — 早到期的包先消费
+# Verify FIFO ordering — the package with the earlier valid_until is consumed first.
+test_fifo_package_consumption_order() {
+    test_start "Scenario E: FIFO顺序消费 — 早到期的包先消费"
+
+    local PHONE
+    PHONE=$(cat /tmp/wisemodel_test_phone.txt)
+    local WM_KEY
+    WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
+
+    local SUFFIX_A
+    SUFFIX_A=$(date +%s%N | tail -c 8)
+
+    # Step 2: Create package A — expires sooner (2026-06-30)
+    local ORDER_A="WM-FIFO-ORD-A-${SUFFIX_A}"
+    local PKG_A="PKG_FIFO_A_${SUFFIX_A}"
+
+    local RESP_A
+    RESP_A=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"order_id\": \"$ORDER_A\",
+            \"package_count\": 1,
+            \"packages\": [
+                {
+                    \"id\": \"$PKG_A\",
+                    \"points\": 1000000000,
+                    \"tokens\": 0,
+                    \"amount\": 100.00,
+                    \"phone\": \"$PHONE\",
+                    \"is_free\": false,
+                    \"valid_until\": \"2026-06-30T23:59:59Z\",
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
+                    \"model_names\": \"\"
+                }
+            ]
+        }")
+
+    sleep 1
+
+    local SUFFIX_B
+    SUFFIX_B=$(date +%s%N | tail -c 8)
+
+    # Step 3: Create package B — expires later (2028-06-30)
+    local ORDER_B="WM-FIFO-ORD-B-${SUFFIX_B}"
+    local PKG_B="PKG_FIFO_B_${SUFFIX_B}"
+
+    local RESP_B
+    RESP_B=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"order_id\": \"$ORDER_B\",
+            \"package_count\": 1,
+            \"packages\": [
+                {
+                    \"id\": \"$PKG_B\",
+                    \"points\": 1000000000,
+                    \"tokens\": 0,
+                    \"amount\": 100.00,
+                    \"phone\": \"$PHONE\",
+                    \"is_free\": false,
+                    \"valid_until\": \"2028-06-30T23:59:59Z\",
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
+                    \"model_names\": \"\"
+                }
+            ]
+        }")
+
+    # Step 4: Assert both orders created
+    local OK_A
+    OK_A=$(echo "$RESP_A" | jq -r '.success' 2>/dev/null)
+    local OK_B
+    OK_B=$(echo "$RESP_B" | jq -r '.success' 2>/dev/null)
+
+    if [ "$OK_A" != "true" ]; then
+        log_error "  [E] 包A创建失败: $RESP_A"
+        return
+    fi
+    log_info "  [E] 包A创建成功 (pkg_id=$PKG_A, valid_until=2026-06-30)"
+
+    if [ "$OK_B" != "true" ]; then
+        log_error "  [E] 包B创建失败: $RESP_B"
+        return
+    fi
+    log_info "  [E] 包B创建成功 (pkg_id=$PKG_B, valid_until=2028-06-30)"
+
+    # Step 5: Allow DB sync
+    sleep 1
+
+    # Step 6: Make 3 chat calls to ensure measurable consumption
+    local CHAT_MODEL="${WISEMODEL_CHAT_MODEL:-minimax-m2.5-highspeed}"
+    local i
+    for i in 1 2 3; do
+        local CHAT_RESP
+        CHAT_RESP=$(curl -s -X POST "$BASE_URL/v1/chat/completions" \
+            -H "Authorization: Bearer $WM_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"model\": \"$CHAT_MODEL\",
+                \"messages\": [{\"role\": \"user\", \"content\": \"Reply OK\"}],
+                \"max_tokens\": 512
+            }")
+        local CHOICES
+        CHOICES=$(echo "$CHAT_RESP" | jq '.choices | length' 2>/dev/null)
+        if [ -n "$CHOICES" ] && [ "$CHOICES" -gt 0 ] 2>/dev/null; then
+            log_info "  [E] Chat call $i 成功"
+        else
+            log_error "  [E] Chat call $i 失败: $CHAT_RESP"
+            return
+        fi
+    done
+
+    sleep 1
+
+    # Step 7: Query package_usage
+    local USAGE
+    USAGE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/package_usage" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"phone\": \"$PHONE\"}")
+
+    local REMAIN_A
+    REMAIN_A=$(echo "$USAGE" | jq --arg pid "$PKG_A" \
+        '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
+
+    local REMAIN_B
+    REMAIN_B=$(echo "$USAGE" | jq --arg pid "$PKG_B" \
+        '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
+
+    log_info "  [E] 包A剩余积分: $REMAIN_A (期望<1000000000，先消费)"
+    log_info "  [E] 包B剩余积分: $REMAIN_B (期望=1000000000 或 > 包A剩余)"
+
+    # Step 8: Assert package A was consumed (earlier expiry = first in FIFO order)
+    if [ -n "$REMAIN_A" ] && [ "$REMAIN_A" -lt 1000000000 ] 2>/dev/null; then
+        log_success "  [E] 包A（早到期）已被优先消耗 (remain_points=$REMAIN_A)"
+    else
+        log_error "  [E] 包A未被消耗: remain_points=$REMAIN_A, 期望<1000000000"
+    fi
+
+    # Step 9: Assert package B was not consumed OR consumed less than A
+    local B_UNTOUCHED=false
+    local B_LESS_CONSUMED=false
+    if [ "$REMAIN_B" = "1000000000" ]; then
+        B_UNTOUCHED=true
+    fi
+    if [ -n "$REMAIN_A" ] && [ -n "$REMAIN_B" ] && [ "$REMAIN_B" -gt "$REMAIN_A" ] 2>/dev/null; then
+        B_LESS_CONSUMED=true
+    fi
+
+    if [ "$B_UNTOUCHED" = "true" ]; then
+        log_success "  [E] 包B（晚到期）完全未被消耗 (remain_points=1000000000，FIFO正确)"
+    elif [ "$B_LESS_CONSUMED" = "true" ]; then
+        log_success "  [E] 包B消耗少于包A (remain_points=$REMAIN_B > $REMAIN_A，FIFO倾向正确)"
+    else
+        log_error "  [E] FIFO顺序异常: 包A remain=$REMAIN_A, 包B remain=$REMAIN_B"
+    fi
+}
+
 # 主测试流程
 main() {
     echo ""
@@ -939,6 +1337,12 @@ main() {
     test_small_package_fallback_to_large
     sleep 1
     test_model_specific_package_isolation
+    sleep 1
+    test_fresh_package_first_call_succeeds
+    sleep 1
+    test_small_quota_package_exhaustion
+    sleep 1
+    test_fifo_package_consumption_order
 
     # 测试报告
     echo ""
