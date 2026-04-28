@@ -248,7 +248,7 @@ func TestPreConsumeWisemodelPkg_ZeroEstimatedQuota_NoOp(t *testing.T) {
 }
 
 func TestPreConsumeWisemodelPkg_LazyInit_DBLookup(t *testing.T) {
-	mr := setupWisemodelQuotaTest(t)
+	setupWisemodelQuotaTest(t)
 	pkgId := "pkg-lazy-db-lookup"
 	quotaGranted := int64(10_000)
 	seedPackage(t, pkgId, quotaGranted)
@@ -271,6 +271,5 @@ func TestPreConsumeWisemodelPkg_LazyInit_DBLookup(t *testing.T) {
 	ctx := context.Background()
 	redisVal, redisErr := common.RDB.Get(ctx, "wm:pkg:remain:"+pkgId).Int64()
 	require.NoError(t, redisErr)
-	_ = mr
 	require.Equal(t, int64(6900), redisVal)
 }
