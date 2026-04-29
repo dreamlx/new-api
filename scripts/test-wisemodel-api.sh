@@ -1119,14 +1119,16 @@ test_small_quota_package_exhaustion() {
     LARGE_REMAIN=$(echo "$USAGE" | jq --arg pid "$LARGE_PKG_ID" \
         '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
 
-    log_info "  [D] 小包(points=1)剩余积分: $TINY_REMAIN (期望=1，未被消耗)"
+    log_info "  [D] 小包(points=1)剩余积分: $TINY_REMAIN (期望=0，1积分<换算精度，QuotaGranted=0)"
     log_info "  [D] 大包剩余积分: $LARGE_REMAIN (期望<1000000000)"
 
-    # Step 6: Assert tiny package remain_points is still 1 (pre-consume correctly skipped it)
-    if [ "$TINY_REMAIN" = "1" ]; then
-        log_success "  [D] 零配额包被正确跳过 (remain_points=1，未被消耗)"
+    # Step 6: Assert tiny package remain_points is 0.
+    # 1 point converts to QuotaGranted=0 (int64(1/1_000_000*500_000)=0), so remain_points is
+    # always 0 regardless of consumption — the package is inherently un-consumable.
+    if [ "$TINY_REMAIN" = "0" ]; then
+        log_success "  [D] 零配额包被正确跳过 (remain_points=0，QuotaGranted=0 精度截断，未被消耗)"
     else
-        log_error "  [D] 零配额包状态异常: remain_points=$TINY_REMAIN, 期望=1"
+        log_error "  [D] 零配额包状态异常: remain_points=$TINY_REMAIN, 期望=0"
     fi
 
     # Step 7: Assert large package was consumed
