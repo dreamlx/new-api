@@ -261,6 +261,10 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
+	// Migrate INT columns to BIGINT to support large wisemodel point/quota values
+	if err := migrateWisemodelIntsToBigint(); err != nil {
+		return err
+	}
 
 	err := DB.AutoMigrate(
 		&Channel{},
@@ -287,6 +291,7 @@ func migrateDB() error {
 		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
+		&WisemodelPackage{},
 	)
 	if err != nil {
 		return err
@@ -567,6 +572,76 @@ func migrateSubscriptionPlanPriceAmount() {
 			common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to decimal(10,6)", tableName, columnName))
 		}
 	}
+}
+
+// migrateWisemodelIntsToBigint upgrades INT columns that may overflow for large wisemodel point values:
+//   - users.quota
+//   - wisemodel_packages.original_points
+//   - wisemodel_packages.original_tokens
+//
+// SQLite uses dynamic INTEGER (up to 64-bit) so no change is needed.
+// AutoMigrate does not alter column types for existing tables, so this must run explicitly.
+func migrateWisemodelIntsToBigint() error {
+	if common.UsingSQLite {
+		return nil // SQLite INTEGER is already 64-bit
+	}
+
+	type colSpec struct {
+		table  string
+		column string
+	}
+	cols := []colSpec{
+		{"users", "quota"},
+		{"wisemodel_packages", "original_points"},
+		{"wisemodel_packages", "original_tokens"},
+	}
+
+	for _, c := range cols {
+		if !DB.Migrator().HasTable(c.table) {
+			continue
+		}
+		if !DB.Migrator().HasColumn(&struct{ _ interface{} }{}, c.column) {
+			// fall through — let AutoMigrate create it with the correct type
+			continue
+		}
+
+		var alterSQL string
+		if common.UsingPostgreSQL {
+			var dataType string
+			if err := DB.Raw(
+				`SELECT data_type FROM information_schema.columns
+				 WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
+				c.table, c.column).Scan(&dataType).Error; err != nil {
+				common.SysLog(fmt.Sprintf("Warning: failed to query %s.%s type: %v", c.table, c.column, err))
+				continue
+			}
+			if dataType == "bigint" {
+				continue
+			}
+			alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE bigint`, c.table, c.column)
+		} else if common.UsingMySQL {
+			var columnType string
+			if err := DB.Raw(
+				`SELECT COLUMN_TYPE FROM information_schema.columns
+				 WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+				c.table, c.column).Scan(&columnType).Error; err != nil {
+				common.SysLog(fmt.Sprintf("Warning: failed to query %s.%s type: %v", c.table, c.column, err))
+				continue
+			}
+			if strings.EqualFold(columnType, "bigint") || strings.HasPrefix(strings.ToLower(columnType), "bigint") {
+				continue
+			}
+			alterSQL = fmt.Sprintf("ALTER TABLE `%s` MODIFY COLUMN `%s` bigint NOT NULL DEFAULT 0", c.table, c.column)
+		}
+
+		if alterSQL != "" {
+			if err := DB.Exec(alterSQL).Error; err != nil {
+				return fmt.Errorf("failed to migrate %s.%s to bigint: %w", c.table, c.column, err)
+			}
+			common.SysLog(fmt.Sprintf("Migrated %s.%s to bigint", c.table, c.column))
+		}
+	}
+	return nil
 }
 
 func closeDB(db *gorm.DB) error {

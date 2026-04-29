@@ -27,8 +27,8 @@ type WisemodelPackage struct {
 	OrderId           string `json:"order_id" gorm:"type:varchar(50);not null;index"`
 
 	// 原始值（Wisemodel传来的，仅用于显示）
-	OriginalPoints int `json:"original_points" gorm:"type:int;default:0"`
-	OriginalTokens int `json:"original_tokens" gorm:"type:int;default:0"`
+	OriginalPoints int `json:"original_points" gorm:"type:bigint;default:0"`
+	OriginalTokens int `json:"original_tokens" gorm:"type:bigint;default:0"`
 
 	// 转换后的quota
 	QuotaGranted int64 `json:"quota_granted" gorm:"type:bigint;not null"`
@@ -296,17 +296,21 @@ func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]
 			}
 		}
 
+		// quota→原始单位换算因子（先除后乘，避免大数 * 1_000_000 溢出 int64）
+		pointsPerQuota := WisemodelPointsPerUnit / int64(common.QuotaPerUnit)
+		tokensPerQuota := WisemodelTokensPerUnit / int64(common.QuotaPerUnit)
+
 		// 构建 per-model details
 		details := []interface{}{}
 		for _, u := range modelMap[pkg.PackageId] {
 			if pkg.OriginalPoints > 0 {
-				usedAmount := u.UsedQuota * WisemodelPointsPerUnit / int64(common.QuotaPerUnit)
+				usedAmount := u.UsedQuota * pointsPerQuota
 				details = append(details, map[string]interface{}{
 					"model_name":  u.ModelName,
 					"used_amount": usedAmount,
 				})
 			} else {
-				usedAmount := u.UsedQuota * WisemodelTokensPerUnit / int64(common.QuotaPerUnit)
+				usedAmount := u.UsedQuota * tokensPerQuota
 				details = append(details, map[string]interface{}{
 					"model_name":         u.ModelName,
 					"used_amount_tokens": usedAmount,
@@ -322,7 +326,7 @@ func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]
 		}
 
 		if pkg.OriginalPoints > 0 {
-			remainPoints := (pkg.QuotaGranted - consumed) * WisemodelPointsPerUnit / int64(common.QuotaPerUnit)
+			remainPoints := (pkg.QuotaGranted - consumed) * pointsPerQuota
 			if remainPoints < 0 {
 				remainPoints = 0
 			}
@@ -330,7 +334,7 @@ func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]
 			row["remain_points"] = remainPoints
 			row["amount"] = int64(pkg.OriginalPoints) - remainPoints
 		} else {
-			remainTokens := (pkg.QuotaGranted - consumed) * WisemodelTokensPerUnit / int64(common.QuotaPerUnit)
+			remainTokens := (pkg.QuotaGranted - consumed) * tokensPerQuota
 			if remainTokens < 0 {
 				remainTokens = 0
 			}
