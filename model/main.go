@@ -600,11 +600,10 @@ func migrateWisemodelIntsToBigint() error {
 		if !DB.Migrator().HasTable(c.table) {
 			continue
 		}
-		if !DB.Migrator().HasColumn(&struct{ _ interface{} }{}, c.column) {
-			// fall through — let AutoMigrate create it with the correct type
-			continue
-		}
 
+		// Use information_schema to read the current column type.
+		// An empty result means the column doesn't exist yet — AutoMigrate will create it
+		// with the correct BIGINT type from the struct tag, so we can safely skip.
 		var alterSQL string
 		if common.UsingPostgreSQL {
 			var dataType string
@@ -615,8 +614,8 @@ func migrateWisemodelIntsToBigint() error {
 				common.SysLog(fmt.Sprintf("Warning: failed to query %s.%s type: %v", c.table, c.column, err))
 				continue
 			}
-			if dataType == "bigint" {
-				continue
+			if dataType == "" || dataType == "bigint" {
+				continue // column absent (AutoMigrate handles it) or already correct
 			}
 			alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE bigint`, c.table, c.column)
 		} else if common.UsingMySQL {
@@ -628,8 +627,8 @@ func migrateWisemodelIntsToBigint() error {
 				common.SysLog(fmt.Sprintf("Warning: failed to query %s.%s type: %v", c.table, c.column, err))
 				continue
 			}
-			if strings.EqualFold(columnType, "bigint") || strings.HasPrefix(strings.ToLower(columnType), "bigint") {
-				continue
+			if columnType == "" || strings.HasPrefix(strings.ToLower(columnType), "bigint") {
+				continue // column absent or already correct
 			}
 			alterSQL = fmt.Sprintf("ALTER TABLE `%s` MODIFY COLUMN `%s` bigint NOT NULL DEFAULT 0", c.table, c.column)
 		}
