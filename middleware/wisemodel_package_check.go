@@ -70,7 +70,8 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 		}
 
 		// 归因计算使用全部包，并将 packages 原地按 FIFO 顺序排序（ValidUntil ASC, CreatedAt ASC）。
-		// 必须在 FilterPackagesByModel 之前调用，确保 eligiblePackages 继承相同的 FIFO 顺序。
+		// 必须在 FilterPackagesByModel 之前调用，确保 eligiblePackages 继承相同的 FIFO 顺序，
+		// 从而让 SelectPackageWithRemainingQuota 优先选择最早到期（配额最充裕）的包。
 		attribution, err := model.CalculatePackageAttribution(userId, packages)
 		if err != nil {
 			logger.LogError(c, fmt.Sprintf("WisemodelPackageCheck: attribution failed for user %d: %s", userId, err.Error()))
