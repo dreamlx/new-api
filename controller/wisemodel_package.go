@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -134,6 +135,13 @@ func CreateOrder(c *gin.Context) {
 				"success": false,
 			})
 			return
+		}
+
+		// 事务更新了 DB quota 但未触及 Redis，清除缓存确保下次读取从 DB 获取最新值
+		_ = model.InvalidateUserCache(user.Id)
+		// 初始化资源包 Redis 配额计数器，避免首次调用时的懒加载 DB 查询
+		if quota > 0 {
+			common.RDB.Set(context.Background(), "wm:pkg:remain:"+wisemodelPkg.PackageId, wisemodelPkg.QuotaGranted, 0)
 		}
 
 		// 创建充值日志

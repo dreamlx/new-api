@@ -57,6 +57,11 @@ func invalidateUserCache(userId int) error {
 	return common.RedisDelKey(getUserCacheKey(userId))
 }
 
+// InvalidateUserCache clears the user's Redis cache, forcing the next read to fetch fresh DB data.
+func InvalidateUserCache(userId int) error {
+	return invalidateUserCache(userId)
+}
+
 // updateUserCache updates all user cache fields using hash
 func updateUserCache(user User) error {
 	if !common.RedisEnabled {
