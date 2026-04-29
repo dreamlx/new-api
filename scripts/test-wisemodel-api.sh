@@ -523,21 +523,26 @@ test_verify_order_after_chat() {
     fi
 }
 
-# Scenario A: 小包耗尽后大包接管
-# Verify that when a small package (QuotaGranted=5, too small) coexists with a large package,
-# the large package is selected and the small one is left untouched.
+# Scenario A: 小包配额不足时自动回落大包
+# Regression test for FIFO ordering fix.
+# Verify that when a tiny package (points=10 => QuotaGranted=5, earlier expiry so FIFO picks
+# it first) cannot cover the estimated quota for a chat request, the middleware correctly
+# skips it and falls back to the large package (points=1_000_000_000 => QuotaGranted=500_000_000).
+# The small package must remain fully intact (remain_points==10) after the call.
 test_small_package_fallback_to_large() {
-    test_start "Scenario A: 小包耗尽后大包接管"
+    test_start "Scenario A: 小包配额不足时自动回落大包"
 
     local PHONE
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
+    local WM_KEY
+    WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
 
-    local SUFFIX
-    SUFFIX=$(date +%s%N | tail -c 6)
-    local SMALL_ORDER_ID="WM-SMALL-ORD-${SUFFIX}"
-    local SMALL_PKG_ID="WM-SMALL-${SUFFIX}"
+    # Step 1: create small package (points=10, earlier expiry so FIFO picks it first)
+    local SUFFIX_S
+    SUFFIX_S=$(date +%s)${RANDOM}
+    local SMALL_ORDER_ID="WM-SMALL-ORD-${SUFFIX_S}"
+    local SMALL_PKG_ID="WM-SMALL-${SUFFIX_S}"
 
-    # Create small package: points=10 => QuotaGranted=5 (too small to satisfy any real request)
     local SMALL_RESP
     SMALL_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
         -H "Authorization: Bearer $TOKEN" \
@@ -553,20 +558,19 @@ test_small_package_fallback_to_large() {
                     \"amount\": 0.01,
                     \"phone\": \"$PHONE\",
                     \"is_free\": false,
-                    \"valid_until\": \"2027-12-31T23:59:59Z\",
-                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
+                    \"valid_until\": \"2026-12-31T23:59:59Z\",
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
+                    \"model_names\": \"\"
                 }
             ]
         }")
 
-    sleep 1
+    # Step 2: create large package (points=1_000_000_000, later expiry)
+    local SUFFIX_L
+    SUFFIX_L=$(date +%s)${RANDOM}
+    local LARGE_ORDER_ID="WM-LARGE-ORD-${SUFFIX_L}"
+    local LARGE_PKG_ID="WM-LARGE-${SUFFIX_L}"
 
-    local LARGE_SUFFIX
-    LARGE_SUFFIX=$(date +%s%N | tail -c 6)
-    local LARGE_ORDER_ID="WM-LARGE-ORD-${LARGE_SUFFIX}"
-    local LARGE_PKG_ID="WM-LARGE-${LARGE_SUFFIX}"
-
-    # Create large package: points=1000000000 => QuotaGranted=500000000
     local LARGE_RESP
     LARGE_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/orders/record" \
         -H "Authorization: Bearer $TOKEN" \
@@ -583,93 +587,96 @@ test_small_package_fallback_to_large() {
                     \"phone\": \"$PHONE\",
                     \"is_free\": false,
                     \"valid_until\": \"2027-12-31T23:59:59Z\",
-                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
+                    \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
+                    \"model_names\": \"\"
                 }
             ]
         }")
 
-    # Assert both package creations succeeded
-    local SMALL_OK
+    # Step 3: assert both orders created successfully
+    local SMALL_OK LARGE_OK
     SMALL_OK=$(echo "$SMALL_RESP" | jq -r '.success' 2>/dev/null)
-    local LARGE_OK
     LARGE_OK=$(echo "$LARGE_RESP" | jq -r '.success' 2>/dev/null)
 
     if [ "$SMALL_OK" != "true" ]; then
         log_error "  [A] 小包创建失败: $SMALL_RESP"
         return
     fi
-    log_info "  [A] 小包创建成功 (pkg_id=$SMALL_PKG_ID, points=10)"
+    log_info "  [A] 小包创建成功 (pkg_id=$SMALL_PKG_ID, points=10, QuotaGranted=5, valid_until=2026-12-31)"
 
     if [ "$LARGE_OK" != "true" ]; then
         log_error "  [A] 大包创建失败: $LARGE_RESP"
         return
     fi
-    log_info "  [A] 大包创建成功 (pkg_id=$LARGE_PKG_ID, points=1000000000)"
+    log_info "  [A] 大包创建成功 (pkg_id=$LARGE_PKG_ID, points=1000000000, QuotaGranted=500000000, valid_until=2027-12-31)"
 
-    # Wait for Redis to settle
-    sleep 2
+    # Allow DB sync before sending chat request
+    sleep 1
 
-    # Make one chat call
-    local WM_KEY
-    WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
+    # Step 4: make one chat call with max_tokens=512 (estimated quota >> QuotaGranted=5)
     local CHAT_MODEL="${WISEMODEL_CHAT_MODEL:-minimax-m2.5-highspeed}"
-
-    local CHAT_RESP
-    CHAT_RESP=$(curl -s -X POST "$BASE_URL/v1/chat/completions" \
+    local CHAT_HTTP_CODE CHAT_RESP
+    CHAT_HTTP_CODE=$(curl -s -o /tmp/wm_chat_resp_a.json -w "%{http_code}" \
+        -X POST "$BASE_URL/v1/chat/completions" \
         -H "Authorization: Bearer $WM_KEY" \
         -H "Content-Type: application/json" \
         -d "{
             \"model\": \"$CHAT_MODEL\",
-            \"messages\": [{\"role\": \"user\", \"content\": \"Hello, reply with just OK\"}],
-            \"max_tokens\": 1024
+            \"messages\": [{\"role\": \"user\", \"content\": \"Reply OK\"}],
+            \"max_tokens\": 512
         }")
+    CHAT_RESP=$(cat /tmp/wm_chat_resp_a.json 2>/dev/null || true)
 
+    # Step 5: assert HTTP 200, choices > 0
+    if [ "$CHAT_HTTP_CODE" != "200" ]; then
+        log_error "  [A] Chat调用返回非200: HTTP $CHAT_HTTP_CODE, body=$CHAT_RESP"
+        return
+    fi
     local CHOICES
-    CHOICES=$(echo "$CHAT_RESP" | jq '.choices | length' 2>/dev/null)
+    CHOICES=$(echo "$CHAT_RESP" | jq '.choices | length' 2>/dev/null || echo "0")
     if [ -n "$CHOICES" ] && [ "$CHOICES" -gt 0 ] 2>/dev/null; then
-        log_info "  [A] Chat调用成功 (model=$CHAT_MODEL)"
+        log_info "  [A] Chat调用成功 HTTP 200, choices=$CHOICES (model=$CHAT_MODEL)"
     else
-        log_error "  [A] Chat调用失败: $CHAT_RESP"
+        log_error "  [A] Chat响应无choices: $CHAT_RESP"
         return
     fi
 
     sleep 2
 
-    # Query package_usage
+    # Step 6: query package_usage
     local USAGE_RESP
     USAGE_RESP=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/package_usage" \
         -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
         -d "{\"phone\": \"$PHONE\"}")
 
-    # Find small package remain_points by package_id
+    # Step 7: find small package remain_points by ID — expect still 10 (not consumed)
     local SMALL_REMAIN
     SMALL_REMAIN=$(echo "$USAGE_RESP" | jq --arg pid "$SMALL_PKG_ID" \
         '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
 
-    # Find large package remain_points by package_id
+    # Step 8: find large package remain_points by ID — expect < 1000000000 (consumed)
     local LARGE_REMAIN
     LARGE_REMAIN=$(echo "$USAGE_RESP" | jq --arg pid "$LARGE_PKG_ID" \
         '.data[] | select(.package_id == $pid) | .remain_points' 2>/dev/null)
 
-    log_info "  [A] 小包剩余积分: $SMALL_REMAIN (期望=10)"
-    log_info "  [A] 大包剩余积分: $LARGE_REMAIN (期望<1000000000)"
+    log_info "  [A] 小包剩余积分: $SMALL_REMAIN (期望=10, 不应被消耗)"
+    log_info "  [A] 大包剩余积分: $LARGE_REMAIN (期望<1000000000, 应被消耗)"
 
-    # Assert small package was NOT consumed
+    # Assert small package was NOT consumed (remain_points == 10)
     if [ "$SMALL_REMAIN" = "10" ]; then
-        log_success "  [A] 小包未被消耗 (remain_points=10，符合预期)"
+        log_success "  [A] 小包未被消耗 (remain_points=10，FIFO回落符合预期)"
     else
         log_error "  [A] 小包状态异常: remain_points=$SMALL_REMAIN, 期望=10"
     fi
 
-    # Assert large package WAS consumed
+    # Assert large package WAS consumed (remain_points < 1000000000)
     local LARGE_CONSUMED=false
     if [ -n "$LARGE_REMAIN" ] && [ "$LARGE_REMAIN" -lt 1000000000 ] 2>/dev/null; then
         LARGE_CONSUMED=true
     fi
-
     if [ "$LARGE_CONSUMED" = "true" ]; then
-        log_success "  [A] 大包已被消耗 (remain_points=$LARGE_REMAIN < 1000000000，符合预期)"
+        log_success "  [A] 大包已被消耗 (remain_points=$LARGE_REMAIN < 1000000000，回落成功)"
     else
         log_error "  [A] 大包未被消耗: remain_points=$LARGE_REMAIN, 期望<1000000000"
     fi
@@ -688,7 +695,7 @@ test_model_specific_package_isolation() {
     local OTHER_MODEL="${WISEMODEL_OTHER_MODEL:-minimax-m2.5-highspeed}"
 
     local SUFFIX_S
-    SUFFIX_S=$(date +%s%N | tail -c 6)
+    SUFFIX_S=$(date +%s)${RANDOM}
     local SPEC_ORDER_ID="WM-SPEC-ORD-${SUFFIX_S}"
     local SPEC_PKG_ID="WM-SPEC-${SUFFIX_S}"
 
@@ -718,7 +725,7 @@ test_model_specific_package_isolation() {
     sleep 1
 
     local SUFFIX_U
-    SUFFIX_U=$(date +%s%N | tail -c 6)
+    SUFFIX_U=$(date +%s)${RANDOM}
     local UNIV_ORDER_ID="WM-UNIV-ORD-${SUFFIX_U}"
     local UNIV_PKG_ID="WM-UNIV-${SUFFIX_U}"
 
@@ -883,7 +890,7 @@ test_fresh_package_first_call_succeeds() {
     WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
 
     local SUFFIX
-    SUFFIX=$(date +%s%N | tail -c 8)
+    SUFFIX=$(date +%s)${RANDOM}
     local ORDER_ID="WM-FRESH-ORD-C-${SUFFIX}"
     local PKG_ID="PKG_FRESH_C_${SUFFIX}"
 
@@ -976,7 +983,7 @@ test_small_quota_package_exhaustion() {
     WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
 
     local SUFFIX
-    SUFFIX=$(date +%s%N | tail -c 8)
+    SUFFIX=$(date +%s)${RANDOM}
 
     # Step 1: Create tiny package: points=1 => QuotaGranted=0 (pre-consume must skip it)
     local TINY_ORDER_ID="WM-TINY-ORD-D-${SUFFIX}"
@@ -1016,7 +1023,7 @@ test_small_quota_package_exhaustion() {
 
     # Step 2: Create large package to absorb the request
     local LARGE_SUFFIX
-    LARGE_SUFFIX=$(date +%s%N | tail -c 8)
+    LARGE_SUFFIX=$(date +%s)${RANDOM}
     local LARGE_ORDER_ID="WM-LARGE-ORD-D-${LARGE_SUFFIX}"
     local LARGE_PKG_ID="PKG_LARGE_D_${LARGE_SUFFIX}"
 
@@ -1120,7 +1127,7 @@ test_fifo_package_consumption_order() {
     WM_KEY=$(cat /tmp/wisemodel_test_wm_key.txt)
 
     local SUFFIX_A
-    SUFFIX_A=$(date +%s%N | tail -c 8)
+    SUFFIX_A=$(date +%s)${RANDOM}
 
     # Step 2: Create package A — expires sooner (2026-06-30)
     local ORDER_A="WM-FIFO-ORD-A-${SUFFIX_A}"
@@ -1151,7 +1158,7 @@ test_fifo_package_consumption_order() {
     sleep 1
 
     local SUFFIX_B
-    SUFFIX_B=$(date +%s%N | tail -c 8)
+    SUFFIX_B=$(date +%s)${RANDOM}
 
     # Step 3: Create package B — expires later (2028-06-30)
     local ORDER_B="WM-FIFO-ORD-B-${SUFFIX_B}"
