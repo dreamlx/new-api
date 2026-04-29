@@ -236,6 +236,44 @@ func TestSelectPackageWithRemainingQuota(t *testing.T) {
 	}
 }
 
+func TestSelectPackageWithSufficientQuota_SkipsFirstPackageWhenRequestWouldOverflow(t *testing.T) {
+	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	mar := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	apr := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+
+	pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &mar, QuotaGranted: 500}
+	pkgB := &WisemodelPackage{PackageId: "PKG-B", CreatedAt: feb, ValidUntil: &apr, QuotaGranted: 2_000}
+	pkgs := []*WisemodelPackage{pkgA, pkgB}
+
+	selected := SelectPackageWithSufficientQuota(pkgs, map[string]int64{
+		"PKG-A": 450,
+		"PKG-B": 200,
+	}, 300)
+	if selected == nil || selected.PackageId != "PKG-B" {
+		t.Fatalf("want PKG-B, got %#v", selected)
+	}
+}
+
+func TestSelectPackageWithSufficientQuota_ReturnsNilWhenNoPackageCanCoverRequest(t *testing.T) {
+	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	mar := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	apr := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+
+	pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &mar, QuotaGranted: 500}
+	pkgB := &WisemodelPackage{PackageId: "PKG-B", CreatedAt: feb, ValidUntil: &apr, QuotaGranted: 2_000}
+	pkgs := []*WisemodelPackage{pkgA, pkgB}
+
+	selected := SelectPackageWithSufficientQuota(pkgs, map[string]int64{
+		"PKG-A": 450,
+		"PKG-B": 1_900,
+	}, 300)
+	if selected != nil {
+		t.Fatalf("want nil when every package would overflow, got %#v", selected)
+	}
+}
+
 // TestBuildPackageUsageRowsDetails 验证 details 字段按模型正确填充
 func TestBuildPackageUsageRowsDetails(t *testing.T) {
 	expire := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -346,10 +384,10 @@ func TestBuildPackageUsageRowsDetailsEmpty(t *testing.T) {
 
 func TestFilterPackagesByModel(t *testing.T) {
 	cases := []struct {
-		name          string
-		packages      []*WisemodelPackage
-		model         string
-		wantEligible  int // 期望返回的包数量
+		name         string
+		packages     []*WisemodelPackage
+		model        string
+		wantEligible int // 期望返回的包数量
 	}{
 		{
 			name:         "empty package list → no eligible packages",

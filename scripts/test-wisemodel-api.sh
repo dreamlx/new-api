@@ -75,39 +75,41 @@ check_service() {
 
 # 生成唯一手机号
 generate_phone() {
-    #echo "139$(date +%s | tail -c 9)"
-    echo "18301852832"
-    #echo "18531606721"
-    # echo "15321866239"
+    printf '18%09d\n' "$(( ( $(date +%s) * 100000 + RANDOM ) % 1000000000 ))"
+}
 
+bind_test_user() {
+    local username_suffix="${1:-base}"
+    PHONE=$(generate_phone)
+    WM_KEY="wisemodel-test-${username_suffix}-$(date +%s)-$RANDOM"
+    RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/bind" \
+        -H "Authorization: Bearer $TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"phone\": \"$PHONE\",
+            \"wisemodel_key\": \"$WM_KEY\",
+            \"username\": \"测试用户_${username_suffix}_$(date +%s)\"
+        }")
+
+    if check_json_field "$RESPONSE" ".success" "true"; then
+        echo "$PHONE" > /tmp/wisemodel_test_phone.txt
+        echo "$WM_KEY" > /tmp/wisemodel_test_wm_key.txt
+        return 0
+    fi
+
+    echo "  响应: $RESPONSE"
+    return 1
 }
 
 # 测试1：用户绑定
 test_user_bind() {
     test_start "用户绑定 - 新用户"
 
-    PHONE=$(generate_phone)
-    WM_KEY="wm_key_test_$(date +%s)"
-    # WM_KEY="wisemodel-iygugqeusgbodidvxxgl"
-    echo "$PHONE" > /tmp/wisemodel_test_phone.txt
-    echo "$WM_KEY" > /tmp/wisemodel_test_wm_key.txt
-    # RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/bind" \
-    #     -H "Authorization: Bearer $TOKEN" \
-    #     -H "Content-Type: application/json" \
-    #     -d "{
-    #         \"phone\": \"$PHONE\",
-    #         \"wisemodel_key\": \"$WM_KEY\",
-    #         \"username\": \"测试用户_$(date +%s)\"
-    #     }")
-
-    # if check_json_field "$RESPONSE" ".success" "true"; then
-    #     log_success "  用户绑定成功"
-    #     echo "$PHONE" > /tmp/wisemodel_test_phone.txt
-    #     echo "$WM_KEY" > /tmp/wisemodel_test_wm_key.txt
-    # else
-    #     log_error "  用户绑定失败"
-    #     echo "  响应: $RESPONSE"
-    # fi
+    if bind_test_user "core"; then
+        log_success "  用户绑定成功"
+    else
+        log_error "  用户绑定失败"
+    fi
 }
 
 # 测G试2：更新Wisemodel Key
@@ -115,8 +117,7 @@ test_update_key() {
     test_start "更新Wisemodel Key"
 
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
-    NEW_KEY="wm_key_updated_$(date +%s)"
-    # NEW_KEY="wisemodel-bvwulxeoviypfmzfvrwj"
+    NEW_KEY="wisemodel-updated-$(date +%s)-$RANDOM"
     RESPONSE=$(curl -s -X POST "$BASE_URL/api/wisemodel/user/update_wisemodel_key" \
         -H "Authorization: Bearer $TOKEN" \
         -H "Content-Type: application/json" \
@@ -532,6 +533,11 @@ test_verify_order_after_chat() {
 test_small_package_fallback_to_large() {
     test_start "Scenario A: 小包配额不足时自动回落大包"
 
+    if ! bind_test_user "scenario_a"; then
+        log_error "  [A] 独立测试用户创建失败"
+        return
+    fi
+
     local PHONE
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
     local WM_KEY
@@ -687,6 +693,11 @@ test_small_package_fallback_to_large() {
 # while a universal package absorbs requests for other models.
 test_model_specific_package_isolation() {
     test_start "Scenario B: 专用包与通用包模型隔离"
+
+    if ! bind_test_user "scenario_b"; then
+        log_error "  [B] 独立测试用户创建失败"
+        return
+    fi
 
     local PHONE
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
@@ -884,6 +895,11 @@ test_model_specific_package_isolation() {
 test_fresh_package_first_call_succeeds() {
     test_start "Scenario C: 新包首次调用成功（懒初始化验证）"
 
+    if ! bind_test_user "scenario_c"; then
+        log_error "  [C] 独立测试用户创建失败"
+        return
+    fi
+
     local PHONE
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
     local WM_KEY
@@ -977,6 +993,11 @@ test_fresh_package_first_call_succeeds() {
 test_small_quota_package_exhaustion() {
     test_start "Scenario D: 零配额包被正确跳过，大包接管"
 
+    if ! bind_test_user "scenario_d"; then
+        log_error "  [D] 独立测试用户创建失败"
+        return
+    fi
+
     local PHONE
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
     local WM_KEY
@@ -1004,7 +1025,7 @@ test_small_quota_package_exhaustion() {
                     \"amount\": 0.01,
                     \"phone\": \"$PHONE\",
                     \"is_free\": false,
-                    \"valid_until\": \"2026-01-01T23:59:59Z\",
+                    \"valid_until\": \"2028-01-01T23:59:59Z\",
                     \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
                     \"model_names\": \"\"
                 }
@@ -1121,6 +1142,11 @@ test_small_quota_package_exhaustion() {
 test_fifo_package_consumption_order() {
     test_start "Scenario E: FIFO顺序消费 — 早到期的包先消费"
 
+    if ! bind_test_user "scenario_e"; then
+        log_error "  [E] 独立测试用户创建失败"
+        return
+    fi
+
     local PHONE
     PHONE=$(cat /tmp/wisemodel_test_phone.txt)
     local WM_KEY
@@ -1148,7 +1174,7 @@ test_fifo_package_consumption_order() {
                     \"amount\": 100.00,
                     \"phone\": \"$PHONE\",
                     \"is_free\": false,
-                    \"valid_until\": \"2026-06-30T23:59:59Z\",
+                    \"valid_until\": \"2027-06-30T23:59:59Z\",
                     \"created_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
                     \"model_names\": \"\"
                 }
@@ -1307,8 +1333,8 @@ main() {
     # sleep 1
     test_update_key
     # sleep 1
-    # test_create_order_points
-    # sleep 1
+    test_create_order_points
+    sleep 1
     # test_create_order_tokens
     # sleep 1
     # test_create_order_free

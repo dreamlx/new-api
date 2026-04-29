@@ -10,8 +10,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/alicebob/miniredis/v2"
-	"github.com/glebarez/sqlite"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -66,17 +66,23 @@ func newQuotaTestCtx(pkgId string) *gin.Context {
 // seedPackage inserts a WisemodelPackage record so ComputeWisemodelPackageRemain can find it.
 func seedPackage(t *testing.T, pkgId string, quotaGranted int64) {
 	t.Helper()
+	seedPackageForUser(t, 1, pkgId, quotaGranted, "", time.Now())
+}
+
+func seedPackageForUser(t *testing.T, userID int, pkgId string, quotaGranted int64, availableModels string, createdAt time.Time) {
+	t.Helper()
 	now := time.Now()
 	expire := now.Add(365 * 24 * time.Hour)
 	pkg := &model.WisemodelPackage{
-		PackageId:      pkgId,
-		UserId:         1,
-		OrderId:        "order-test",
-		QuotaGranted:   quotaGranted,
-		OriginalPoints: 1000,
-		Amount:         1.0,
-		ValidUntil:     &expire,
-		CreatedAt:      now,
+		PackageId:       pkgId,
+		UserId:          userID,
+		OrderId:         "order-test",
+		QuotaGranted:    quotaGranted,
+		OriginalPoints:  1000,
+		AvailableModels: availableModels,
+		Amount:          1.0,
+		ValidUntil:      &expire,
+		CreatedAt:       createdAt,
 	}
 	require.NoError(t, model.DB.Create(pkg).Error)
 }
@@ -272,4 +278,90 @@ func TestPreConsumeWisemodelPkg_LazyInit_DBLookup(t *testing.T) {
 	redisVal, redisErr := common.RDB.Get(ctx, "wm:pkg:remain:"+pkgId).Int64()
 	require.NoError(t, redisErr)
 	require.Equal(t, int64(6900), redisVal)
+}
+
+func TestPrepareWisemodelPackageForPreConsume_SelectsPackageWithSufficientQuota(t *testing.T) {
+	setupWisemodelQuotaTest(t)
+
+	userID := 42
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedPackageForUser(t, userID, "pkg-small", 500, "", base)
+	seedPackageForUser(t, userID, "pkg-large", 2000, "", base.Add(24*time.Hour))
+
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		UserId:             userID,
+		Type:               model.LogTypeConsume,
+		Quota:              450,
+		WisemodelPackageId: "pkg-small",
+		CreatedAt:          time.Now().Unix(),
+	}).Error)
+
+	c := newQuotaTestCtx("")
+	c.Set("id", userID)
+	c.Set("token_name", "wisemodel-token")
+
+	err := PrepareWisemodelPackageForPreConsume(c, "minimax-m2", 300)
+	require.NoError(t, err)
+	require.Equal(t, "pkg-large", c.GetString("wisemodel_package_id"))
+}
+
+func TestPrepareWisemodelPackageForPreConsume_ReturnsErrorWhenNoPackageCanCoverRequest(t *testing.T) {
+	setupWisemodelQuotaTest(t)
+
+	userID := 43
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedPackageForUser(t, userID, "pkg-small", 500, "", base)
+	seedPackageForUser(t, userID, "pkg-also-small", 250, "", base.Add(24*time.Hour))
+
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		UserId:             userID,
+		Type:               model.LogTypeConsume,
+		Quota:              450,
+		WisemodelPackageId: "pkg-small",
+		CreatedAt:          time.Now().Unix(),
+	}).Error)
+
+	c := newQuotaTestCtx("")
+	c.Set("id", userID)
+	c.Set("token_name", "wisemodel-token")
+
+	err := PrepareWisemodelPackageForPreConsume(c, "minimax-m2", 300)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "wisemodel package quota exhausted")
+	require.Equal(t, "", c.GetString("wisemodel_package_id"))
+}
+
+func TestPreConsumeWisemodelPkg_FallsBackToNextCandidateWhenRedisBalanceDrifted(t *testing.T) {
+	mr := setupWisemodelQuotaTest(t)
+
+	userID := 44
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedPackageForUser(t, userID, "pkg-first", 1000, "", base)
+	seedPackageForUser(t, userID, "pkg-second", 1200, "", base.Add(24*time.Hour))
+
+	c := newQuotaTestCtx("")
+	c.Set("id", userID)
+	c.Set("token_name", "wisemodel-token")
+
+	err := PrepareWisemodelPackageForPreConsume(c, "minimax-m2", 300)
+	require.NoError(t, err)
+	require.Equal(t, "pkg-first", c.GetString("wisemodel_package_id"))
+
+	// Simulate Redis drifting below DB-estimated remaining quota for the first package,
+	// while the second candidate can still absorb the request.
+	require.NoError(t, mr.Set("wm:pkg:remain:pkg-first", "100"))
+	require.NoError(t, mr.Set("wm:pkg:remain:pkg-second", "1000"))
+
+	err = PreConsumeWisemodelPkg(c, 300)
+	require.NoError(t, err)
+	require.Equal(t, "pkg-second", c.GetString("wisemodel_package_id"))
+	require.Equal(t, 300, c.GetInt("wisemodel_pre_consumed_quota"))
+
+	firstVal, firstErr := mr.Get("wm:pkg:remain:pkg-first")
+	require.NoError(t, firstErr)
+	require.Equal(t, "100", firstVal)
+
+	secondVal, secondErr := mr.Get("wm:pkg:remain:pkg-second")
+	require.NoError(t, secondErr)
+	require.Equal(t, "700", secondVal)
 }

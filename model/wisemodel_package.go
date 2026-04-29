@@ -398,6 +398,18 @@ func SelectPackageWithRemainingQuota(packages []*WisemodelPackage, attribution m
 	return nil
 }
 
+func SelectPackageWithSufficientQuota(packages []*WisemodelPackage, attribution map[string]int64, requiredQuota int64) *WisemodelPackage {
+	if requiredQuota <= 0 {
+		return SelectPackageWithRemainingQuota(packages, attribution)
+	}
+	for _, pkg := range packages {
+		if pkg.QuotaGranted-attribution[pkg.PackageId] >= requiredQuota {
+			return pkg
+		}
+	}
+	return nil
+}
+
 // FilterPackagesByModel 返回能承载指定模型请求的资源包子集。
 // 规则（按包逐个判断）：
 //   - 包的 AvailableModels 为空 → 通用包，能承载任意模型
@@ -424,7 +436,6 @@ func FilterPackagesByModel(packages []*WisemodelPackage, requestedModel string) 
 	}
 	return eligible
 }
-
 
 // getPreciseAttributionByPackages 批量查询多个资源包的精确消费总和（一次 GROUP BY 替代 N 次单包查询）。
 func getPreciseAttributionByPackages(pkgIds []string) (map[string]int64, error) {

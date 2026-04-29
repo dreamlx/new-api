@@ -58,19 +58,37 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 			return
 		}
 
-		// 按请求模型过滤出可承载该请求的资源包子集。
-		// 通用包（AvailableModels 为空）可承载任意模型；
-		// 专用包仅在请求模型出现在其列表中时才纳入候选。
+		// 解析请求模型名（body 可重复读，不影响后续处理）。
 		var modelReq struct {
 			Model string `json:"model"`
 		}
-		eligiblePackages := packages // 默认全部可用（解析失败时不限制）
 		if err := common.UnmarshalBodyReusable(c, &modelReq); err != nil {
 			// 解析失败不阻断请求（如音频转录等非 JSON body）
 			logger.LogWarn(c, fmt.Sprintf(
 				"WisemodelPackageCheck: failed to extract model name for user %d: %s", userId, err.Error(),
 			))
-		} else if modelReq.Model != "" {
+		}
+
+		// 归因计算使用全部包，并将 packages 原地按 FIFO 顺序排序（ValidUntil ASC, CreatedAt ASC）。
+		// 必须在 FilterPackagesByModel 之前调用，确保 eligiblePackages 继承相同的 FIFO 顺序。
+		attribution, err := model.CalculatePackageAttribution(userId, packages)
+		if err != nil {
+			logger.LogError(c, fmt.Sprintf("WisemodelPackageCheck: attribution failed for user %d: %s", userId, err.Error()))
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error": gin.H{
+					"message": "服务暂时不可用，请稍后重试",
+					"type":    "server_error",
+					"code":    "wisemodel_attribution_error",
+				},
+			})
+			return
+		}
+
+		// 按请求模型过滤出可承载该请求的资源包子集（在 FIFO 排序后过滤，保留顺序）。
+		// 通用包（AvailableModels 为空）可承载任意模型；
+		// 专用包仅在请求模型出现在其列表中时才纳入候选。
+		eligiblePackages := packages // 默认全部可用（解析失败或无模型名时不限制）
+		if modelReq.Model != "" {
 			eligiblePackages = model.FilterPackagesByModel(packages, modelReq.Model)
 			if len(eligiblePackages) == 0 {
 				logger.LogWarn(c, fmt.Sprintf(
@@ -86,21 +104,6 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 				})
 				return
 			}
-		}
-
-		// 归因计算仍使用全部包（保证 FIFO 历史日志归因准确）；
-		// 包选择仅在 eligiblePackages 中进行，确保扣费归属到正确的资源包。
-		attribution, err := model.CalculatePackageAttribution(userId, packages)
-		if err != nil {
-			logger.LogError(c, fmt.Sprintf("WisemodelPackageCheck: attribution failed for user %d: %s", userId, err.Error()))
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"error": gin.H{
-					"message": "服务暂时不可用，请稍后重试",
-					"type":    "server_error",
-					"code":    "wisemodel_attribution_error",
-				},
-			})
-			return
 		}
 		selected := model.SelectPackageWithRemainingQuota(eligiblePackages, attribution)
 		if selected == nil {
