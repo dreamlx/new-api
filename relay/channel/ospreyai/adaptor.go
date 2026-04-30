@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -30,6 +31,19 @@ func detectUpstreamProtocol(info *relaycommon.RelayInfo) UpstreamProtocol {
 	return protocolFromChannelType(info.ChannelType)
 }
 
+func rewriteClaudePassthroughPath(requestPath string) string {
+	if requestPath == "" {
+		return "/anthropic/v1/messages"
+	}
+	if strings.HasPrefix(requestPath, "/anthropic/") {
+		return requestPath
+	}
+	if strings.HasPrefix(requestPath, "/v1/") {
+		return "/anthropic" + requestPath
+	}
+	return requestPath
+}
+
 // ─── 1. Initialization ──────────────────────────────────────────────────
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
@@ -46,9 +60,14 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	protocol := detectUpstreamProtocol(info)
 
 	// Get full URL preserving original path
+	requestPath := info.RequestURLPath
+	if protocol == ProtocolClaude {
+		requestPath = rewriteClaudePassthroughPath(requestPath)
+	}
+
 	fullURL := relaycommon.GetFullRequestURL(
 		info.ChannelBaseUrl,
-		info.RequestURLPath, // ← Preserve original path
+		requestPath,
 		info.ChannelType,
 	)
 

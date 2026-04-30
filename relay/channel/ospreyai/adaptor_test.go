@@ -212,6 +212,30 @@ func TestGetRequestURLUsesRelayFormatGemini(t *testing.T) {
 	}
 }
 
+func TestGetRequestURLRewritesClaudePathToAnthropicPassthrough(t *testing.T) {
+	adaptor := &Adaptor{}
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat:    types.RelayFormatClaude,
+		RequestURLPath: "/v1/messages?beta=true",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelBaseUrl: "https://litellm.example.com",
+			ChannelType:    constant.ChannelTypeOspreyAI,
+			ApiKey:         "test-claude-key",
+		},
+	}
+
+	url, err := adaptor.GetRequestURL(info)
+	if err != nil {
+		t.Fatalf("GetRequestURL failed: %v", err)
+	}
+
+	expected := "https://litellm.example.com/anthropic/v1/messages?beta=true"
+	if url != expected {
+		t.Fatalf("URL = %q, want %q", url, expected)
+	}
+}
+
 // TestGetChannelName verifies channel name
 func TestGetChannelName(t *testing.T) {
 	adaptor := &Adaptor{}
