@@ -31,11 +31,12 @@ relay/channel/ospreyai/
 - [x] Convert methods (returning errors for passthrough mode)
 - [x] Interface registration
 
-### Phase 2: Authentication & Routing (⏳ Pending)
-- [ ] Complete SetupRequestHeader() implementation
-- [ ] Complete GetRequestURL() implementation
-- [ ] Header mapping table
-- [ ] URL handling for special cases
+### Phase 2: Authentication & Routing (✅ Completed)
+- [x] Complete SetupRequestHeader() implementation
+- [x] Complete GetRequestURL() implementation
+- [x] Header mapping table (5 protocols: OpenAI, Claude, Gemini, Azure, AWS)
+- [x] URL handling for special cases (Gemini API key in query param)
+- [x] Unit tests for Header and URL generation (8 tests, all passing)
 
 ### Phase 3: Response Processing (⏳ Pending)
 - [ ] Protocol router implementation

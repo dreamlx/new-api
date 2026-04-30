@@ -26,25 +26,64 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 
 // ─── 2. URL and Header ──────────────────────────────────────────────────
 
-// GetRequestURL preserves client original request path
+// GetRequestURL preserves client original request path and handles API key in query param
 // This is the core of multi-protocol passthrough:
 // client accesses what path, forward what path to upstream
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
-	return relaycommon.GetFullRequestURL(
+	// Get full URL preserving original path
+	fullURL := relaycommon.GetFullRequestURL(
 		info.ChannelBaseUrl,
 		info.RequestURLPath, // ← Preserve original path
 		info.ChannelType,
-	), nil
+	)
+
+	// Special handling: add API key to query parameter if needed (e.g., Gemini)
+	if IsApiKeyInQuery(info.ChannelType) {
+		paramName := GetApiKeyQueryParam(info.ChannelType)
+
+		// Check if URL already has query parameters
+		separator := "?"
+		for _, char := range fullURL {
+			if char == '?' {
+				separator = "&"
+				break
+			}
+		}
+
+		fullURL += separator + paramName + "=" + info.ApiKey
+	}
+
+	return fullURL, nil
 }
 
 // SetupRequestHeader sets appropriate auth headers based on protocol
 // Different upstream APIs expect different auth methods
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
-	// Generic header setup
+	// Generic header setup (sets content-type, user-agent, etc.)
 	channel.SetupApiRequestHeader(info, c, req)
 
-	// Setup auth header based on channel type
+	// Setup protocol-specific auth header based on channel type
 	SetupAuthHeader(req, info.ApiKey, info.ChannelType)
+
+	// Apply runtime headers override if enabled
+	// This allows dynamic header manipulation at request time
+	if info.UseRuntimeHeadersOverride && info.RuntimeHeadersOverride != nil {
+		for key, value := range info.RuntimeHeadersOverride {
+			if strValue, ok := value.(string); ok {
+				req.Set(key, strValue)
+			}
+		}
+	}
+
+	// Apply headers override from channel settings
+	// This allows channel-specific header customization
+	if info.HeadersOverride != nil {
+		for key, value := range info.HeadersOverride {
+			if strValue, ok := value.(string); ok {
+				req.Set(key, strValue)
+			}
+		}
+	}
 
 	return nil
 }
