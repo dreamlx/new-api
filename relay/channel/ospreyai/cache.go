@@ -10,23 +10,25 @@ import (
 // HeaderMappingCache caches header mappings to avoid repeated lookups
 type HeaderMappingCache struct {
 	mu       sync.RWMutex
-	mappings map[int]*HeaderMapping
+	mappings map[UpstreamProtocol]*HeaderMapping
 	cached   bool
 }
 
 // NewHeaderMappingCache creates a new header mapping cache
 func NewHeaderMappingCache() *HeaderMappingCache {
 	return &HeaderMappingCache{
-		mappings: make(map[int]*HeaderMapping),
+		mappings: make(map[UpstreamProtocol]*HeaderMapping),
 		cached:   false,
 	}
 }
 
 // GetMapping returns cached or fresh header mapping
 func (hmc *HeaderMappingCache) GetMapping(channelType int) *HeaderMapping {
+	protocol := protocolFromChannelType(channelType)
+
 	hmc.mu.RLock()
 	if hmc.cached {
-		if mapping, exists := hmc.mappings[channelType]; exists {
+		if mapping, exists := hmc.mappings[protocol]; exists {
 			hmc.mu.RUnlock()
 			return mapping
 		}
@@ -35,11 +37,11 @@ func (hmc *HeaderMappingCache) GetMapping(channelType int) *HeaderMapping {
 
 	// Not in cache, get fresh mapping
 	mappings := GetHeaderMappings()
-	mapping := mappings[channelType]
+	mapping := mappings[protocol]
 
 	// Store in cache
 	hmc.mu.Lock()
-	hmc.mappings[channelType] = mapping
+	hmc.mappings[protocol] = mapping
 	if len(hmc.mappings) == len(mappings) {
 		hmc.cached = true
 	}
@@ -89,9 +91,9 @@ func (prc *ProtocolRouterCache) IsFormatSupported(format string) bool {
 
 // GlobalCaches provides singleton access to caches
 var (
-	headerMappingCache *HeaderMappingCache
+	headerMappingCache  *HeaderMappingCache
 	protocolRouterCache *ProtocolRouterCache
-	cacheOnce sync.Once
+	cacheOnce           sync.Once
 )
 
 // GetHeaderMappingCache returns singleton header mapping cache

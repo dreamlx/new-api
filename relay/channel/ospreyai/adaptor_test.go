@@ -2,11 +2,15 @@ package ospreyai
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+
+	"github.com/gin-gonic/gin"
 )
 
 // TestSetupAuthHeaderOpenAI verifies OpenAI authentication header
@@ -151,6 +155,60 @@ func TestGetRequestURLGeminiApiKey(t *testing.T) {
 	// Should contain API key in query parameter
 	if !strings.Contains(url, "key=test-gemini-key") {
 		t.Errorf("URL should contain API key in query parameter, got %q", url)
+	}
+}
+
+func TestSetupRequestHeaderUsesRelayFormatClaude(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	adaptor := &Adaptor{}
+	headers := http.Header{}
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatClaude,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOspreyAI,
+			ApiKey:      "test-claude-key",
+		},
+	}
+
+	err := adaptor.SetupRequestHeader(c, &headers, info)
+	if err != nil {
+		t.Fatalf("SetupRequestHeader failed: %v", err)
+	}
+
+	if got := headers.Get("x-api-key"); got != "test-claude-key" {
+		t.Fatalf("x-api-key = %q, want %q", got, "test-claude-key")
+	}
+	if got := headers.Get("anthropic-version"); got != "2023-06-01" {
+		t.Fatalf("anthropic-version = %q, want %q", got, "2023-06-01")
+	}
+	if got := headers.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization = %q, want empty", got)
+	}
+}
+
+func TestGetRequestURLUsesRelayFormatGemini(t *testing.T) {
+	adaptor := &Adaptor{}
+
+	info := &relaycommon.RelayInfo{
+		RelayFormat:    types.RelayFormatGemini,
+		RequestURLPath: "/v1beta/models/gemini-pro:generateContent",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelBaseUrl: "https://generativelanguage.googleapis.com",
+			ChannelType:    constant.ChannelTypeOspreyAI,
+			ApiKey:         "test-gemini-key",
+		},
+	}
+
+	url, err := adaptor.GetRequestURL(info)
+	if err != nil {
+		t.Fatalf("GetRequestURL failed: %v", err)
+	}
+
+	if !strings.Contains(url, "key=test-gemini-key") {
+		t.Fatalf("URL should contain API key in query parameter, got %q", url)
 	}
 }
 

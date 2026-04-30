@@ -36,7 +36,7 @@ relay/channel/ospreyai/
 - [x] Complete GetRequestURL() implementation
 - [x] Header mapping table (5 protocols: OpenAI, Claude, Gemini, Azure, AWS)
 - [x] URL handling for special cases (Gemini API key in query param)
-- [x] Unit tests for Header and URL generation (8 tests, all passing)
+- [x] Unit tests for Header, URL generation, and RelayFormat routing
 
 ### Phase 3: Response Processing (✅ Completed)
 - [x] Protocol router framework (ProtocolRouter struct)
@@ -97,7 +97,7 @@ relay/channel/ospreyai/
   - Full test coverage
 - [x] Code review checklist
   - Compilation verified
-  - Tests passing (8/8)
+  - Tests passing
   - No warnings or errors
   - Code style consistent
 
@@ -108,10 +108,11 @@ OspreyAI channel type: `constant.APITypeOspreyAI`
 ## Key Methods
 
 ### GetRequestURL()
-Preserves original client request path using `GetFullRequestURL()`.
+Preserves the original client request path using `GetFullRequestURL()`.
+Protocol-specific API key placement is selected by `RelayFormat`, with `ChannelType` used only as a fallback when `RelayFormat` is unavailable.
 
 ### SetupRequestHeader()
-Routes authentication based on `ChannelType` to apply correct headers:
+Routes authentication based on `RelayFormat` to apply correct headers:
 - OpenAI: `Authorization: Bearer {api_key}`
 - Claude: `x-api-key: {api_key}`, `anthropic-version: 2023-06-01`
 - Gemini: API Key in URL query parameter
@@ -160,7 +161,7 @@ POST /v1/models/claude-3-sonnet:generateText  # Anthropic
 
 ### Authentication
 
-The adaptor automatically applies the correct authentication for each protocol:
+The adaptor automatically applies the correct authentication for each protocol, selected from `RelayFormat`:
 
 - **OpenAI format** → `Authorization: Bearer {api_key}`
 - **Claude format** → `x-api-key: {api_key}`, `anthropic-version: 2023-06-01`
@@ -176,15 +177,18 @@ Run tests with:
 go test ./relay/channel/ospreyai -v
 ```
 
-Current test coverage (8 tests):
+Current test coverage includes:
 - ✅ OpenAI header authentication
 - ✅ Claude/Anthropic header authentication  
 - ✅ Azure header authentication
 - ✅ API key in query parameter detection
 - ✅ URL path preservation across protocols
 - ✅ Gemini API key query parameter handling
+- ✅ RelayFormat-based Claude header selection
+- ✅ RelayFormat-based Gemini query parameter selection
 - ✅ Channel name retrieval
 - ✅ Model list generation
+- ✅ OspreyAI stream option support
 
 ### Integration Tests (Recommended)
 

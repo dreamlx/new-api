@@ -74,13 +74,19 @@ type HeaderMapping struct {
 | Azure | API Key Header | `api-key: {api_key}` |
 | AWS | Signature-based | (handled separately) |
 
+**Protocol Selection:**
+
+- Runtime protocol selection is driven by `RelayFormat`
+- `ChannelType` is used only as a fallback when `RelayFormat` is unavailable
+
 **Key Functions:**
 
 ```go
 // GetHeaderMappings() - Returns all protocol mappings
-// SetupAuthHeader() - Apply headers to request
-// IsApiKeyInQuery() - Check if protocol uses query param API key
-// GetApiKeyQueryParam() - Get query param name for API key
+// ProtocolFromRelayFormat() - Map RelayFormat to upstream protocol
+// SetupAuthHeaderByProtocol() - Apply headers to request
+// IsApiKeyInQueryByProtocol() - Check if protocol uses query param API key
+// GetApiKeyQueryParamByProtocol() - Get query param name for API key
 // replaceApiKeyPlaceholder() - Replace {api_key} in templates
 ```
 

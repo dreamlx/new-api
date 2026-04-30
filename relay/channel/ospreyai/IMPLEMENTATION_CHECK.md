@@ -92,6 +92,7 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 #### OspreyAI (增强透传型) ⭐
 ```go
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+    protocol := detectUpstreamProtocol(info)
     fullURL := relaycommon.GetFullRequestURL(
         info.ChannelBaseUrl,
         info.RequestURLPath,  // ✅ 保留原始路径
@@ -99,8 +100,8 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
     )
     
     // ✅ 增强：某些协议的API Key在查询参数中（如Gemini）
-    if IsApiKeyInQuery(info.ChannelType) {
-        paramName := GetApiKeyQueryParam(info.ChannelType)
+    if IsApiKeyInQueryByProtocol(protocol) {
+        paramName := GetApiKeyQueryParamByProtocol(protocol)
         separator := "?" 
         for _, char := range fullURL {
             if char == '?' {
@@ -118,6 +119,7 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 - ✅ 路径完全透传（Submodel式）
 - ✅ **智能处理查询参数认证**（Gemini 特殊性）
 - ✅ 支持多协议不同认证方式
+- ✅ 优先根据 `RelayFormat` 分流协议，`ChannelType` 仅作回退
 
 ### 2. SetupRequestHeader() 实现对比
 
@@ -153,15 +155,16 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
     channel.SetupApiRequestHeader(info, c, req)
     
     // ✅ 动态选择正确的认证Header
-    switch info.ChannelType {
-    case constant.ChannelTypeOpenAI:
+    protocol := detectUpstreamProtocol(info)
+    switch protocol {
+    case ProtocolOpenAI:
         req.Set("Authorization", "Bearer "+info.ApiKey)
-    case constant.ChannelTypeAnthropic:
+    case ProtocolClaude:
         req.Set("x-api-key", info.ApiKey)
         req.Set("anthropic-version", "2023-06-01")
-    case constant.ChannelTypeGemini:
+    case ProtocolGemini:
         // API Key在查询参数（由GetRequestURL处理）
-    case constant.ChannelTypeAzure:
+    case ProtocolAzure:
         req.Set("api-key", info.ApiKey)
     default:
         req.Set("Authorization", "Bearer "+info.ApiKey)
@@ -297,7 +300,8 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 ## ✨ OspreyAI 的独特优势
 
 ### 1. **智能认证系统** (header_mapping.go)
-- 根据ChannelType自动选择正确的认证方式
+- 根据RelayFormat自动选择正确的认证方式
+- 当RelayFormat为空时回退到ChannelType
 - 支持Header模板替换 `{api_key}` 占位符
 - 可扩展添加新协议
 
@@ -476,7 +480,7 @@ Authorization: Bearer $TOKEN
 2. Distribute 中间件选择 OspreyAI channel
 3. GetAdaptor 返回 &ospreyai.Adaptor{}
 4. GetRequestURL 保留原始路径，处理API Key
-5. SetupRequestHeader 根据ChannelType设置认证
+5. SetupRequestHeader 根据RelayFormat设置认证
 6. DoRequest 转发到 OspreyAI
 7. OspreyAI 转发到实际上游（OpenAI/Claude/Gemini）
 8. DoResponse 根据 RelayFormat 调用正确的处理器

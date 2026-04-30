@@ -20,6 +20,16 @@ import (
 // Adaptor supports multi-protocol passthrough (no format conversion)
 type Adaptor struct{}
 
+func detectUpstreamProtocol(info *relaycommon.RelayInfo) UpstreamProtocol {
+	if info == nil {
+		return ProtocolOpenAI
+	}
+	if info.RelayFormat != "" {
+		return ProtocolFromRelayFormat(info.RelayFormat)
+	}
+	return protocolFromChannelType(info.ChannelType)
+}
+
 // ─── 1. Initialization ──────────────────────────────────────────────────
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
@@ -33,6 +43,8 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 // This is the core of multi-protocol passthrough:
 // client accesses what path, forward what path to upstream
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	protocol := detectUpstreamProtocol(info)
+
 	// Get full URL preserving original path
 	fullURL := relaycommon.GetFullRequestURL(
 		info.ChannelBaseUrl,
@@ -41,8 +53,8 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	)
 
 	// Special handling: add API key to query parameter if needed (e.g., Gemini)
-	if IsApiKeyInQuery(info.ChannelType) {
-		paramName := GetApiKeyQueryParam(info.ChannelType)
+	if IsApiKeyInQueryByProtocol(protocol) {
+		paramName := GetApiKeyQueryParamByProtocol(protocol)
 
 		// Check if URL already has query parameters
 		separator := "?"
@@ -62,11 +74,13 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 // SetupRequestHeader sets appropriate auth headers based on protocol
 // Different upstream APIs expect different auth methods
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
+	protocol := detectUpstreamProtocol(info)
+
 	// Generic header setup (sets content-type, user-agent, etc.)
 	channel.SetupApiRequestHeader(info, c, req)
 
 	// Setup protocol-specific auth header based on channel type
-	SetupAuthHeader(req, info.ApiKey, info.ChannelType)
+	SetupAuthHeaderByProtocol(req, info.ApiKey, protocol)
 
 	// Apply runtime headers override if enabled
 	// This allows dynamic header manipulation at request time
