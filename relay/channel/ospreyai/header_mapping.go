@@ -21,6 +21,13 @@ type HeaderMapping struct {
 // GetHeaderMappings returns all supported protocol header mappings
 func GetHeaderMappings() map[int]*HeaderMapping {
 	return map[int]*HeaderMapping{
+		constant.ChannelTypeOspreyAI: {
+			Protocol: "OspreyAI Gateway",
+			Headers: map[string]string{
+				"Authorization": "Bearer {api_key}",
+			},
+			ApiKeyInQuery: false,
+		},
 		constant.ChannelTypeOpenAI: {
 			Protocol: "OpenAI",
 			Headers: map[string]string{
