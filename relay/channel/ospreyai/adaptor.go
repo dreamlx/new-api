@@ -149,6 +149,9 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 // This is the most complex part of multi-protocol adaptor
 // Supports 11+ protocol formats with streaming and non-streaming variants
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	// Record final response format for logging and billing
+	info.FinalRequestRelayFormat = info.RelayFormat
+
 	// Route response handling based on client request format (RelayFormat)
 	// Each format may have stream/non-stream variants
 
@@ -218,15 +221,8 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 // ─── 6. Metadata ────────────────────────────────────────────────────
 
 // GetModelList returns all models supported by this channel
-// Note: Should be populated based on actual channel configuration
 func (a *Adaptor) GetModelList() []string {
-	return []string{
-		// OpenAI models
-		"gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo",
-		// Claude models
-		"claude-3-5-sonnet-20241022", "claude-3-opus-20250219", "claude-3-sonnet-20240229",
-		// More models can be added based on actual support
-	}
+	return ModelList
 }
 
 // GetChannelName returns channel name
