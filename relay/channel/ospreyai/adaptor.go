@@ -8,6 +8,9 @@ import (
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
+	"github.com/QuantumNous/new-api/relay/channel/claude"
+	"github.com/QuantumNous/new-api/relay/channel/gemini"
+	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
@@ -144,15 +147,72 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 
 // DoResponse routes response based on relay format and calls appropriate handler
 // This is the most complex part of multi-protocol adaptor
-// To be implemented in Phase 3: Response Processing
+// Supports 11+ protocol formats with streaming and non-streaming variants
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
-	// Phase 3: Implement protocol routing with switch statement
-	// For now, return error indicating not yet implemented
-	return nil, types.NewError(
-		fmt.Errorf("ospreyai adaptor: DoResponse not yet implemented (Phase 3)"),
-		types.ErrorCodeInvalidRequest,
-		types.ErrOptionWithSkipRetry(),
-	)
+	// Route response handling based on client request format (RelayFormat)
+	// Each format may have stream/non-stream variants
+
+	switch info.RelayFormat {
+
+	// ─── OpenAI Protocol ───────────────────────────────────────────
+	case types.RelayFormatOpenAI:
+		if info.IsStream {
+			return openai.OaiStreamHandler(c, info, resp)
+		}
+		return openai.OpenaiHandler(c, info, resp)
+
+	// ─── Claude/Anthropic Protocol ────────────────────────────────
+	case types.RelayFormatClaude:
+		if info.IsStream {
+			return claude.ClaudeStreamHandler(c, resp, info)
+		}
+		return claude.ClaudeHandler(c, resp, info)
+
+	// ─── Gemini Protocol ───────────────────────────────────────────
+	case types.RelayFormatGemini:
+		if info.IsStream {
+			return gemini.GeminiChatStreamHandler(c, info, resp)
+		}
+		return gemini.GeminiChatHandler(c, info, resp)
+
+	// ─── Image Generation ─────────────────────────────────────────
+	case types.RelayFormatOpenAIImage:
+		return openai.OpenaiHandlerWithUsage(c, info, resp)
+
+	// ─── Embedding ────────────────────────────────────────────────
+	case types.RelayFormatEmbedding:
+		return openai.OpenaiHandler(c, info, resp)
+
+	// ─── Audio Processing ─────────────────────────────────────────
+	case types.RelayFormatOpenAIAudio:
+		return openai.OpenaiHandler(c, info, resp)
+
+	// ─── Reranking ────────────────────────────────────────────────
+	case types.RelayFormatRerank:
+		return openai.OpenaiHandler(c, info, resp)
+
+	// ─── OpenAI Responses Format ──────────────────────────────────
+	case types.RelayFormatOpenAIResponses:
+		if info.IsStream {
+			return openai.OaiResponsesStreamHandler(c, info, resp)
+		}
+		return openai.OaiResponsesHandler(c, info, resp)
+
+	// ─── OpenAI Responses Compaction ──────────────────────────────
+	case types.RelayFormatOpenAIResponsesCompaction:
+		if info.IsStream {
+			return openai.OaiResponsesStreamHandler(c, info, resp)
+		}
+		return openai.OaiResponsesHandler(c, info, resp)
+
+	// ─── Error Handling ───────────────────────────────────────────
+	default:
+		return nil, types.NewError(
+			fmt.Errorf("ospreyai adaptor: unsupported relay format: %s", info.RelayFormat),
+			types.ErrorCodeInvalidRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
 }
 
 // ─── 6. Metadata ────────────────────────────────────────────────────
