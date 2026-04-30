@@ -54,11 +54,26 @@ relay/channel/ospreyai/
 - [x] Streaming support via info.IsStream flag
 - [x] Imported all necessary handler modules
 
-### Phase 4: Advanced Features (⏳ Pending)
-- [ ] Protocol detection enhancement
-- [ ] Error handling standardization
-- [ ] Token counting
-- [ ] Performance optimization
+### Phase 4: Advanced Features (✅ Completed)
+- [x] Protocol detection enhancement (`ProtocolDetector`)
+  - URL path detection
+  - Header-based detection
+  - Body content detection
+  - Multi-level fallback detection
+- [x] Error handling standardization (`ErrorHandler`)
+  - Status code to error code mapping
+  - Error message parsing
+  - Retry detection
+- [x] Token counting (`UsageExtractor`)
+  - OpenAI format support
+  - Claude format support
+  - Gemini format support
+  - Protocol-agnostic fallback
+- [x] Performance optimization via caching
+  - `HeaderMappingCache` for header mappings
+  - `ProtocolRouterCache` for routing decisions
+  - Singleton cache initialization
+  - Pre-loading supported formats
 
 ### Phase 5: Documentation & Testing (⏳ Pending)
 - [ ] Code documentation

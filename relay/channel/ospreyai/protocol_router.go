@@ -21,27 +21,19 @@ func (pr *ProtocolRouter) RouteResponse(format types.RelayFormat, isStream bool)
 }
 
 // IsSupportedFormat checks if the format is supported
+// Accepts RelayFormat type (which is string)
 func (pr *ProtocolRouter) IsSupportedFormat(format types.RelayFormat) bool {
-	switch format {
-	case types.RelayFormatOpenAI:
-		return true
-	case types.RelayFormatClaude:
-		return true
-	case types.RelayFormatGemini:
-		return true
-	case types.RelayFormatOpenAIImage:
-		return true
-	case types.RelayFormatEmbedding:
-		return true
-	case types.RelayFormatOpenAIAudio:
-		return true
-	case types.RelayFormatRerank:
-		return true
-	case types.RelayFormatOpenAIResponses:
-		return true
-	case types.RelayFormatOpenAIResponsesCompaction:
-		return true
-	default:
-		return false
+	supportedFormats := map[types.RelayFormat]bool{
+		types.RelayFormatOpenAI:                   true,
+		types.RelayFormatClaude:                   true,
+		types.RelayFormatGemini:                   true,
+		types.RelayFormatOpenAIImage:              true,
+		types.RelayFormatEmbedding:                true,
+		types.RelayFormatOpenAIAudio:              true,
+		types.RelayFormatRerank:                   true,
+		types.RelayFormatOpenAIResponses:          true,
+		types.RelayFormatOpenAIResponsesCompaction: true,
 	}
+
+	return supportedFormats[format]
 }
