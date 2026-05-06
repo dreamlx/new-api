@@ -24,6 +24,7 @@ import SettingsPaymentGateway from '../../pages/Setting/Payment/SettingsPaymentG
 import SettingsPaymentGatewayStripe from '../../pages/Setting/Payment/SettingsPaymentGatewayStripe';
 import SettingsPaymentGatewayCreem from '../../pages/Setting/Payment/SettingsPaymentGatewayCreem';
 import SettingsPaymentGatewayWaffo from '../../pages/Setting/Payment/SettingsPaymentGatewayWaffo';
+import SettingsPaymentGatewayPayPal from '../../pages/Setting/Payment/SettingsPaymentGatewayPayPal';
 import { API, showError, toBoolean } from '../../helpers';
 import { useTranslation } from 'react-i18next';
 
@@ -48,6 +49,12 @@ const PaymentSetting = () => {
     StripeUnitPrice: 8.0,
     StripeMinTopUp: 1,
     StripePromotionCodesEnabled: false,
+
+    PayPalClientId: '',
+    PayPalClientSecret: '',
+    PayPalWebhookSecret: '',
+    PayPalMode: 'sandbox',
+    PayPalMinTopUp: 1,
   });
 
   let [loading, setLoading] = useState(false);
@@ -96,6 +103,7 @@ const PaymentSetting = () => {
           case 'MinTopUp':
           case 'StripeUnitPrice':
           case 'StripeMinTopUp':
+          case 'PayPalMinTopUp':
             newInputs[item.key] = parseFloat(item.value);
             break;
           default:
@@ -146,6 +154,9 @@ const PaymentSetting = () => {
         </Card>
         <Card style={{ marginTop: '10px' }}>
           <SettingsPaymentGatewayWaffo options={inputs} refresh={onRefresh} />
+        </Card>
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsPaymentGatewayPayPal options={inputs} refresh={onRefresh} />
         </Card>
       </Spin>
     </>
