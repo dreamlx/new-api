@@ -407,6 +407,16 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.WaffoUnitPrice, _ = strconv.ParseFloat(value, 64)
 	case "WaffoMinTopUp":
 		setting.WaffoMinTopUp, _ = strconv.Atoi(value)
+	case "PayPalClientId":
+		setting.PayPalClientId = value
+	case "PayPalClientSecret":
+		setting.PayPalClientSecret = value
+	case "PayPalWebhookSecret":
+		setting.PayPalWebhookSecret = value
+	case "PayPalMode":
+		setting.PayPalMode = value
+	case "PayPalMinTopUp":
+		setting.PayPalMinTopUp, _ = strconv.Atoi(value)
 	case "TopupGroupRatio":
 		err = common.UpdateTopupGroupRatioByJSONString(value)
 	case "GitHubClientId":

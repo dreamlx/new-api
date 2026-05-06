@@ -76,6 +76,9 @@ const TopUp = () => {
   const [waffoPayMethods, setWaffoPayMethods] = useState([]);
   const [waffoMinTopUp, setWaffoMinTopUp] = useState(1);
 
+  // PayPal 相关状态
+  const [enablePayPalTopUp, setEnablePayPalTopUp] = useState(false);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [open, setOpen] = useState(false);
   const [payWay, setPayWay] = useState('');
@@ -495,6 +498,8 @@ const TopUp = () => {
           setEnableWaffoTopUp(enableWaffoTopUp);
           setWaffoPayMethods(data.waffo_pay_methods || []);
           setWaffoMinTopUp(data.waffo_min_topup || 1);
+          const enablePayPalTopUp = data.enable_paypal_topup || false;
+          setEnablePayPalTopUp(enablePayPalTopUp);
           setMinTopUp(minTopUpValue);
           setTopUpCount(minTopUpValue);
 
@@ -789,6 +794,7 @@ const TopUp = () => {
           creemProducts={creemProducts}
           creemPreTopUp={creemPreTopUp}
           enableWaffoTopUp={enableWaffoTopUp}
+          enablePayPalTopUp={enablePayPalTopUp}
           waffoTopUp={waffoTopUp}
           waffoPayMethods={waffoPayMethods}
           presetAmounts={presetAmounts}

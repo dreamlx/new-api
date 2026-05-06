@@ -77,6 +77,7 @@ const SubscriptionPlansCard = ({
   enableOnlineTopUp = false,
   enableStripeTopUp = false,
   enableCreemTopUp = false,
+  enablePayPalTopUp = false,
   billingPreference,
   onChangeBillingPreference,
   activeSubscriptions = [],

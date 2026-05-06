@@ -78,11 +78,33 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	// 如果启用了 PayPal 支付，添加到支付方法列表
+	if setting.PayPalClientId != "" && setting.PayPalClientSecret != "" {
+		hasPayPal := false
+		for _, method := range payMethods {
+			if method["type"] == "paypal" {
+				hasPayPal = true
+				break
+			}
+		}
+
+		if !hasPayPal {
+			paypalMethod := map[string]string{
+				"name":      "PayPal",
+				"type":      "paypal",
+				"color":     "rgba(var(--semi-blue-6), 1)",
+				"min_topup": strconv.Itoa(setting.PayPalMinTopUp),
+			}
+			payMethods = append(payMethods, paypalMethod)
+		}
+	}
+
 	data := gin.H{
 		"enable_online_topup": operation_setting.PayAddress != "" && operation_setting.EpayId != "" && operation_setting.EpayKey != "",
 		"enable_stripe_topup": setting.StripeApiSecret != "" && setting.StripeWebhookSecret != "" && setting.StripePriceId != "",
 		"enable_creem_topup":  setting.CreemApiKey != "" && setting.CreemProducts != "[]",
 		"enable_waffo_topup": enableWaffo,
+		"enable_paypal_topup": setting.PayPalClientId != "" && setting.PayPalClientSecret != "",
 		"waffo_pay_methods": func() interface{} {
 			if enableWaffo {
 				return setting.GetWaffoPayMethods()
@@ -94,6 +116,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"min_topup":           operation_setting.MinTopUp,
 		"stripe_min_topup":    setting.StripeMinTopUp,
 		"waffo_min_topup":     setting.WaffoMinTopUp,
+		"paypal_min_topup":    setting.PayPalMinTopUp,
 		"amount_options":      operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":            operation_setting.GetPaymentSetting().AmountDiscount,
 	}

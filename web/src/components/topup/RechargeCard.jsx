@@ -35,7 +35,7 @@ import {
   Tabs,
   TabPane,
 } from '@douyinfe/semi-ui';
-import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si';
+import { SiAlipay, SiWechat, SiStripe, SiPaypal } from 'react-icons/si';
 import {
   CreditCard,
   Coins,
@@ -90,6 +90,7 @@ const RechargeCard = ({
   enableWaffoTopUp,
   waffoTopUp,
   waffoPayMethods,
+  enablePayPalTopUp,
   subscriptionLoading = false,
   subscriptionPlans = [],
   billingPreference,
@@ -227,19 +228,19 @@ const RechargeCard = ({
           <div className='py-8 flex justify-center'>
             <Spin size='large' />
           </div>
-        ) : enableOnlineTopUp || enableStripeTopUp || enableCreemTopUp || enableWaffoTopUp ? (
+        ) : enableOnlineTopUp || enableStripeTopUp || enableCreemTopUp || enableWaffoTopUp || enablePayPalTopUp ? (
           <Form
             getFormApi={(api) => (onlineFormApiRef.current = api)}
             initValues={{ topUpCount: topUpCount }}
           >
             <div className='space-y-6'>
-              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp) && (
+              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp || enablePayPalTopUp) && (
                 <Row gutter={12}>
                   <Col xs={24} sm={24} md={24} lg={10} xl={10}>
                     <Form.InputNumber
                       field='topUpCount'
                       label={t('充值数量')}
-                      disabled={!enableOnlineTopUp && !enableStripeTopUp && !enableWaffoTopUp}
+                      disabled={!enableOnlineTopUp && !enableStripeTopUp && !enableWaffoTopUp && !enablePayPalTopUp}
                       placeholder={
                         t('充值数量，最低 ') + renderQuotaWithAmount(minTopUp)
                       }
@@ -298,9 +299,11 @@ const RechargeCard = ({
                           {payMethods.filter(m => m.type !== 'waffo').map((payMethod) => {
                             const minTopupVal = Number(payMethod.min_topup) || 0;
                             const isStripe = payMethod.type === 'stripe';
+                            const isPayPal = payMethod.type === 'paypal';
                             const disabled =
-                              (!enableOnlineTopUp && !isStripe) ||
+                              (!enableOnlineTopUp && !isStripe && !isPayPal) ||
                               (!enableStripeTopUp && isStripe) ||
+                              (!enablePayPalTopUp && isPayPal) ||
                               minTopupVal > Number(topUpCount || 0);
 
                             const buttonEl = (
@@ -320,6 +323,8 @@ const RechargeCard = ({
                                     <SiWechat size={18} color='#07C160' />
                                   ) : payMethod.type === 'stripe' ? (
                                     <SiStripe size={18} color='#635BFF' />
+                                  ) : payMethod.type === 'paypal' ? (
+                                    <SiPaypal size={18} color='#003087' />
                                   ) : (
                                     <CreditCard
                                       size={18}
@@ -361,7 +366,7 @@ const RechargeCard = ({
                 </Row>
               )}
 
-              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp) && (
+              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp || enablePayPalTopUp) && (
                 <Form.Slot
                   label={
                     <div className='flex items-center gap-2'>
@@ -661,6 +666,7 @@ const RechargeCard = ({
                 enableOnlineTopUp={enableOnlineTopUp}
                 enableStripeTopUp={enableStripeTopUp}
                 enableCreemTopUp={enableCreemTopUp}
+                enablePayPalTopUp={enablePayPalTopUp}
                 billingPreference={billingPreference}
                 onChangeBillingPreference={onChangeBillingPreference}
                 activeSubscriptions={activeSubscriptions}
