@@ -136,23 +136,39 @@ func SyncExternalUser(c *gin.Context) {
 	}
 	if req.AffCode != "" {
 		user.AffCode = req.AffCode
+	} else {
+		user.AffCode = common.GetRandomString(4)
 	}
 
-	if err := model.DB.Create(user).Error; err != nil {
+	// Retry on aff_code collision (4-char random string has limited space)
+	maxRetries := 5
+	var createErr error
+	for i := 0; i < maxRetries; i++ {
+		createErr = model.DB.Create(user).Error
+		if createErr == nil {
+			break
+		}
+		if !strings.Contains(createErr.Error(), "aff_code") {
+			break
+		}
+		// aff_code collision, regenerate and retry
+		user.AffCode = common.GetRandomString(4)
+	}
+	if createErr != nil {
 		errorMsg := "创建用户失败"
-		if strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			if strings.Contains(err.Error(), "username") {
+		if strings.Contains(createErr.Error(), "Duplicate entry") || strings.Contains(createErr.Error(), "UNIQUE constraint failed") {
+			if strings.Contains(createErr.Error(), "username") {
 				errorMsg = "用户名已存在，请使用其他用户名"
-			} else if strings.Contains(err.Error(), "email") {
+			} else if strings.Contains(createErr.Error(), "email") {
 				errorMsg = "邮箱已被使用，请使用其他邮箱"
-			} else if strings.Contains(err.Error(), "aff_code") {
+			} else if strings.Contains(createErr.Error(), "aff_code") {
 				errorMsg = "推荐码已被使用，请使用其他推荐码"
 			}
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success":      false,
 			"message":      errorMsg,
-			"error_detail": err.Error(),
+			"error_detail": createErr.Error(),
 		})
 		return
 	}

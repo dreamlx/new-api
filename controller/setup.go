@@ -76,11 +76,11 @@ func PostSetup(c *gin.Context) {
 
 	// If root doesn't exist, validate and create admin account
 	if !rootExists {
-		// Validate username length: max 12 characters to align with model.User validation
-		if len(req.Username) > 12 {
+		// Validate username length: max 64 characters to align with model.User validation
+		if len(req.Username) > 64 {
 			c.JSON(200, gin.H{
 				"success": false,
-				"message": "用户名长度不能超过12个字符",
+				"message": "用户名长度不能超过64个字符",
 			})
 			return
 		}
