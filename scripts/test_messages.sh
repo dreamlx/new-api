@@ -6,12 +6,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
 
 MESSAGE_MODEL="${MESSAGE_MODEL:-hosted_vllm/minimax-m2.5}"
+# MESSAGE_MODEL="${MESSAGE_MODEL:-minimax-m2.5-highspeed}"
 MESSAGE_PROMPT="${MESSAGE_PROMPT:-请简短回复：hello}"
 MAX_TOKENS="${MAX_TOKENS:-1280}"
 ANTHROPIC_VERSION="${ANTHROPIC_VERSION:-2026-04-01}"
 MESSAGES_PATH="${MESSAGES_PATH:-/v1/messages}"
-BASE_URL="${BASE_URL:-http://192.168.1.100:3000}"
-RELAY_TOKEN="${RELAY_TOKEN:-sk-Hdiw6CgxSxPNESnfwkVxmTLoll7vD6SAZ7j8uW94EZ24svWP}" 
+BASE_URL="${BASE_URL:-http://192.168.1.100}"
+#RELAY_TOKEN="${RELAY_TOKEN:-sk-Hdiw6CgxSxPNESnfwkVxmTLoll7vD6SAZ7j8uW94EZ24svWP}" 
+RELAY_TOKEN="${RELAY_TOKEN:-sk-ZA5H33LzSxzx9EpXFwoASA}" 
 
 require_deps() {
     for cmd in curl jq mktemp; do

@@ -253,7 +253,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
-func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string) (logs []*Log, total int64, err error) {
+func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, wisemodelPackageId string, isWisemodel bool) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB
@@ -285,6 +285,13 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if group != "" {
 		tx = tx.Where("logs."+logGroupCol+" = ?", group)
 	}
+
+	if wisemodelPackageId != "" {
+		tx = tx.Where("logs.wisemodel_package_id = ?", wisemodelPackageId)
+	} else if isWisemodel {
+		tx = tx.Where("logs.wisemodel_package_id != ''")
+	}
+
 	err = tx.Model(&Log{}).Count(&total).Error
 	if err != nil {
 		return nil, 0, err
@@ -386,12 +393,13 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 
 type Stat struct {
 	Quota int `json:"quota"`
+	Count int `json:"count"`
 	Rpm   int `json:"rpm"`
 	Tpm   int `json:"tpm"`
 }
 
-func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
-	tx := LOG_DB.Table("logs").Select("sum(quota) quota")
+func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string, wisemodelPackageId string, isWisemodel bool) (stat Stat, err error) {
+	tx := LOG_DB.Table("logs").Select("sum(quota) quota, count(*) count")
 
 	// 为rpm和tpm创建单独的查询
 	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, sum(prompt_tokens) + sum(completion_tokens) tpm")
@@ -425,6 +433,14 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if group != "" {
 		tx = tx.Where(logGroupCol+" = ?", group)
 		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
+	}
+
+	if wisemodelPackageId != "" {
+		tx = tx.Where("wisemodel_package_id = ?", wisemodelPackageId)
+		rpmTpmQuery = rpmTpmQuery.Where("wisemodel_package_id = ?", wisemodelPackageId)
+	} else if isWisemodel {
+		tx = tx.Where("wisemodel_package_id != ''")
+		rpmTpmQuery = rpmTpmQuery.Where("wisemodel_package_id != ''")
 	}
 
 	tx = tx.Where("type = ?", LogTypeConsume)

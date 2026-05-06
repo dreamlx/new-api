@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useMemo } from 'react';
-import { Wallet, Activity, Zap, Gauge } from 'lucide-react';
+import { Wallet, Activity, Zap, Gauge, Globe } from 'lucide-react';
 import {
   IconMoneyExchangeStroked,
   IconHistogram,
@@ -41,6 +41,8 @@ export const useDashboardStats = (
   performanceMetrics,
   navigate,
   t,
+  wisemodelStat,
+  isAdmin,
 ) => {
   const groupedStatsData = useMemo(
     () => [
@@ -132,6 +134,28 @@ export const useDashboardStats = (
           },
         ],
       },
+      ...(isAdmin ? [{
+        title: createSectionTitle(Globe, t('外部对接平台')),
+        color: 'bg-teal-50',
+        items: [
+          {
+            title: t('WiseModel 消耗额度'),
+            value: renderQuota(wisemodelStat?.quota || 0),
+            icon: <IconCoinMoneyStroked />,
+            avatarColor: 'teal',
+            trendData: [],
+            trendColor: '#14b8a6',
+          },
+          {
+            title: t('WiseModel 请求数'),
+            value: (wisemodelStat?.count || 0).toLocaleString(),
+            icon: <IconSend />,
+            avatarColor: 'cyan',
+            trendData: [],
+            trendColor: '#06b6d4',
+          },
+        ],
+      }] : []),
     ],
     [
       userState?.user?.quota,
@@ -144,6 +168,8 @@ export const useDashboardStats = (
       performanceMetrics,
       navigate,
       t,
+      wisemodelStat,
+      isAdmin,
     ],
   );
 

@@ -81,6 +81,12 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [uptimeLoading, setUptimeLoading] = useState(false);
   const [activeUptimeTab, setActiveUptimeTab] = useState('');
 
+  // ========== WiseModel 统计数据 ==========
+  const [wisemodelStat, setWisemodelStat] = useState({
+    quota: 0,
+    count: 0,
+  });
+
   // ========== 常量 ==========
   const now = new Date();
   const isAdminUser = isAdmin();
@@ -234,6 +240,26 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     }
   }, [inputs, isAdminUser]);
 
+  const loadWisemodelStats = useCallback(async () => {
+    if (!isAdminUser) return;
+    try {
+      const { start_timestamp, end_timestamp } = inputs;
+      const localStartTimestamp = Date.parse(start_timestamp) / 1000;
+      const localEndTimestamp = Date.parse(end_timestamp) / 1000;
+      const url = `/api/log/stat?is_wisemodel=true&type=2&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}`;
+      const res = await API.get(url);
+      const { success, message, data } = res.data;
+      if (success && data) {
+        setWisemodelStat({
+          quota: data.quota || 0,
+          count: data.count || 0,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load WiseModel stats:', err);
+    }
+  }, [inputs, isAdminUser]);
+
   const getUserData = useCallback(async () => {
     let res = await API.get(`/api/user/self`);
     const { success, message, data } = res.data;
@@ -247,8 +273,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const refresh = useCallback(async () => {
     const data = await loadQuotaData();
     await loadUptimeData();
+    await loadWisemodelStats();
     return data;
-  }, [loadQuotaData, loadUptimeData]);
+  }, [loadQuotaData, loadUptimeData, loadWisemodelStats]);
 
   const handleSearchConfirm = useCallback(
     async (updateChartDataCallback) => {
@@ -315,6 +342,10 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     activeUptimeTab,
     setActiveUptimeTab,
 
+    // WiseModel 统计数据
+    wisemodelStat,
+    setWisemodelStat,
+
     // 计算值
     timeOptions,
     performanceMetrics,
@@ -334,6 +365,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     loadQuotaData,
     loadUserQuotaData,
     loadUptimeData,
+    loadWisemodelStats,
     getUserData,
     refresh,
     handleSearchConfirm,
