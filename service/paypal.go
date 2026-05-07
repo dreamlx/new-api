@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	PayPalSandboxURL = "https://api.sandbox.paypal.com"
-	PayPalLiveURL    = "https://api.paypal.com"
+	PayPalSandboxURL = "https://api-m.sandbox.paypal.com"
+	PayPalLiveURL    = "https://api-m.paypal.com"
 )
 
 func getPayPalURL() string {
@@ -207,14 +207,15 @@ func getPayPalAccessToken() (string, error) {
 
 	var tokenResp map[string]interface{}
 	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
-		return "", fmt.Errorf("解析响应失败: %w", err)
+		return "", fmt.Errorf("解析响应失败: %w (响应: %s)", err, string(respBody))
 	}
 
 	if token, ok := tokenResp["access_token"].(string); ok {
 		return token, nil
 	}
 
-	return "", fmt.Errorf("未获取到 token")
+	// PayPal 返回了错误，输出完整响应帮助诊断
+	return "", fmt.Errorf("未获取到 token。响应状态: %d, 响应内容: %s", httpResp.StatusCode, string(respBody))
 }
 
 // CapturePayPalOrder 捕获 PayPal 订单（完成支付）
@@ -288,13 +289,18 @@ func CapturePayPalOrder(orderID string) (*PayPalCaptureResponse, error) {
 }
 
 // VerifyPayPalWebhookSignature 验证 PayPal Webhook 签名
+// 注：PayPal 官方使用 RSA-SHA256 证书验证，但 WebhookSecret 方式已过时
+// 建议改用官方的 verify-webhook-signature 端点或本地 RSA 验证
+// 参考：https://developer.paypal.com/api/rest/webhooks/rest/
 func VerifyPayPalWebhookSignature(transmissionID, transmissionTime, certURL string, payload []byte, signature string) bool {
 	if setting.PayPalWebhookSecret == "" {
 		return false
 	}
 
-	// PayPal webhook 签名验证：HMAC-SHA256(transmission_id + transmission_time + webhook_id + payload, webhook_secret)
-	// 但实际上 PayPal 使用的是证书验证，这里简化为 HMAC 验证
+	// 临时实现：使用简化的 HMAC 验证
+	// TODO: 替换为官方推荐的方法
+	// 1. POST 到 PayPal verify-webhook-signature 端点，或
+	// 2. 使用 certURL 进行本地 RSA-SHA256 验证
 	expectedSignature := computePayPalSignature(transmissionID, transmissionTime, string(payload), setting.PayPalWebhookSecret)
 
 	return hmac.Equal([]byte(signature), []byte(expectedSignature))

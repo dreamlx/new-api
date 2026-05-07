@@ -215,6 +215,13 @@ func RequestEpay(c *gin.Context) {
 		return
 	}
 
+	// Only epay-compatible payment methods should reach here
+	// PayPal, Stripe, Waffo, Creem have their own dedicated endpoints
+	if req.PaymentMethod == "paypal" || req.PaymentMethod == "stripe" || req.PaymentMethod == "waffo" || req.PaymentMethod == "creem" {
+		c.JSON(200, gin.H{"message": "error", "data": "该支付方式有专属接口，请调用相应接口"})
+		return
+	}
+
 	callBackAddress := service.GetCallbackAddress()
 	returnUrl, _ := url.Parse(system_setting.ServerAddress + "/console/log")
 	notifyUrl, _ := url.Parse(callBackAddress + "/api/user/epay/notify")

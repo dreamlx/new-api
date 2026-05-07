@@ -65,7 +65,7 @@ func RequestPayPalTopUp(c *gin.Context) {
 	payLink, err := service.CreatePayPalOrder(referenceId, fmt.Sprintf("%.2f", money), "USD", returnUrl, cancelUrl)
 	if err != nil {
 		log.Println("创建 PayPal 订单失败:", err)
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("创建 PayPal 订单失败: %v", err)})
 		return
 	}
 

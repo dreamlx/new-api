@@ -7,6 +7,7 @@ package operation_setting
 
 import (
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting"
 )
 
 var PayAddress = ""
@@ -49,11 +50,35 @@ func PayMethods2JsonString() string {
 	return string(jsonBytes)
 }
 
+// isPayMethodConfigured 检查指定的动态支付方式是否已配置
+func isPayMethodConfigured(method string) bool {
+	switch method {
+	case "stripe":
+		return setting.StripeApiSecret != "" && setting.StripeWebhookSecret != "" && setting.StripePriceId != ""
+	case "paypal":
+		return setting.PayPalClientId != "" && setting.PayPalClientSecret != ""
+	case "waffo":
+		return setting.WaffoEnabled &&
+			((!setting.WaffoSandbox &&
+				setting.WaffoApiKey != "" &&
+				setting.WaffoPrivateKey != "" &&
+				setting.WaffoPublicCert != "") ||
+				(setting.WaffoSandbox &&
+					setting.WaffoSandboxApiKey != "" &&
+					setting.WaffoSandboxPrivateKey != "" &&
+					setting.WaffoSandboxPublicCert != ""))
+	default:
+		return false
+	}
+}
+
 func ContainsPayMethod(method string) bool {
+	// Check static pay methods
 	for _, payMethod := range PayMethods {
 		if payMethod["type"] == method {
 			return true
 		}
 	}
-	return false
+	// Check dynamic pay methods
+	return isPayMethodConfigured(method)
 }

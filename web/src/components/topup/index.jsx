@@ -165,6 +165,11 @@ const TopUp = () => {
         showError(t('管理员未开启Stripe充值！'));
         return;
       }
+    } else if (payment === 'paypal') {
+      if (!enablePayPalTopUp) {
+        showError(t('管理员未开启PayPal充值！'));
+        return;
+      }
     } else {
       if (!enableOnlineTopUp) {
         showError(t('管理员未开启在线充值！'));
@@ -195,12 +200,10 @@ const TopUp = () => {
 
   const onlineTopUp = async () => {
     if (payWay === 'stripe') {
-      // Stripe 支付处理
       if (amount === 0) {
         await getStripeAmount();
       }
     } else {
-      // 普通支付处理
       if (amount === 0) {
         await getAmount();
       }
@@ -213,16 +216,28 @@ const TopUp = () => {
     setConfirmLoading(true);
     try {
       let res;
+      const amount_int = parseInt(topUpCount);
+
       if (payWay === 'stripe') {
-        // Stripe 支付请求
         res = await API.post('/api/user/stripe/pay', {
-          amount: parseInt(topUpCount),
+          amount: amount_int,
           payment_method: 'stripe',
         });
+      } else if (payWay === 'paypal') {
+        res = await API.post('/api/user/paypal/pay', {
+          amount: amount_int,
+        });
+      } else if (payWay === 'waffo') {
+        res = await API.post('/api/user/waffo/pay', {
+          amount: amount_int,
+        });
+      } else if (payWay === 'creem') {
+        res = await API.post('/api/user/creem/pay', {
+          amount: amount_int,
+        });
       } else {
-        // 普通支付请求
         res = await API.post('/api/user/pay', {
-          amount: parseInt(topUpCount),
+          amount: amount_int,
           payment_method: payWay,
         });
       }
@@ -230,11 +245,11 @@ const TopUp = () => {
       if (res !== undefined) {
         const { message, data } = res.data;
         if (message === 'success') {
-          if (payWay === 'stripe') {
-            // Stripe 支付回调处理
+          if (payWay === 'stripe' || payWay === 'paypal') {
             window.open(data.pay_link, '_blank');
+          } else if (payWay === 'waffo') {
+            window.open(data.payment_url, '_blank');
           } else {
-            // 普通支付表单提交
             let params = data;
             let url = res.data.url;
             let form = document.createElement('form');
