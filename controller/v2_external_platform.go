@@ -163,6 +163,9 @@ func V2GetPlatformLogs(c *gin.Context) {
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
 	tokenKeyFilter := c.Query("token_key")
+	tokenIdStr := c.Query("token_id")
+	afterIdStr := c.Query("after_id")
+	modelName := c.Query("model_name")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
@@ -191,8 +194,12 @@ func V2GetPlatformLogs(c *gin.Context) {
 	// Build query
 	tx := model.LOG_DB.Where("user_id = ? AND type = ?", user.Id, model.LogTypeConsume)
 
-	// Optional token_key filter
-	if tokenKeyFilter != "" {
+	// Optional token_id filter (takes precedence over token_key)
+	if tokenIdStr != "" {
+		if tokenId, err := strconv.Atoi(tokenIdStr); err == nil && tokenId > 0 {
+			tx = tx.Where("token_id = ?", tokenId)
+		}
+	} else if tokenKeyFilter != "" {
 		tokenKeyBody := strings.TrimPrefix(tokenKeyFilter, "sk-")
 		filterToken, err := model.GetTokenByKey(tokenKeyBody, true)
 		if err != nil || filterToken == nil || filterToken.UserId != user.Id {
@@ -211,6 +218,15 @@ func V2GetPlatformLogs(c *gin.Context) {
 		tx = tx.Where("token_id = ?", filterToken.Id)
 	}
 
+	// Optional after_id filter (incremental pull)
+	if afterIdStr != "" {
+		if afterId, err := strconv.Atoi(afterIdStr); err == nil && afterId > 0 {
+			tx = tx.Where("id > ?", afterId)
+		}
+	}
+	if modelName != "" {
+		tx = tx.Where("model_name LIKE ?", "%"+modelName+"%")
+	}
 	if startTimestamp > 0 {
 		tx = tx.Where("created_at >= ?", startTimestamp)
 	}
@@ -228,7 +244,11 @@ func V2GetPlatformLogs(c *gin.Context) {
 	// Fetch logs
 	var logs []*model.Log
 	offset := (page - 1) * pageSize
-	if err := tx.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&logs).Error; err != nil {
+	orderClause := "created_at DESC"
+	if afterIdStr != "" {
+		orderClause = "id ASC"
+	}
+	if err := tx.Order(orderClause).Offset(offset).Limit(pageSize).Find(&logs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询失败"})
 		return
 	}
@@ -254,7 +274,10 @@ func V2GetPlatformLogs(c *gin.Context) {
 
 		logItems = append(logItems, gin.H{
 			"log_id":            log.Id,
+			"request_id":        log.RequestId,
+			"created_at":        log.CreatedAt,
 			"time":              time.Unix(log.CreatedAt, 0).UTC().Format(time.RFC3339),
+			"token_id":          log.TokenId,
 			"token_key":         tokenKey,
 			"model_name":        log.ModelName,
 			"prompt_tokens":     log.PromptTokens,

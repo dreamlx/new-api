@@ -833,8 +833,9 @@ GET /api/user/external/{external_user_id}/logs
 **查询参数**:
 - `start_date` (string, optional): 开始日期，格式：2024-01-01
 - `end_date` (string, optional): 结束日期，格式：2024-01-31  
-- `username` (string, optional): 用户名筛选
 - `model_name` (string, optional): 模型名筛选（支持模糊匹配）
+- `token_id` (int, optional): 按 token ID 过滤
+- `after_id` (int, optional): 增量拉取，只返回 `log_id > after_id` 的记录，排序自动切为 `id ASC`
 - `page` (int, optional): 页码，默认1
 - `page_size` (int, optional): 每页大小，默认20，最大100
 
@@ -845,34 +846,49 @@ GET /api/user/external/{external_user_id}/logs
   "data": {
     "logs": [
       {
+        "log_id": 12345,
+        "request_id": "chatcmpl-abc123",
+        "created_at": 1706621425,
         "time": "2024-01-30 15:30:25",
         "username": "testuser",
         "token_key": "sk-abc123def456789xyz",
         "token_name": "我的聊天应用",
         "token_id": 132,
         "tokens": 80,
+        "prompt_tokens": 50,
+        "completion_tokens": 30,
         "type": "consume",
         "model": "qwen-turbo",
         "spend": 0.002
       },
       {
+        "log_id": 12300,
+        "request_id": "",
+        "created_at": 1706601600,
         "time": "2024-01-30 10:00:00",
         "username": "testuser",
         "token_key": "",
         "token_name": "",
         "token_id": 0,
         "tokens": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
         "type": "topup",
         "model": "",
         "spend": -10.0
       },
       {
+        "log_id": 12299,
+        "request_id": "",
+        "created_at": 1706598000,
         "time": "2024-01-30 09:00:00",
         "username": "testuser",
         "token_key": "",
         "token_name": "",
         "token_id": 0,
         "tokens": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
         "type": "deduct",
         "model": "",
         "spend": -5.0
@@ -893,42 +909,39 @@ GET /api/user/external/{external_user_id}/logs
 ```
 
 **字段说明**:
+- `log_id`: 日志自增主键，可作为增量拉取的水位线和幂等键
+- `request_id`: relay 请求唯一标识，可用于请求级别去重
+- `created_at`: Unix 时间戳（秒），便于程序处理
 - `time`: 记录时间，格式：YYYY-MM-DD HH:mm:ss
 - `username`: 用户名
-- `token_key`: 🆕 令牌密钥（完整），仅消费记录有值，其他类型为空字符串
-- `token_name`: 🆕 令牌名称，仅消费记录有值，其他类型为空字符串
-- `token_id`: 🆕 令牌ID，仅消费记录有值，其他类型为0
-- `tokens`: Token消费数量（prompt + completion），充值/扣除记录为0
-- `type`: 记录类型
-  - `consume`: 消费记录（调用LLM）
-  - `topup`: 充值记录
-  - `deduct`: 🆕 扣除记录（管理员调整）
-  - `error`: 错误记录
-- `model`: 使用的模型名称，充值/扣除记录为空
-- `spend`: 花费金额（美元）
-  - 正数：实际消费
-  - 负数：充值金额（显示为负数便于区分）
-- `pagination`: 分页信息
-- `summary`: 汇总信息
-  - `total_tokens`: 本页记录的总Token消费
-  - `total_spend`: 本页记录的总花费
+- `token_key`: 令牌密钥（完整），仅消费记录有值
+- `token_name`: 令牌名称，仅消费记录有值
+- `token_id`: 令牌ID，仅消费记录有值，其他类型为0
+- `tokens`: Token消费数量（prompt + completion）
+- `prompt_tokens`: 输入 tokens
+- `completion_tokens`: 输出 tokens
+- `type`: 记录类型（`consume` / `topup` / `deduct`）
+- `model`: 使用的模型名称
+- `spend`: 花费金额（美元），正数=消费，负数=充值
+
+**日志写入时机**：日志是同步写入的，收到 API 响应后立即可查。
 
 **使用示例**:
 ```bash
 # 查询所有记录
 GET /api/user/external/test_user_001/logs
 
-# 按日期范围查询
-GET /api/user/external/test_user_001/logs?start_date=2024-01-01&end_date=2024-01-31
+# 按 token_id 过滤
+GET /api/user/external/test_user_001/logs?token_id=132
 
-# 按模型筛选
-GET /api/user/external/test_user_001/logs?model_name=qwen
+# 增量拉取（settle 场景）
+GET /api/user/external/test_user_001/logs?token_id=132&after_id=12345&page_size=100
+
+# 按日期范围 + 模型筛选
+GET /api/user/external/test_user_001/logs?start_date=2024-01-01&end_date=2024-01-31&model_name=qwen
 
 # 分页查询
 GET /api/user/external/test_user_001/logs?page=2&page_size=10
-
-# 组合查询
-GET /api/user/external/test_user_001/logs?start_date=2024-01-15&model_name=qwen&page=1&page_size=50
 ```
 
 ## LLM API 使用

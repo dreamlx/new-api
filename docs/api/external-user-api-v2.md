@@ -56,8 +56,12 @@ curl -X POST "http://localhost:3000/v1/chat/completions" \
   }'
 
 # 4. 查询平台消费流水
-curl "http://localhost:3000/api/v2/external/platforms/asd/logs?start_date=2025-11-01&end_date=2025-11-30"
-# 响应包含：完整token_key、模型名、tokens数、quota消费
+curl "http://localhost:3000/api/v2/external/platforms/asd/logs?token_id=2&page_size=100"
+# 响应包含：log_id、request_id、token_id、token_key、模型名、tokens数、quota消费
+
+# 5. 增量拉取（settle 场景）
+curl "http://localhost:3000/api/v2/external/platforms/asd/logs?after_id=12345&page_size=100"
+# 只返回 log_id > 12345 的记录，按 id ASC 排序
 ```
 
 **关键特性**：
@@ -199,51 +203,40 @@ v2 接口采用了一种简化的设计原则，其核心原则是：
 
 **查询参数 (`Query Parameters`)**:
 - `platform_id`: 必填，路径参数，平台标识符
-- `start_date`: 必填，开始日期，格式：2025-10-01
-- `end_date`: 必填，结束日期，格式：2025-10-31
+- `start_date`: 可选，开始日期，格式：2025-10-01
+- `end_date`: 可选，结束日期，格式：2025-10-31
+- `token_id`: 可选，按 token ID 过滤（优先于 token_key）
+- `token_key`: 可选，按 token key 过滤
+- `after_id`: 可选，增量拉取：只返回 `log_id > after_id` 的记录，排序自动切为 `id ASC`
+- `model_name`: 可选，按模型名模糊匹配
 - `page`: 可选，页码，默认为1
 - `page_size`: 可选，每页大小，默认20，最大100
 
 **请求示例**:
-```
+```bash
+# 按时间范围查询
 GET /v2/external/platforms/asd/logs?start_date=2025-10-20&end_date=2025-10-21&page=1&page_size=20
-```
 
-**内部SQL查询逻辑**:
-```sql
-SELECT
-  logs.id as log_id,
-  logs.created_at,
-  tokens.key as token_key,
-  logs.model_name,
-  logs.prompt_tokens,
-  logs.completion_tokens,
-  logs.quota,
-  logs.other
-FROM logs
-LEFT JOIN tokens ON logs.token_id = tokens.id
-LEFT JOIN users ON tokens.user_id = users.id
-WHERE users.username = 'platform_asd'
-  AND logs.type = 2  -- LogTypeConsume
-  AND logs.created_at BETWEEN start_timestamp AND end_timestamp
-ORDER BY logs.id DESC
+# 按 token_id 过滤
+GET /v2/external/platforms/asd/logs?token_id=5&page_size=100
+
+# 增量拉取（settle 场景，用 after_id 做水位线）
+GET /v2/external/platforms/asd/logs?token_id=5&after_id=142&page_size=100
 ```
 
 **响应体 (`Response Body` - 成功)**:
 ```json
 {
   "success": true,
-  "message": "查询成功",
   "data": {
     "platform_id": "asd",
-    "date_range": {
-      "start_date": "2025-10-20",
-      "end_date": "2025-10-21"
-    },
     "logs": [
       {
-        "log_id": "12345",
+        "log_id": 12345,
+        "request_id": "chatcmpl-abc123",
+        "created_at": 1729438200,
         "time": "2025-10-20T15:30:00Z",
+        "token_id": 5,
         "token_key": "sk-abc123def456789xyz",
         "model_name": "claude-3-5-sonnet-20241022",
         "prompt_tokens": 150,
@@ -252,8 +245,11 @@ ORDER BY logs.id DESC
         "quota_cost": 1150
       },
       {
-        "log_id": "12344",
+        "log_id": 12344,
+        "request_id": "chatcmpl-def456",
+        "created_at": 1729442712,
         "time": "2025-10-20T16:45:12Z",
+        "token_id": 6,
         "token_key": "sk-xyz789uvw012345abc",
         "model_name": "gpt-4o",
         "prompt_tokens": 200,
@@ -262,33 +258,43 @@ ORDER BY logs.id DESC
         "quota_cost": 960
       }
     ],
+    "pagination": {
+      "page": 1,
+      "page_size": 20,
+      "total": 2,
+      "total_pages": 1
+    },
     "summary": {
       "total_requests": 2,
+      "total_prompt_tokens": 350,
+      "total_completion_tokens": 200,
       "total_tokens": 550,
-      "total_quota_consumed": 2110
+      "total_quota_consumed": 2110,
+      "unique_tokens": 2
     }
   }
 }
 ```
 
 **字段说明**：
-- `token_key`: **完整的Token密钥**（2025-11-18修复）
-  - ✅ 返回完整密钥：`sk-abc123def456789xyz`
-  - ✅ 便于平台方匹配识别
-  - ✅ 平台可根据token_key分组统计各Token消费
-  - ⚠️ 注意安全：仅在授权的平台间传输
-    ],
-    "pagination": {
-      "page": 1,
-      "page_size": 20,
-      "total_items": 2,
-      "total_pages": 1,
-      "has_next": false,
-      "has_prev": false
-    },
-    "summary": {
-      "total_requests": 2,
-      "total_prompt_tokens": 350,
+- `log_id`: 日志自增主键，可作为增量拉取的水位线和幂等键
+- `request_id`: relay 请求唯一标识，可用于请求级别去重
+- `created_at`: Unix 时间戳（秒），便于程序处理
+- `time`: ISO 8601 格式时间，便于人类阅读
+- `token_id`: Token 的数据库 ID，用于 `token_id` 过滤
+- `token_key`: **完整的Token密钥**，便于平台方匹配识别
+- `quota_cost`: 本次请求消耗的 quota（$1 = 500,000 quota）
+
+**增量拉取（settle 场景）**：
+- 使用 `after_id` 参数传入上次处理的最大 `log_id`
+- 响应自动按 `id ASC` 排序（从旧到新）
+- 处理完毕后记录本批次最大 `log_id` 作为下次的 `after_id`
+- 天然幂等，不会重复 settle
+
+**日志写入时机**：
+- 日志是**同步写入**的，在 HTTP 响应返回之前已落库
+- 收到 chat/completions 响应后立即查询即可获取到对应日志
+- 不需要 retry 或等待
       "total_completion_tokens": 200,
       "total_tokens": 550,
       "total_quota_consumed": 2110,

@@ -677,6 +677,8 @@ func GetExternalUserLogs(c *gin.Context) {
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
 	modelName := c.Query("model_name")
+	tokenIdStr := c.Query("token_id")
+	afterIdStr := c.Query("after_id")
 
 	if page <= 0 {
 		page = 1
@@ -702,6 +704,16 @@ func GetExternalUserLogs(c *gin.Context) {
 
 	tx := model.LOG_DB.Where("user_id = ? AND (type = ? OR type = ? OR type = ?)",
 		user.Id, model.LogTypeConsume, model.LogTypeTopup, model.LogTypeManage)
+	if tokenIdStr != "" {
+		if tokenId, err := strconv.Atoi(tokenIdStr); err == nil && tokenId > 0 {
+			tx = tx.Where("token_id = ?", tokenId)
+		}
+	}
+	if afterIdStr != "" {
+		if afterId, err := strconv.Atoi(afterIdStr); err == nil && afterId > 0 {
+			tx = tx.Where("id > ?", afterId)
+		}
+	}
 	if modelName != "" {
 		tx = tx.Where("model_name LIKE ?", "%"+modelName+"%")
 	}
@@ -720,7 +732,11 @@ func GetExternalUserLogs(c *gin.Context) {
 
 	var logs []*model.Log
 	offset := (page - 1) * pageSize
-	if err := tx.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&logs).Error; err != nil {
+	orderClause := "created_at DESC"
+	if afterIdStr != "" {
+		orderClause = "id ASC"
+	}
+	if err := tx.Order(orderClause).Offset(offset).Limit(pageSize).Find(&logs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询失败"})
 		return
 	}
@@ -757,15 +773,20 @@ func GetExternalUserLogs(c *gin.Context) {
 		}
 
 		logItems = append(logItems, gin.H{
-			"time":       time.Unix(log.CreatedAt, 0).Format("2006-01-02 15:04:05"),
-			"username":   log.Username,
-			"token_key":  tokenKey,
-			"token_name": tokenName,
-			"token_id":   tokenId,
-			"tokens":     tokens,
-			"type":       logType,
-			"model":      log.ModelName,
-			"spend":      spend,
+			"log_id":      log.Id,
+			"request_id":  log.RequestId,
+			"time":        time.Unix(log.CreatedAt, 0).Format("2006-01-02 15:04:05"),
+			"created_at":  log.CreatedAt,
+			"username":    log.Username,
+			"token_key":   tokenKey,
+			"token_name":  tokenName,
+			"token_id":    tokenId,
+			"tokens":      tokens,
+			"prompt_tokens":     log.PromptTokens,
+			"completion_tokens": log.CompletionTokens,
+			"type":        logType,
+			"model":       log.ModelName,
+			"spend":       spend,
 		})
 	}
 
