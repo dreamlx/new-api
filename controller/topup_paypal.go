@@ -55,14 +55,18 @@ func RequestPayPalTopUp(c *gin.Context) {
 	reference := fmt.Sprintf("paypal-topup-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "paypal_" + common.Sha1([]byte(reference))
 
-	// 计算金额
-	money := float64(req.Amount) / float64(common.QuotaPerUnit)
+	money := getPayMoney(req.Amount, user.Group)
+	moneyStr := fmt.Sprintf("%.2f", money)
+	if moneyStr == "0.00" || money <= 0 {
+		common.ApiErrorMsg(c, "充值金额过小，最低 $0.01")
+		return
+	}
 
 	// 创建 PayPal 订单
 	returnUrl := system_setting.ServerAddress + "/console/log"
 	cancelUrl := system_setting.ServerAddress + "/console/topup"
 
-	payLink, err := service.CreatePayPalOrder(referenceId, fmt.Sprintf("%.2f", money), "USD", returnUrl, cancelUrl)
+	payLink, err := service.CreatePayPalOrder(referenceId, moneyStr, "USD", returnUrl, cancelUrl)
 	if err != nil {
 		log.Println("创建 PayPal 订单失败:", err)
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("创建 PayPal 订单失败: %v", err)})

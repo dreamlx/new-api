@@ -267,9 +267,9 @@ func ManualCompleteTopUp(tradeNo string) error {
 		}
 
 		// 计算应充值额度：
-		// - Stripe 订单：Money 代表经分组倍率换算后的美元数量，直接 * QuotaPerUnit
-		// - 其他订单（如易支付）：Amount 为美元数量，* QuotaPerUnit
-		if topUp.PaymentMethod == "stripe" {
+		// - Stripe / PayPal：Money 已经过 getPayMoney 换算为 USD，直接 * QuotaPerUnit
+		// - 其他订单（如易支付）：Amount 为金额单位，* QuotaPerUnit
+		if topUp.PaymentMethod == "stripe" || topUp.PaymentMethod == "paypal" {
 			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 			quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(dQuotaPerUnit).IntPart())
 		} else {

@@ -157,16 +157,20 @@ func CreatePayPalOrder(referenceId, amount, currency, returnUrl, cancelUrl strin
 		return "", fmt.Errorf("解析响应失败: %w", err)
 	}
 
-	if httpResp.StatusCode != http.StatusCreated {
+	// PayPal 返回 201 (CREATED) 或 200 (PAYER_ACTION_REQUIRED) 均为成功
+	if httpResp.StatusCode != http.StatusCreated && httpResp.StatusCode != http.StatusOK {
 		if len(resp.Details) > 0 {
 			return "", fmt.Errorf("PayPal API 错误: %s - %s", resp.Details[0].Issue, resp.Details[0].Description)
 		}
-		return "", fmt.Errorf("PayPal API 错误: %s", resp.Message)
+		if resp.Message != "" {
+			return "", fmt.Errorf("PayPal API 错误: %s", resp.Message)
+		}
+		return "", fmt.Errorf("PayPal API 错误 (HTTP %d): %s", httpResp.StatusCode, string(respBody))
 	}
 
-	// 找到 approve 链接
+	// payment_source 模式返回 "payer-action"，基础模式返回 "approve"
 	for _, link := range resp.Links {
-		if link.Rel == "approve" {
+		if link.Rel == "payer-action" || link.Rel == "approve" {
 			return link.Href, nil
 		}
 	}
