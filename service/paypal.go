@@ -56,8 +56,9 @@ type PayPalPayerInfo struct {
 }
 
 type PayPalExperienceContext struct {
-	ReturnUrl string `json:"return_url"`
-	CancelUrl string `json:"cancel_url"`
+	ReturnUrl  string `json:"return_url"`
+	CancelUrl  string `json:"cancel_url"`
+	UserAction string `json:"user_action,omitempty"`
 }
 
 type PayPalApplicationContext struct {
@@ -71,11 +72,11 @@ type PayPalApplicationContext struct {
 
 // PayPalCreateOrderResponse 创建订单响应
 type PayPalCreateOrderResponse struct {
-	Id     string                      `json:"id"`
-	Status string                      `json:"status"`
-	Links  []PayPalLink                `json:"links"`
-	Detail *PayPalErrorDetail          `json:"details,omitempty"`
-	Message string                     `json:"message,omitempty"`
+	Id      string               `json:"id"`
+	Status  string               `json:"status"`
+	Links   []PayPalLink         `json:"links"`
+	Details []PayPalErrorDetail  `json:"details,omitempty"`
+	Message string               `json:"message,omitempty"`
 }
 
 type PayPalLink struct {
@@ -101,7 +102,7 @@ func CreatePayPalOrder(referenceId, amount, currency, returnUrl, cancelUrl strin
 		return "", fmt.Errorf("获取 PayPal token 失败: %w", err)
 	}
 
-	// 创建订单
+	// 创建订单（使用 payment_source，不能同时使用已废弃的 application_context）
 	req := PayPalCreateOrderRequest{
 		Intent: "CAPTURE",
 		PurchaseUnits: []PayPalPurchaseUnit{
@@ -117,15 +118,11 @@ func CreatePayPalOrder(referenceId, amount, currency, returnUrl, cancelUrl strin
 		PaymentSource: &PayPalPaymentSource{
 			Paypal: &PayPalPayerInfo{
 				ExperienceContext: &PayPalExperienceContext{
-					ReturnUrl: returnUrl,
-					CancelUrl: cancelUrl,
+					ReturnUrl:  returnUrl,
+					CancelUrl:  cancelUrl,
+					UserAction: "PAY_NOW",
 				},
 			},
-		},
-		ApplicationContext: &PayPalApplicationContext{
-			UserAction: "PAY_NOW",
-			ReturnUrl:  returnUrl,
-			CancelUrl:  cancelUrl,
 		},
 	}
 
@@ -161,8 +158,8 @@ func CreatePayPalOrder(referenceId, amount, currency, returnUrl, cancelUrl strin
 	}
 
 	if httpResp.StatusCode != http.StatusCreated {
-		if resp.Detail != nil {
-			return "", fmt.Errorf("PayPal API 错误: %s - %s", resp.Detail.Issue, resp.Detail.Description)
+		if len(resp.Details) > 0 {
+			return "", fmt.Errorf("PayPal API 错误: %s - %s", resp.Details[0].Issue, resp.Details[0].Description)
 		}
 		return "", fmt.Errorf("PayPal API 错误: %s", resp.Message)
 	}
@@ -223,8 +220,8 @@ type PayPalCaptureResponse struct {
 	Id     string                     `json:"id"`
 	Status string                     `json:"status"`
 	PurchaseUnits []PayPalCapturedUnit `json:"purchase_units,omitempty"`
-	Message string                     `json:"message,omitempty"`
-	Details *PayPalErrorDetail         `json:"details,omitempty"`
+	Message       string               `json:"message,omitempty"`
+	Details       []PayPalErrorDetail  `json:"details,omitempty"`
 }
 
 type PayPalCapturedUnit struct {
@@ -279,8 +276,8 @@ func CapturePayPalOrder(orderID string) (*PayPalCaptureResponse, error) {
 	}
 
 	if httpResp.StatusCode != http.StatusCreated && httpResp.StatusCode != http.StatusOK {
-		if resp.Details != nil {
-			return nil, fmt.Errorf("PayPal API 错误: %s - %s", resp.Details.Issue, resp.Details.Description)
+		if len(resp.Details) > 0 {
+			return nil, fmt.Errorf("PayPal API 错误: %s - %s", resp.Details[0].Issue, resp.Details[0].Description)
 		}
 		return nil, fmt.Errorf("PayPal API 错误: %s", resp.Message)
 	}
