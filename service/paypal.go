@@ -5,7 +5,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,16 +29,17 @@ func getPayPalURL() string {
 
 // PayPalCreateOrderRequest 创建订单请求
 type PayPalCreateOrderRequest struct {
-	Intent              string                    `json:"intent"`
-	PurchaseUnits       []PayPalPurchaseUnit      `json:"purchase_units"`
-	PaymentSource       *PayPalPaymentSource      `json:"payment_source,omitempty"`
-	ApplicationContext  *PayPalApplicationContext `json:"application_context,omitempty"`
+	Intent             string                    `json:"intent"`
+	PurchaseUnits      []PayPalPurchaseUnit      `json:"purchase_units"`
+	PaymentSource      *PayPalPaymentSource      `json:"payment_source,omitempty"`
+	ApplicationContext *PayPalApplicationContext `json:"application_context,omitempty"`
 }
 
 type PayPalPurchaseUnit struct {
-	ReferenceId string                `json:"reference_id"`
-	Amount      PayPalAmount          `json:"amount"`
-	Description string                `json:"description,omitempty"`
+	ReferenceId string       `json:"reference_id"`
+	InvoiceId   string       `json:"invoice_id,omitempty"`
+	Amount      PayPalAmount `json:"amount"`
+	Description string       `json:"description,omitempty"`
 }
 
 type PayPalAmount struct {
@@ -62,21 +62,21 @@ type PayPalExperienceContext struct {
 }
 
 type PayPalApplicationContext struct {
-	BrandName      string `json:"brand_name,omitempty"`
-	UserAction     string `json:"user_action,omitempty"`
-	ReturnUrl      string `json:"return_url"`
-	CancelUrl      string `json:"cancel_url"`
-	NoticeUrl      string `json:"notify_url,omitempty"`
-	LocaleCode     string `json:"locale_code,omitempty"`
+	BrandName  string `json:"brand_name,omitempty"`
+	UserAction string `json:"user_action,omitempty"`
+	ReturnUrl  string `json:"return_url"`
+	CancelUrl  string `json:"cancel_url"`
+	NoticeUrl  string `json:"notify_url,omitempty"`
+	LocaleCode string `json:"locale_code,omitempty"`
 }
 
 // PayPalCreateOrderResponse 创建订单响应
 type PayPalCreateOrderResponse struct {
-	Id      string               `json:"id"`
-	Status  string               `json:"status"`
-	Links   []PayPalLink         `json:"links"`
-	Details []PayPalErrorDetail  `json:"details,omitempty"`
-	Message string               `json:"message,omitempty"`
+	Id      string              `json:"id"`
+	Status  string              `json:"status"`
+	Links   []PayPalLink        `json:"links"`
+	Details []PayPalErrorDetail `json:"details,omitempty"`
+	Message string              `json:"message,omitempty"`
 }
 
 type PayPalLink struct {
@@ -108,6 +108,7 @@ func CreatePayPalOrder(referenceId, amount, currency, returnUrl, cancelUrl strin
 		PurchaseUnits: []PayPalPurchaseUnit{
 			{
 				ReferenceId: referenceId,
+				InvoiceId:   referenceId,
 				Amount: PayPalAmount{
 					CurrencyCode: currency,
 					Value:        amount,
@@ -207,7 +208,7 @@ func getPayPalAccessToken() (string, error) {
 	}
 
 	var tokenResp map[string]interface{}
-	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
+	if err := common.Unmarshal(respBody, &tokenResp); err != nil {
 		return "", fmt.Errorf("解析响应失败: %w (响应: %s)", err, string(respBody))
 	}
 
@@ -221,16 +222,17 @@ func getPayPalAccessToken() (string, error) {
 
 // CapturePayPalOrder 捕获 PayPal 订单（完成支付）
 type PayPalCaptureResponse struct {
-	Id     string                     `json:"id"`
-	Status string                     `json:"status"`
+	Id            string               `json:"id"`
+	Status        string               `json:"status"`
 	PurchaseUnits []PayPalCapturedUnit `json:"purchase_units,omitempty"`
 	Message       string               `json:"message,omitempty"`
 	Details       []PayPalErrorDetail  `json:"details,omitempty"`
 }
 
 type PayPalCapturedUnit struct {
-	ReferenceId string                    `json:"reference_id"`
-	Payments    *PayPalCapturedPayments   `json:"payments,omitempty"`
+	ReferenceId string                  `json:"reference_id"`
+	InvoiceId   string                  `json:"invoice_id,omitempty"`
+	Payments    *PayPalCapturedPayments `json:"payments,omitempty"`
 }
 
 type PayPalCapturedPayments struct {
@@ -238,8 +240,8 @@ type PayPalCapturedPayments struct {
 }
 
 type PayPalCapture struct {
-	Id     string `json:"id"`
-	Status string `json:"status"`
+	Id     string       `json:"id"`
+	Status string       `json:"status"`
 	Amount PayPalAmount `json:"amount"`
 }
 
@@ -261,6 +263,7 @@ func CapturePayPalOrder(orderID string) (*PayPalCaptureResponse, error) {
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	httpReq.Header.Set("Prefer", "return=representation")
 
 	client := &http.Client{}
 	httpResp, err := client.Do(httpReq)
