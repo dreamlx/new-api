@@ -110,6 +110,9 @@ func WisemodelBind(c *gin.Context) {
 			_ = model.DisableTokenByKey(user.WisemodelKey)
 		}
 
+		if user.AffCode == "" {
+			user.AffCode = common.GetRandomString(4)
+		}
 		user.WisemodelKey = req.WisemodelKey
 		err := model.DB.Save(user).Error
 		if err != nil {
@@ -166,6 +169,9 @@ func DeleteWisemodelKey(c *gin.Context) {
 	}
 
 	// 清空wisemodel_key
+	if user.AffCode == "" {
+		user.AffCode = common.GetRandomString(4)
+	}
 	user.WisemodelKey = ""
 	err := model.DB.Save(user).Error
 	if err != nil {
@@ -213,6 +219,9 @@ func UpdateWisemodelKey(c *gin.Context) {
 	}
 
 	// 更新wisemodel_key
+	if user.AffCode == "" {
+		user.AffCode = common.GetRandomString(4)
+	}
 	user.WisemodelKey = req.NewKey
 	err := model.DB.Save(user).Error
 	if err != nil {
@@ -275,6 +284,9 @@ func UpdatePhone(c *gin.Context) {
 	}
 
 	// 更新手机号
+	if user.AffCode == "" {
+		user.AffCode = common.GetRandomString(4)
+	}
 	user.Phone = req.NewPhone
 	err := model.DB.Save(user).Error
 	if err != nil {
@@ -349,6 +361,9 @@ func DeleteWisemodelUser(c *gin.Context) {
 	}
 
 	// 清空wisemodel相关字段
+	if user.AffCode == "" {
+		user.AffCode = common.GetRandomString(4)
+	}
 	user.WisemodelKey = ""
 	err = model.DB.Save(user).Error
 	if err != nil {

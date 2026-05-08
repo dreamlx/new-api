@@ -423,7 +423,6 @@ func (user *User) Insert(inviterId int) error {
 	}
 	user.Quota = common.QuotaForNewUser
 	//user.SetAccessToken(common.GetUUID())
-	user.AffCode = common.GetRandomString(4)
 
 	// 初始化用户设置，包括默认的边栏配置
 	if user.Setting == "" {
@@ -432,9 +431,22 @@ func (user *User) Insert(inviterId int) error {
 		user.SetSetting(defaultSetting)
 	}
 
-	result := DB.Create(user)
-	if result.Error != nil {
+	var insertErr error
+	for i := 0; i < 5; i++ {
+		user.AffCode = common.GetRandomString(4)
+		result := DB.Create(user)
+		if result.Error == nil {
+			insertErr = nil
+			break
+		}
+		if isAffCodeDuplicate(result.Error) {
+			insertErr = result.Error
+			continue
+		}
 		return result.Error
+	}
+	if insertErr != nil {
+		return insertErr
 	}
 
 	// 用户创建成功后，根据角色初始化边栏配置
@@ -481,7 +493,6 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 		}
 	}
 	user.Quota = common.QuotaForNewUser
-	user.AffCode = common.GetRandomString(4)
 
 	// 初始化用户设置
 	if user.Setting == "" {
@@ -489,9 +500,22 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 		user.SetSetting(defaultSetting)
 	}
 
-	result := tx.Create(user)
-	if result.Error != nil {
+	var insertErr error
+	for i := 0; i < 5; i++ {
+		user.AffCode = common.GetRandomString(4)
+		result := tx.Create(user)
+		if result.Error == nil {
+			insertErr = nil
+			break
+		}
+		if isAffCodeDuplicate(result.Error) {
+			insertErr = result.Error
+			continue
+		}
 		return result.Error
+	}
+	if insertErr != nil {
+		return insertErr
 	}
 
 	return nil
@@ -1073,4 +1097,13 @@ func RootUserExists() bool {
 		return false
 	}
 	return true
+}
+
+func isAffCodeDuplicate(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "aff_code") &&
+		(strings.Contains(msg, "Duplicate entry") || strings.Contains(msg, "UNIQUE constraint failed") || strings.Contains(msg, "duplicate key"))
 }

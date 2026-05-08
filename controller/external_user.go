@@ -137,6 +137,8 @@ func SyncExternalUser(c *gin.Context) {
 	}
 	if req.AffCode != "" {
 		user.AffCode = req.AffCode
+	} else {
+		user.AffCode = common.GetRandomString(4)
 	}
 
 	if err := model.DB.Create(user).Error; err != nil {
