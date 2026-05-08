@@ -344,7 +344,11 @@ func ExtractPayPalReferenceID(payload []byte) (string, error) {
 	if resource, ok := data["resource"].(map[string]interface{}); ok {
 		if purchaseUnits, ok := resource["purchase_units"].([]interface{}); ok && len(purchaseUnits) > 0 {
 			if pu, ok := purchaseUnits[0].(map[string]interface{}); ok {
-				if refId, ok := pu["reference_id"].(string); ok {
+				// PayPal overwrites reference_id with "DEFAULT" for single-unit orders; invoice_id is preserved.
+				if invoiceId, ok := pu["invoice_id"].(string); ok && invoiceId != "" {
+					return invoiceId, nil
+				}
+				if refId, ok := pu["reference_id"].(string); ok && refId != "" && refId != "DEFAULT" {
 					return refId, nil
 				}
 			}

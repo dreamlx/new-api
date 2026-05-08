@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -192,6 +193,10 @@ func PayPalReturn(c *gin.Context) {
 	resp, err := payPalCaptureOrder(orderID)
 	if err != nil {
 		log.Printf("PayPal return 捕获订单失败: paypal_order_id=%s err=%v\n", orderID, err)
+		if strings.Contains(err.Error(), "ORDER_ALREADY_CAPTURED") {
+			redirectPayPalReturn(c, "success")
+			return
+		}
 		redirectPayPalReturn(c, "pending")
 		return
 	}
@@ -292,11 +297,12 @@ func extractPayPalCaptureResponseData(resp *service.PayPalCaptureResponse) (stri
 		return "", 0, "", fmt.Errorf("capture response missing purchase_units")
 	}
 	unit := resp.PurchaseUnits[0]
-	referenceID := unit.ReferenceId
+	// PayPal overwrites reference_id with "DEFAULT" for single-unit orders; invoice_id is preserved.
+	referenceID := unit.InvoiceId
 	if referenceID == "" {
-		referenceID = unit.InvoiceId
+		referenceID = unit.ReferenceId
 	}
-	if referenceID == "" {
+	if referenceID == "" || referenceID == "DEFAULT" {
 		return "", 0, "", fmt.Errorf("capture response missing reference_id")
 	}
 	if unit.Payments == nil || len(unit.Payments.Captures) == 0 {

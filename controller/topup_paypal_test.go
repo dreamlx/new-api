@@ -201,6 +201,39 @@ func TestPayPalCheckoutOrderCompletedWebhookKeepsOrderPayloadSupport(t *testing.
 	require.Equal(t, 100+int(2*common.QuotaPerUnit), user.Quota)
 }
 
+func TestPayPalCheckoutOrderCompletedWebhookUsesInvoiceIdWhenReferenceIdIsDefault(t *testing.T) {
+	db := setupPayPalControllerTestDB(t)
+	seedPayPalTopUp(t, db, "paypal_ref_invoice_default")
+
+	body := `{
+		"event_type": "CHECKOUT.ORDER.COMPLETED",
+		"resource": {
+			"id": "PAYPAL_ORDER_DEFAULT",
+			"purchase_units": [{
+				"reference_id": "DEFAULT",
+				"invoice_id": "paypal_ref_invoice_default",
+				"payments": {
+					"captures": [{
+						"id": "CAPTURE_DEFAULT",
+						"status": "COMPLETED",
+						"amount": {
+							"currency_code": "USD",
+							"value": "2.00"
+						}
+					}]
+				}
+			}]
+		}
+	}`
+
+	recorder := postPayPalWebhook(t, body)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var topUp model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", "paypal_ref_invoice_default").First(&topUp).Error)
+	require.Equal(t, common.TopUpStatusSuccess, topUp.Status)
+}
+
 func TestPayPalReturnCapturesOrderAndRedirectsSuccess(t *testing.T) {
 	db := setupPayPalControllerTestDB(t)
 	seedPayPalTopUp(t, db, "paypal_ref_return")
@@ -246,6 +279,52 @@ func TestPayPalReturnCapturesOrderAndRedirectsSuccess(t *testing.T) {
 
 	var topUp model.TopUp
 	require.NoError(t, db.Where("trade_no = ?", "paypal_ref_return").First(&topUp).Error)
+	require.Equal(t, common.TopUpStatusSuccess, topUp.Status)
+}
+
+func TestPayPalReturnCaptureUsesInvoiceIdWhenReferenceIdIsDefault(t *testing.T) {
+	db := setupPayPalControllerTestDB(t)
+	seedPayPalTopUp(t, db, "paypal_ref_return_default")
+
+	originalCapture := payPalCaptureOrder
+	payPalCaptureOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		require.Equal(t, "PAYPAL_ORDER_RETURN_DEFAULT", orderID)
+		return &service.PayPalCaptureResponse{
+			Id:     "PAYPAL_ORDER_RETURN_DEFAULT",
+			Status: "COMPLETED",
+			PurchaseUnits: []service.PayPalCapturedUnit{
+				{
+					ReferenceId: "DEFAULT",
+					InvoiceId:   "paypal_ref_return_default",
+					Payments: &service.PayPalCapturedPayments{
+						Captures: []service.PayPalCapture{
+							{
+								Id:     "CAPTURE_RETURN_DEFAULT",
+								Status: "COMPLETED",
+								Amount: service.PayPalAmount{
+									CurrencyCode: "USD",
+									Value:        "2.00",
+								},
+							},
+						},
+					},
+				},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { payPalCaptureOrder = originalCapture })
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/paypal/return?token=PAYPAL_ORDER_RETURN_DEFAULT", nil)
+
+	PayPalReturn(ctx)
+
+	require.Equal(t, http.StatusFound, recorder.Code)
+	require.Equal(t, "http://localhost:3000/console/topup?pay=success&show_history=true", recorder.Header().Get("Location"))
+
+	var topUp model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", "paypal_ref_return_default").First(&topUp).Error)
 	require.Equal(t, common.TopUpStatusSuccess, topUp.Status)
 }
 
