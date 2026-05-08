@@ -592,9 +592,23 @@ const TopUp = () => {
 
   // URL 参数自动打开账单弹窗（支付回跳时触发）
   useEffect(() => {
-    if (searchParams.get('show_history') === 'true') {
+    const shouldShowHistory = searchParams.get('show_history') === 'true';
+    const payStatus = searchParams.get('pay');
+    if (payStatus === 'success') {
+      showSuccess(t('支付成功，到账状态请以账单记录为准'));
+      getUserQuota().then();
+    } else if (payStatus === 'pending') {
+      showInfo(t('支付处理中，正在等待支付平台确认'));
+      getUserQuota().then();
+    } else if (payStatus === 'fail') {
+      showError(t('支付确认失败，请稍后查看账单或联系管理员'));
+    }
+    if (shouldShowHistory) {
       setOpenHistory(true);
+    }
+    if (shouldShowHistory || payStatus) {
       searchParams.delete('show_history');
+      searchParams.delete('pay');
       setSearchParams(searchParams, { replace: true });
     }
   }, []);

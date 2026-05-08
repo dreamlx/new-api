@@ -66,15 +66,17 @@ func RequestPayPalTopUp(c *gin.Context) {
 	}
 
 	// 创建 PayPal 订单
-	returnUrl := system_setting.ServerAddress + "/console/log"
+	returnUrl := system_setting.ServerAddress + "/api/paypal/return"
 	cancelUrl := system_setting.ServerAddress + "/console/topup"
+	log.Printf("PayPal 创建订单开始: user_id=%d trade_no=%s amount=%d money=%s currency=USD return_url=%s cancel_url=%s\n", userId, referenceId, req.Amount, moneyStr, returnUrl, cancelUrl)
 
 	payLink, err := service.CreatePayPalOrder(referenceId, moneyStr, "USD", returnUrl, cancelUrl)
 	if err != nil {
-		log.Println("创建 PayPal 订单失败:", err)
+		log.Printf("创建 PayPal 订单失败: user_id=%d trade_no=%s err=%v\n", userId, referenceId, err)
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("创建 PayPal 订单失败: %v", err)})
 		return
 	}
+	log.Printf("PayPal 平台订单创建成功: user_id=%d trade_no=%s\n", userId, referenceId)
 
 	// 创建本地充值记录
 	order := &model.TopUp{
@@ -87,9 +89,11 @@ func RequestPayPalTopUp(c *gin.Context) {
 		Status:        common.TopUpStatusPending,
 	}
 	if err := order.Insert(); err != nil {
+		log.Printf("创建 PayPal 本地充值订单失败: user_id=%d trade_no=%s err=%v\n", userId, referenceId, err)
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
 		return
 	}
+	log.Printf("PayPal 本地充值订单创建成功: user_id=%d trade_no=%s topup_id=%d status=%s\n", userId, referenceId, order.Id, order.Status)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success",
@@ -125,6 +129,7 @@ func PayPalWebhook(c *gin.Context) {
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
+	log.Printf("PayPal webhook 收到事件: event=%s payload_size=%d\n", eventType, len(payload))
 
 	switch eventType {
 	case "CHECKOUT.ORDER.COMPLETED":
@@ -138,33 +143,71 @@ func PayPalWebhook(c *gin.Context) {
 			log.Printf("解析 PayPal 订单完成金额失败: %v\n", err)
 			break
 		}
-		completePayPalOrder(referenceID, amount, currency, "CHECKOUT.ORDER.COMPLETED")
+		log.Printf("PayPal webhook 订单完成: event=%s trade_no=%s amount=%.2f currency=%s\n", eventType, referenceID, amount, currency)
+		if err := completePayPalOrder(referenceID, amount, currency, "CHECKOUT.ORDER.COMPLETED"); err != nil {
+			log.Printf("完成 PayPal 订单失败: event=%s trade_no=%s err=%v\n", eventType, referenceID, err)
+		}
 	case "PAYMENT.CAPTURE.COMPLETED":
 		referenceID, amount, currency, err := extractPayPalCaptureCompletedData(payload)
 		if err != nil {
 			log.Printf("解析 PayPal 支付完成数据失败: %v\n", err)
 			break
 		}
-		completePayPalOrder(referenceID, amount, currency, "PAYMENT.CAPTURE.COMPLETED")
+		log.Printf("PayPal webhook 捕获完成: event=%s trade_no=%s amount=%.2f currency=%s\n", eventType, referenceID, amount, currency)
+		if err := completePayPalOrder(referenceID, amount, currency, "PAYMENT.CAPTURE.COMPLETED"); err != nil {
+			log.Printf("完成 PayPal 订单失败: event=%s trade_no=%s err=%v\n", eventType, referenceID, err)
+		}
 	case "CHECKOUT.ORDER.APPROVED":
 		orderID, err := service.ExtractPayPalOrderID(payload)
 		if err != nil {
 			log.Printf("提取 PayPal 订单 ID 失败: %v\n", err)
 			break
 		}
+		log.Printf("PayPal webhook 订单已批准，开始捕获: event=%s paypal_order_id=%s\n", eventType, orderID)
 		resp, err := payPalCaptureOrder(orderID)
 		if err != nil {
-			log.Printf("捕获 PayPal 订单失败: %v\n", err)
+			log.Printf("捕获 PayPal 订单失败: event=%s paypal_order_id=%s err=%v\n", eventType, orderID, err)
 			break
 		}
 		if err := handlePayPalCaptureResponse(resp); err != nil {
-			log.Printf("处理 PayPal 捕获结果失败: %v\n", err)
+			log.Printf("处理 PayPal 捕获结果失败: event=%s paypal_order_id=%s err=%v\n", eventType, orderID, err)
 		}
 	default:
 		log.Printf("不支持的 PayPal Webhook 事件类型: %s\n", eventType)
 	}
 
 	c.Status(http.StatusOK)
+}
+
+func PayPalReturn(c *gin.Context) {
+	orderID := c.Query("token")
+	payerID := c.Query("PayerID")
+	if orderID == "" {
+		log.Printf("PayPal return 缺少 token: payer_id=%s\n", payerID)
+		redirectPayPalReturn(c, "fail")
+		return
+	}
+	log.Printf("PayPal return 收到回跳: paypal_order_id=%s payer_id=%s\n", orderID, payerID)
+
+	resp, err := payPalCaptureOrder(orderID)
+	if err != nil {
+		log.Printf("PayPal return 捕获订单失败: paypal_order_id=%s err=%v\n", orderID, err)
+		redirectPayPalReturn(c, "pending")
+		return
+	}
+	if err := handlePayPalCaptureResponse(resp); err != nil {
+		log.Printf("PayPal return 处理捕获结果失败: paypal_order_id=%s err=%v\n", orderID, err)
+		redirectPayPalReturn(c, "pending")
+		return
+	}
+
+	redirectPayPalReturn(c, "success")
+}
+
+func redirectPayPalReturn(c *gin.Context, status string) {
+	target := system_setting.ServerAddress + "/console/topup?pay=" + status + "&show_history=true"
+	log.Printf("PayPal return 重定向: status=%s target=%s\n", status, target)
+	c.Redirect(http.StatusFound, target)
 }
 
 func handlePayPalCaptureResponse(resp *service.PayPalCaptureResponse) error {
@@ -179,14 +222,15 @@ func handlePayPalCaptureResponse(resp *service.PayPalCaptureResponse) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("PayPal capture 响应解析成功: paypal_order_id=%s status=%s trade_no=%s amount=%.2f currency=%s\n", resp.Id, resp.Status, referenceID, amount, currency)
 
-	completePayPalOrder(referenceID, amount, currency, "PAYPAL_ORDER_CAPTURE")
-	return nil
+	return completePayPalOrder(referenceID, amount, currency, "PAYPAL_ORDER_CAPTURE")
 }
 
-func completePayPalOrder(referenceID string, amount float64, currency string, event string) {
+func completePayPalOrder(referenceID string, amount float64, currency string, event string) error {
 	LockOrder(referenceID)
 	defer UnlockOrder(referenceID)
+	log.Printf("PayPal 本地订单完成开始: trade_no=%s event=%s amount=%.2f currency=%s\n", referenceID, event, amount, currency)
 
 	payloadStr := common.GetJsonString(map[string]interface{}{
 		"amount":   amount,
@@ -196,32 +240,37 @@ func completePayPalOrder(referenceID string, amount float64, currency string, ev
 
 	// 尝试完成订阅订单（如果存在）
 	if err := model.CompleteSubscriptionOrder(referenceID, payloadStr); err == nil {
-		return
+		log.Printf("PayPal 订阅订单完成成功: trade_no=%s event=%s\n", referenceID, event)
+		return nil
 	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
-		log.Println("完成订阅订单失败:", err.Error(), referenceID)
-		return
+		log.Printf("完成订阅订单失败: trade_no=%s event=%s err=%v\n", referenceID, event, err)
+		return err
 	}
 
 	topUp := model.GetTopUpByTradeNo(referenceID)
 	if topUp == nil {
-		log.Println("PayPal 充值订单不存在:", referenceID)
-		return
+		err := fmt.Errorf("PayPal 充值订单不存在: %s", referenceID)
+		log.Println(err)
+		return err
 	}
+	log.Printf("PayPal 本地充值订单命中: trade_no=%s topup_id=%d user_id=%d status=%s\n", referenceID, topUp.Id, topUp.UserId, topUp.Status)
 	if topUp.Status == common.TopUpStatusSuccess {
-		log.Println("PayPal 订单已完成，忽略重复通知:", referenceID)
-		return
+		log.Printf("PayPal 订单已完成，忽略重复通知: trade_no=%s event=%s\n", referenceID, event)
+		return nil
 	}
 	if topUp.Status != common.TopUpStatusPending {
-		log.Println("PayPal 充值订单状态错误:", referenceID, topUp.Status)
-		return
+		err := fmt.Errorf("PayPal 充值订单状态错误: %s %s", referenceID, topUp.Status)
+		log.Println(err)
+		return err
 	}
 
 	if err := model.Recharge(referenceID, ""); err != nil {
 		log.Println("充值失败:", err.Error(), referenceID)
-		return
+		return err
 	}
 
-	log.Printf("PayPal 支付成功: %s, %.2f %s\n", referenceID, amount, currency)
+	log.Printf("PayPal 支付成功，本地充值完成: trade_no=%s topup_id=%d user_id=%d amount=%.2f currency=%s event=%s\n", referenceID, topUp.Id, topUp.UserId, amount, currency, event)
+	return nil
 }
 
 func extractPayPalEventType(payload []byte) (string, error) {

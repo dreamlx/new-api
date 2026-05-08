@@ -200,3 +200,104 @@ func TestPayPalCheckoutOrderCompletedWebhookKeepsOrderPayloadSupport(t *testing.
 	require.NoError(t, db.First(&user, 1).Error)
 	require.Equal(t, 100+int(2*common.QuotaPerUnit), user.Quota)
 }
+
+func TestPayPalReturnCapturesOrderAndRedirectsSuccess(t *testing.T) {
+	db := setupPayPalControllerTestDB(t)
+	seedPayPalTopUp(t, db, "paypal_ref_return")
+
+	captureCalls := 0
+	originalCapture := payPalCaptureOrder
+	payPalCaptureOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		captureCalls++
+		require.Equal(t, "PAYPAL_ORDER_RETURN", orderID)
+		return &service.PayPalCaptureResponse{
+			Id:     "PAYPAL_ORDER_RETURN",
+			Status: "COMPLETED",
+			PurchaseUnits: []service.PayPalCapturedUnit{
+				{
+					InvoiceId: "paypal_ref_return",
+					Payments: &service.PayPalCapturedPayments{
+						Captures: []service.PayPalCapture{
+							{
+								Id:     "CAPTURE_RETURN",
+								Status: "COMPLETED",
+								Amount: service.PayPalAmount{
+									CurrencyCode: "USD",
+									Value:        "2.00",
+								},
+							},
+						},
+					},
+				},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { payPalCaptureOrder = originalCapture })
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/paypal/return?token=PAYPAL_ORDER_RETURN&PayerID=PAYER_123", nil)
+
+	PayPalReturn(ctx)
+
+	require.Equal(t, http.StatusFound, recorder.Code)
+	require.Equal(t, "http://localhost:3000/console/topup?pay=success&show_history=true", recorder.Header().Get("Location"))
+	require.Equal(t, 1, captureCalls)
+
+	var topUp model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", "paypal_ref_return").First(&topUp).Error)
+	require.Equal(t, common.TopUpStatusSuccess, topUp.Status)
+}
+
+func TestPayPalReturnWithoutTokenRedirectsFail(t *testing.T) {
+	setupPayPalControllerTestDB(t)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/paypal/return", nil)
+
+	PayPalReturn(ctx)
+
+	require.Equal(t, http.StatusFound, recorder.Code)
+	require.Equal(t, "http://localhost:3000/console/topup?pay=fail&show_history=true", recorder.Header().Get("Location"))
+}
+
+func TestPayPalReturnUnknownLocalOrderRedirectsPending(t *testing.T) {
+	setupPayPalControllerTestDB(t)
+
+	originalCapture := payPalCaptureOrder
+	payPalCaptureOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		require.Equal(t, "PAYPAL_ORDER_UNKNOWN", orderID)
+		return &service.PayPalCaptureResponse{
+			Id:     "PAYPAL_ORDER_UNKNOWN",
+			Status: "COMPLETED",
+			PurchaseUnits: []service.PayPalCapturedUnit{
+				{
+					InvoiceId: "missing_paypal_ref",
+					Payments: &service.PayPalCapturedPayments{
+						Captures: []service.PayPalCapture{
+							{
+								Id:     "CAPTURE_UNKNOWN",
+								Status: "COMPLETED",
+								Amount: service.PayPalAmount{
+									CurrencyCode: "USD",
+									Value:        "2.00",
+								},
+							},
+						},
+					},
+				},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { payPalCaptureOrder = originalCapture })
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/paypal/return?token=PAYPAL_ORDER_UNKNOWN", nil)
+
+	PayPalReturn(ctx)
+
+	require.Equal(t, http.StatusFound, recorder.Code)
+	require.Equal(t, "http://localhost:3000/console/topup?pay=pending&show_history=true", recorder.Header().Get("Location"))
+}
