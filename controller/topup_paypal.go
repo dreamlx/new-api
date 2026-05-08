@@ -22,6 +22,15 @@ import (
 const PaymentMethodPayPal = "paypal"
 
 var payPalCaptureOrder = service.CapturePayPalOrder
+var payPalGetOrder = service.GetPayPalOrder
+
+type payPalCaptureInfo struct {
+	CaptureID      string
+	InvoiceID      string
+	RelatedOrderID string
+	Amount         float64
+	Currency       string
+}
 
 type PayPalTopUpRequest struct {
 	Amount int64 `json:"amount"`
@@ -112,73 +121,106 @@ func PayPalWebhook(c *gin.Context) {
 		return
 	}
 
-	// 验证签名（可选，PayPal 推荐使用）
-	transmissionID := c.GetHeader("Paypal-Transmission-Id")
-	transmissionTime := c.GetHeader("Paypal-Transmission-Time")
-	certURL := c.GetHeader("Paypal-Cert-Url")
-	signature := c.GetHeader("Paypal-Transmission-Sig")
-
-	// 注：这里简化了签名验证，生产环境应该使用完整的 PayPal 签名验证
-	_ = transmissionID
-	_ = transmissionTime
-	_ = certURL
-	_ = signature
+	eventID := c.GetHeader("Paypal-Transmission-Id")
+	// signature verification TODO: use PayPal verify-webhook-signature endpoint
+	_ = c.GetHeader("Paypal-Transmission-Time")
+	_ = c.GetHeader("Paypal-Cert-Url")
+	_ = c.GetHeader("Paypal-Transmission-Sig")
 
 	eventType, err := extractPayPalEventType(payload)
 	if err != nil {
-		log.Printf("解析 PayPal Webhook event_type 失败: err=%v payload_preview=%s\n", err, webhookPayloadPreview(payload))
+		log.Printf("PayPal webhook event_type 解析失败: event_id=%s err=%v payload_preview=%s\n", eventID, err, webhookPayloadPreview(payload))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
-	log.Printf("PayPal webhook 收到事件: event=%s payload_size=%d\n", eventType, len(payload))
+	log.Printf("PayPal webhook 收到事件: event_id=%s event=%s payload_size=%d\n", eventID, eventType, len(payload))
 
 	switch eventType {
+	case "PAYMENT.CAPTURE.COMPLETED":
+		info, err := extractPayPalCaptureCompletedData(payload)
+		if err != nil {
+			log.Printf("PayPal PAYMENT.CAPTURE.COMPLETED 解析失败: event_id=%s err=%v payload_preview=%s\n", eventID, err, webhookPayloadPreview(payload))
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
+
+		tradeNo := info.InvoiceID
+		if tradeNo == "" && info.RelatedOrderID != "" {
+			log.Printf("PayPal PAYMENT.CAPTURE.COMPLETED invoice_id 为空，尝试 GetOrder: event_id=%s capture_id=%s related_order_id=%s\n",
+				eventID, info.CaptureID, info.RelatedOrderID)
+			order, getErr := payPalGetOrder(info.RelatedOrderID)
+			if getErr != nil {
+				log.Printf("PayPal PAYMENT.CAPTURE.COMPLETED GetOrder 失败: event_id=%s capture_id=%s related_order_id=%s err=%v\n",
+					eventID, info.CaptureID, info.RelatedOrderID, getErr)
+				c.AbortWithStatus(http.StatusInternalServerError)
+				return
+			}
+			if len(order.PurchaseUnits) > 0 {
+				unit := order.PurchaseUnits[0]
+				tradeNo = unit.InvoiceId
+				if tradeNo == "" && unit.ReferenceId != "DEFAULT" {
+					tradeNo = unit.ReferenceId
+				}
+			}
+		}
+
+		log.Printf("PayPal PAYMENT.CAPTURE.COMPLETED: event_id=%s capture_id=%s invoice_id=%s related_order_id=%s resolved_trade_no=%s amount=%.2f currency=%s\n",
+			eventID, info.CaptureID, info.InvoiceID, info.RelatedOrderID, tradeNo, info.Amount, info.Currency)
+
+		if tradeNo == "" {
+			log.Printf("PayPal PAYMENT.CAPTURE.COMPLETED 无法解析 trade_no: event_id=%s capture_id=%s\n", eventID, info.CaptureID)
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if err := completePayPalOrder(tradeNo, info.Amount, info.Currency, "PAYMENT.CAPTURE.COMPLETED"); err != nil {
+			log.Printf("PayPal PAYMENT.CAPTURE.COMPLETED 完成订单失败: event_id=%s capture_id=%s trade_no=%s err=%v\n",
+				eventID, info.CaptureID, tradeNo, err)
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+
 	case "CHECKOUT.ORDER.COMPLETED":
 		referenceID, err := service.ExtractPayPalReferenceID(payload)
 		if err != nil {
-			log.Printf("解析 PayPal 订单完成 reference_id 失败: event=%s err=%v payload_preview=%s\n", eventType, err, webhookPayloadPreview(payload))
-			break
+			log.Printf("PayPal CHECKOUT.ORDER.COMPLETED reference_id 解析失败: event_id=%s err=%v payload_preview=%s\n", eventID, err, webhookPayloadPreview(payload))
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
 		}
 		amount, currency, err := service.ExtractPayPalAmount(payload)
 		if err != nil {
-			log.Printf("解析 PayPal 订单完成金额失败: event=%s trade_no=%s err=%v\n", eventType, referenceID, err)
-			break
+			log.Printf("PayPal CHECKOUT.ORDER.COMPLETED 金额解析失败: event_id=%s trade_no=%s err=%v\n", eventID, referenceID, err)
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
 		}
-		log.Printf("PayPal webhook 订单完成: event=%s trade_no=%s amount=%.2f currency=%s\n", eventType, referenceID, amount, currency)
+		log.Printf("PayPal CHECKOUT.ORDER.COMPLETED: event_id=%s trade_no=%s amount=%.2f currency=%s\n", eventID, referenceID, amount, currency)
 		if err := completePayPalOrder(referenceID, amount, currency, "CHECKOUT.ORDER.COMPLETED"); err != nil {
-			log.Printf("完成 PayPal 订单失败: event=%s trade_no=%s err=%v\n", eventType, referenceID, err)
+			log.Printf("PayPal CHECKOUT.ORDER.COMPLETED 完成订单失败: event_id=%s trade_no=%s err=%v\n", eventID, referenceID, err)
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
 		}
-	case "PAYMENT.CAPTURE.COMPLETED":
-		referenceID, amount, currency, err := extractPayPalCaptureCompletedData(payload)
-		if err != nil {
-			log.Printf("解析 PayPal 支付完成数据失败: event=%s err=%v payload_preview=%s\n", eventType, err, webhookPayloadPreview(payload))
-			break
-		}
-		log.Printf("PayPal webhook 捕获完成: event=%s trade_no=%s amount=%.2f currency=%s\n", eventType, referenceID, amount, currency)
-		if err := completePayPalOrder(referenceID, amount, currency, "PAYMENT.CAPTURE.COMPLETED"); err != nil {
-			log.Printf("完成 PayPal 订单失败: event=%s trade_no=%s err=%v\n", eventType, referenceID, err)
-		}
+
 	case "CHECKOUT.ORDER.APPROVED":
 		orderID, err := service.ExtractPayPalOrderID(payload)
 		if err != nil {
-			log.Printf("提取 PayPal 订单 ID 失败: event=%s err=%v payload_preview=%s\n", eventType, err, webhookPayloadPreview(payload))
+			log.Printf("PayPal CHECKOUT.ORDER.APPROVED 订单 ID 解析失败: event_id=%s err=%v payload_preview=%s\n", eventID, err, webhookPayloadPreview(payload))
 			break
 		}
-		log.Printf("PayPal webhook 订单已批准，开始捕获: event=%s paypal_order_id=%s\n", eventType, orderID)
+		log.Printf("PayPal CHECKOUT.ORDER.APPROVED 开始捕获: event_id=%s paypal_order_id=%s\n", eventID, orderID)
 		resp, err := payPalCaptureOrder(orderID)
 		if err != nil {
 			if strings.Contains(err.Error(), "ORDER_ALREADY_CAPTURED") {
-				log.Printf("PayPal webhook 订单已被捕获（return URL 已先行处理）: event=%s paypal_order_id=%s\n", eventType, orderID)
+				log.Printf("PayPal CHECKOUT.ORDER.APPROVED 订单已被捕获（return URL 先行处理）: event_id=%s paypal_order_id=%s\n", eventID, orderID)
 			} else {
-				log.Printf("捕获 PayPal 订单失败: event=%s paypal_order_id=%s err=%v\n", eventType, orderID, err)
+				log.Printf("PayPal CHECKOUT.ORDER.APPROVED 捕获失败: event_id=%s paypal_order_id=%s err=%v\n", eventID, orderID, err)
 			}
 			break
 		}
 		if err := handlePayPalCaptureResponse(resp); err != nil {
-			log.Printf("处理 PayPal 捕获结果失败: event=%s paypal_order_id=%s err=%v\n", eventType, orderID, err)
+			log.Printf("PayPal CHECKOUT.ORDER.APPROVED 处理捕获结果失败: event_id=%s paypal_order_id=%s err=%v\n", eventID, orderID, err)
 		}
+
 	default:
-		log.Printf("PayPal webhook 收到未处理的事件类型: event=%s payload_preview=%s\n", eventType, webhookPayloadPreview(payload))
+		log.Printf("PayPal webhook 未处理事件类型: event_id=%s event=%s\n", eventID, eventType)
 	}
 
 	c.Status(http.StatusOK)
@@ -198,6 +240,18 @@ func PayPalReturn(c *gin.Context) {
 	if err != nil {
 		log.Printf("PayPal return 捕获订单失败: paypal_order_id=%s err=%v\n", orderID, err)
 		if strings.Contains(err.Error(), "ORDER_ALREADY_CAPTURED") {
+			log.Printf("PayPal return 订单已被捕获，调用 GetOrder 确认本地状态: paypal_order_id=%s\n", orderID)
+			order, getErr := payPalGetOrder(orderID)
+			if getErr != nil {
+				log.Printf("PayPal return ORDER_ALREADY_CAPTURED GetOrder 失败: paypal_order_id=%s err=%v\n", orderID, getErr)
+				redirectPayPalReturn(c, "pending")
+				return
+			}
+			if handleErr := handlePayPalCaptureResponse(order); handleErr != nil {
+				log.Printf("PayPal return ORDER_ALREADY_CAPTURED 处理失败: paypal_order_id=%s err=%v\n", orderID, handleErr)
+				redirectPayPalReturn(c, "pending")
+				return
+			}
 			redirectPayPalReturn(c, "success")
 			return
 		}
@@ -323,32 +377,40 @@ func extractPayPalCaptureResponseData(resp *service.PayPalCaptureResponse) (stri
 	return referenceID, amount, capture.Amount.CurrencyCode, nil
 }
 
-func extractPayPalCaptureCompletedData(payload []byte) (string, float64, string, error) {
+func extractPayPalCaptureCompletedData(payload []byte) (*payPalCaptureInfo, error) {
 	var data map[string]interface{}
 	if err := common.Unmarshal(payload, &data); err != nil {
-		return "", 0, "", err
+		return nil, err
 	}
 
 	resource, ok := data["resource"].(map[string]interface{})
 	if !ok {
-		return "", 0, "", fmt.Errorf("unable to extract resource")
-	}
-	referenceID, _ := resource["invoice_id"].(string)
-	if referenceID == "" {
-		return "", 0, "", fmt.Errorf("unable to extract invoice_id")
-	}
-	amountData, ok := resource["amount"].(map[string]interface{})
-	if !ok {
-		return "", 0, "", fmt.Errorf("unable to extract amount")
-	}
-	valueStr, _ := amountData["value"].(string)
-	currency, _ := amountData["currency_code"].(string)
-	amount, err := strconv.ParseFloat(valueStr, 64)
-	if err != nil {
-		return "", 0, "", err
+		return nil, fmt.Errorf("unable to extract resource")
 	}
 
-	return referenceID, amount, currency, nil
+	info := &payPalCaptureInfo{}
+	info.CaptureID, _ = resource["id"].(string)
+	info.InvoiceID, _ = resource["invoice_id"].(string)
+
+	if suppData, ok := resource["supplementary_data"].(map[string]interface{}); ok {
+		if relatedIDs, ok := suppData["related_ids"].(map[string]interface{}); ok {
+			info.RelatedOrderID, _ = relatedIDs["order_id"].(string)
+		}
+	}
+
+	amountData, ok := resource["amount"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unable to extract amount")
+	}
+	valueStr, _ := amountData["value"].(string)
+	info.Currency, _ = amountData["currency_code"].(string)
+	var err error
+	info.Amount, err = strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return nil, err
+	}
+
+	return info, nil
 }
 
 func webhookPayloadPreview(payload []byte) string {

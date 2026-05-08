@@ -300,6 +300,48 @@ func truncateRespBody(body []byte) string {
 	return string(body[:maxLen]) + "...(truncated)"
 }
 
+// GetPayPalOrder fetches the current state of a PayPal order via GET /v2/checkout/orders/{id}
+func GetPayPalOrder(orderID string) (*PayPalCaptureResponse, error) {
+	if setting.PayPalClientId == "" || setting.PayPalClientSecret == "" {
+		return nil, fmt.Errorf("PayPal 配置不完整")
+	}
+	token, err := getPayPalAccessToken()
+	if err != nil {
+		return nil, fmt.Errorf("获取 PayPal token 失败: %w", err)
+	}
+	url := fmt.Sprintf("%s/v2/checkout/orders/%s", getPayPalURL(), orderID)
+	httpReq, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	httpResp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	var resp PayPalCaptureResponse
+	if err := common.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+	if httpResp.StatusCode != http.StatusOK {
+		if len(resp.Details) > 0 {
+			return nil, fmt.Errorf("PayPal get order HTTP %d: %s - %s", httpResp.StatusCode, resp.Details[0].Issue, resp.Details[0].Description)
+		}
+		return nil, fmt.Errorf("PayPal get order HTTP %d: %s", httpResp.StatusCode, truncateRespBody(respBody))
+	}
+	return &resp, nil
+}
+
 // VerifyPayPalWebhookSignature 验证 PayPal Webhook 签名
 // 注：PayPal 官方使用 RSA-SHA256 证书验证，但 WebhookSecret 方式已过时
 // 建议改用官方的 verify-webhook-signature 端点或本地 RSA 验证

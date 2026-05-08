@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -325,6 +326,113 @@ func TestPayPalReturnCaptureUsesInvoiceIdWhenReferenceIdIsDefault(t *testing.T) 
 
 	var topUp model.TopUp
 	require.NoError(t, db.Where("trade_no = ?", "paypal_ref_return_default").First(&topUp).Error)
+	require.Equal(t, common.TopUpStatusSuccess, topUp.Status)
+}
+
+func TestPayPalCaptureCompletedWebhookFallsBackToGetOrderWhenInvoiceIdMissing(t *testing.T) {
+	db := setupPayPalControllerTestDB(t)
+	seedPayPalTopUp(t, db, "paypal_ref_no_invoice")
+
+	originalGet := payPalGetOrder
+	payPalGetOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		require.Equal(t, "PAYPAL_ORDER_FALLBACK", orderID)
+		return &service.PayPalCaptureResponse{
+			Id:     "PAYPAL_ORDER_FALLBACK",
+			Status: "COMPLETED",
+			PurchaseUnits: []service.PayPalCapturedUnit{
+				{
+					InvoiceId: "paypal_ref_no_invoice",
+					Payments: &service.PayPalCapturedPayments{
+						Captures: []service.PayPalCapture{
+							{Id: "CAP_FB", Status: "COMPLETED", Amount: service.PayPalAmount{CurrencyCode: "USD", Value: "2.00"}},
+						},
+					},
+				},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { payPalGetOrder = originalGet })
+
+	body := `{
+		"event_type": "PAYMENT.CAPTURE.COMPLETED",
+		"resource": {
+			"id": "CAP_FB",
+			"amount": {"currency_code": "USD", "value": "2.00"},
+			"supplementary_data": {"related_ids": {"order_id": "PAYPAL_ORDER_FALLBACK"}}
+		}
+	}`
+
+	recorder := postPayPalWebhook(t, body)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var topUp model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", "paypal_ref_no_invoice").First(&topUp).Error)
+	require.Equal(t, common.TopUpStatusSuccess, topUp.Status)
+}
+
+func TestPayPalCaptureCompletedWebhookReturns500WhenGetOrderFails(t *testing.T) {
+	setupPayPalControllerTestDB(t)
+
+	originalGet := payPalGetOrder
+	payPalGetOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		return nil, fmt.Errorf("PayPal get order HTTP 503: service unavailable")
+	}
+	t.Cleanup(func() { payPalGetOrder = originalGet })
+
+	body := `{
+		"event_type": "PAYMENT.CAPTURE.COMPLETED",
+		"resource": {
+			"id": "CAP_ERR",
+			"amount": {"currency_code": "USD", "value": "2.00"},
+			"supplementary_data": {"related_ids": {"order_id": "PAYPAL_ORDER_ERR"}}
+		}
+	}`
+
+	recorder := postPayPalWebhook(t, body)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+}
+
+func TestPayPalReturnOrderAlreadyCapturedVerifiesViaGetOrderThenRedirectsSuccess(t *testing.T) {
+	db := setupPayPalControllerTestDB(t)
+	seedPayPalTopUp(t, db, "paypal_ref_already_cap")
+
+	originalCapture := payPalCaptureOrder
+	payPalCaptureOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		return nil, fmt.Errorf("PayPal capture HTTP 422: issue=ORDER_ALREADY_CAPTURED desc=order already captured")
+	}
+	t.Cleanup(func() { payPalCaptureOrder = originalCapture })
+
+	originalGet := payPalGetOrder
+	payPalGetOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		require.Equal(t, "PAYPAL_ORDER_ALREADY_CAP", orderID)
+		return &service.PayPalCaptureResponse{
+			Id:     "PAYPAL_ORDER_ALREADY_CAP",
+			Status: "COMPLETED",
+			PurchaseUnits: []service.PayPalCapturedUnit{
+				{
+					InvoiceId: "paypal_ref_already_cap",
+					Payments: &service.PayPalCapturedPayments{
+						Captures: []service.PayPalCapture{
+							{Id: "CAP_AC", Status: "COMPLETED", Amount: service.PayPalAmount{CurrencyCode: "USD", Value: "2.00"}},
+						},
+					},
+				},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { payPalGetOrder = originalGet })
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/paypal/return?token=PAYPAL_ORDER_ALREADY_CAP", nil)
+
+	PayPalReturn(ctx)
+
+	require.Equal(t, http.StatusFound, recorder.Code)
+	require.Equal(t, "http://localhost:3000/console/topup?pay=success&show_history=true", recorder.Header().Get("Location"))
+
+	var topUp model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", "paypal_ref_already_cap").First(&topUp).Error)
 	require.Equal(t, common.TopUpStatusSuccess, topUp.Status)
 }
 
