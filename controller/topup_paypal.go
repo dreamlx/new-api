@@ -203,20 +203,36 @@ func PayPalWebhook(c *gin.Context) {
 		orderID, err := service.ExtractPayPalOrderID(payload)
 		if err != nil {
 			log.Printf("PayPal CHECKOUT.ORDER.APPROVED 订单 ID 解析失败: event_id=%s err=%v payload_preview=%s\n", eventID, err, webhookPayloadPreview(payload))
-			break
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
 		}
 		log.Printf("PayPal CHECKOUT.ORDER.APPROVED 开始捕获: event_id=%s paypal_order_id=%s\n", eventID, orderID)
 		resp, err := payPalCaptureOrder(orderID)
 		if err != nil {
 			if strings.Contains(err.Error(), "ORDER_ALREADY_CAPTURED") {
-				log.Printf("PayPal CHECKOUT.ORDER.APPROVED 订单已被捕获（return URL 先行处理）: event_id=%s paypal_order_id=%s\n", eventID, orderID)
-			} else {
-				log.Printf("PayPal CHECKOUT.ORDER.APPROVED 捕获失败: event_id=%s paypal_order_id=%s err=%v\n", eventID, orderID, err)
+				log.Printf("PayPal CHECKOUT.ORDER.APPROVED 订单已被捕获，尝试 GetOrder 确认本地状态: event_id=%s paypal_order_id=%s\n", eventID, orderID)
+				order, getErr := payPalGetOrder(orderID)
+				if getErr != nil {
+					log.Printf("PayPal CHECKOUT.ORDER.APPROVED GetOrder 失败: event_id=%s paypal_order_id=%s err=%v\n", eventID, orderID, getErr)
+					c.AbortWithStatus(http.StatusInternalServerError)
+					return
+				}
+				if handleErr := handlePayPalCaptureResponse(order); handleErr != nil {
+					log.Printf("PayPal CHECKOUT.ORDER.APPROVED ORDER_ALREADY_CAPTURED 本地处理失败: event_id=%s paypal_order_id=%s err=%v\n", eventID, orderID, handleErr)
+					c.AbortWithStatus(http.StatusInternalServerError)
+					return
+				}
+				c.Status(http.StatusOK)
+				return
 			}
-			break
+			log.Printf("PayPal CHECKOUT.ORDER.APPROVED 捕获失败: event_id=%s paypal_order_id=%s err=%v\n", eventID, orderID, err)
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
 		}
 		if err := handlePayPalCaptureResponse(resp); err != nil {
 			log.Printf("PayPal CHECKOUT.ORDER.APPROVED 处理捕获结果失败: event_id=%s paypal_order_id=%s err=%v\n", eventID, orderID, err)
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
 		}
 
 	default:

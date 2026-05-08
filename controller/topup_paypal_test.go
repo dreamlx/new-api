@@ -135,6 +135,121 @@ func TestPayPalApprovedWebhookCapturesOrderAndCompletesTopUp(t *testing.T) {
 	require.Equal(t, 100+int(2*common.QuotaPerUnit), user.Quota)
 }
 
+func TestPayPalApprovedWebhookReturns500WhenCaptureFails(t *testing.T) {
+	setupPayPalControllerTestDB(t)
+
+	originalCapture := payPalCaptureOrder
+	payPalCaptureOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		require.Equal(t, "PAYPAL_ORDER_CAPTURE_FAIL", orderID)
+		return nil, fmt.Errorf("PayPal capture HTTP 503: service unavailable")
+	}
+	t.Cleanup(func() { payPalCaptureOrder = originalCapture })
+
+	body := `{
+		"event_type": "CHECKOUT.ORDER.APPROVED",
+		"resource": {
+			"id": "PAYPAL_ORDER_CAPTURE_FAIL"
+		}
+	}`
+
+	recorder := postPayPalWebhook(t, body)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+}
+
+func TestPayPalApprovedWebhookReturns500WhenLocalCompletionFails(t *testing.T) {
+	setupPayPalControllerTestDB(t)
+
+	originalCapture := payPalCaptureOrder
+	payPalCaptureOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		require.Equal(t, "PAYPAL_ORDER_MISSING_LOCAL", orderID)
+		return &service.PayPalCaptureResponse{
+			Id:     "PAYPAL_ORDER_MISSING_LOCAL",
+			Status: "COMPLETED",
+			PurchaseUnits: []service.PayPalCapturedUnit{
+				{
+					InvoiceId: "missing_paypal_ref",
+					Payments: &service.PayPalCapturedPayments{
+						Captures: []service.PayPalCapture{
+							{
+								Id:     "CAPTURE_MISSING_LOCAL",
+								Status: "COMPLETED",
+								Amount: service.PayPalAmount{
+									CurrencyCode: "USD",
+									Value:        "2.00",
+								},
+							},
+						},
+					},
+				},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { payPalCaptureOrder = originalCapture })
+
+	body := `{
+		"event_type": "CHECKOUT.ORDER.APPROVED",
+		"resource": {
+			"id": "PAYPAL_ORDER_MISSING_LOCAL"
+		}
+	}`
+
+	recorder := postPayPalWebhook(t, body)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+}
+
+func TestPayPalApprovedWebhookAlreadyCapturedFallsBackToGetOrder(t *testing.T) {
+	db := setupPayPalControllerTestDB(t)
+	seedPayPalTopUp(t, db, "paypal_ref_approved_already_captured")
+
+	originalCapture := payPalCaptureOrder
+	payPalCaptureOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		require.Equal(t, "PAYPAL_ORDER_APPROVED_ALREADY_CAPTURED", orderID)
+		return nil, fmt.Errorf("PayPal capture HTTP 422: issue=ORDER_ALREADY_CAPTURED desc=order already captured")
+	}
+	t.Cleanup(func() { payPalCaptureOrder = originalCapture })
+
+	originalGet := payPalGetOrder
+	payPalGetOrder = func(orderID string) (*service.PayPalCaptureResponse, error) {
+		require.Equal(t, "PAYPAL_ORDER_APPROVED_ALREADY_CAPTURED", orderID)
+		return &service.PayPalCaptureResponse{
+			Id:     "PAYPAL_ORDER_APPROVED_ALREADY_CAPTURED",
+			Status: "COMPLETED",
+			PurchaseUnits: []service.PayPalCapturedUnit{
+				{
+					InvoiceId: "paypal_ref_approved_already_captured",
+					Payments: &service.PayPalCapturedPayments{
+						Captures: []service.PayPalCapture{
+							{
+								Id:     "CAPTURE_APPROVED_ALREADY_CAPTURED",
+								Status: "COMPLETED",
+								Amount: service.PayPalAmount{
+									CurrencyCode: "USD",
+									Value:        "2.00",
+								},
+							},
+						},
+					},
+				},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { payPalGetOrder = originalGet })
+
+	body := `{
+		"event_type": "CHECKOUT.ORDER.APPROVED",
+		"resource": {
+			"id": "PAYPAL_ORDER_APPROVED_ALREADY_CAPTURED"
+		}
+	}`
+
+	recorder := postPayPalWebhook(t, body)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var topUp model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", "paypal_ref_approved_already_captured").First(&topUp).Error)
+	require.Equal(t, common.TopUpStatusSuccess, topUp.Status)
+}
+
 func TestPayPalCaptureCompletedWebhookUsesInvoiceIdAndIsIdempotent(t *testing.T) {
 	db := setupPayPalControllerTestDB(t)
 	seedPayPalTopUp(t, db, "paypal_ref_capture")
