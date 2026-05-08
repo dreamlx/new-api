@@ -126,7 +126,7 @@ func PayPalWebhook(c *gin.Context) {
 
 	eventType, err := extractPayPalEventType(payload)
 	if err != nil {
-		log.Printf("解析 PayPal Webhook 数据失败: %v\n", err)
+		log.Printf("解析 PayPal Webhook event_type 失败: err=%v payload_preview=%s\n", err, webhookPayloadPreview(payload))
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
@@ -136,12 +136,12 @@ func PayPalWebhook(c *gin.Context) {
 	case "CHECKOUT.ORDER.COMPLETED":
 		referenceID, err := service.ExtractPayPalReferenceID(payload)
 		if err != nil {
-			log.Printf("解析 PayPal 订单完成 reference_id 失败: %v\n", err)
+			log.Printf("解析 PayPal 订单完成 reference_id 失败: event=%s err=%v payload_preview=%s\n", eventType, err, webhookPayloadPreview(payload))
 			break
 		}
 		amount, currency, err := service.ExtractPayPalAmount(payload)
 		if err != nil {
-			log.Printf("解析 PayPal 订单完成金额失败: %v\n", err)
+			log.Printf("解析 PayPal 订单完成金额失败: event=%s trade_no=%s err=%v\n", eventType, referenceID, err)
 			break
 		}
 		log.Printf("PayPal webhook 订单完成: event=%s trade_no=%s amount=%.2f currency=%s\n", eventType, referenceID, amount, currency)
@@ -151,7 +151,7 @@ func PayPalWebhook(c *gin.Context) {
 	case "PAYMENT.CAPTURE.COMPLETED":
 		referenceID, amount, currency, err := extractPayPalCaptureCompletedData(payload)
 		if err != nil {
-			log.Printf("解析 PayPal 支付完成数据失败: %v\n", err)
+			log.Printf("解析 PayPal 支付完成数据失败: event=%s err=%v payload_preview=%s\n", eventType, err, webhookPayloadPreview(payload))
 			break
 		}
 		log.Printf("PayPal webhook 捕获完成: event=%s trade_no=%s amount=%.2f currency=%s\n", eventType, referenceID, amount, currency)
@@ -161,20 +161,24 @@ func PayPalWebhook(c *gin.Context) {
 	case "CHECKOUT.ORDER.APPROVED":
 		orderID, err := service.ExtractPayPalOrderID(payload)
 		if err != nil {
-			log.Printf("提取 PayPal 订单 ID 失败: %v\n", err)
+			log.Printf("提取 PayPal 订单 ID 失败: event=%s err=%v payload_preview=%s\n", eventType, err, webhookPayloadPreview(payload))
 			break
 		}
 		log.Printf("PayPal webhook 订单已批准，开始捕获: event=%s paypal_order_id=%s\n", eventType, orderID)
 		resp, err := payPalCaptureOrder(orderID)
 		if err != nil {
-			log.Printf("捕获 PayPal 订单失败: event=%s paypal_order_id=%s err=%v\n", eventType, orderID, err)
+			if strings.Contains(err.Error(), "ORDER_ALREADY_CAPTURED") {
+				log.Printf("PayPal webhook 订单已被捕获（return URL 已先行处理）: event=%s paypal_order_id=%s\n", eventType, orderID)
+			} else {
+				log.Printf("捕获 PayPal 订单失败: event=%s paypal_order_id=%s err=%v\n", eventType, orderID, err)
+			}
 			break
 		}
 		if err := handlePayPalCaptureResponse(resp); err != nil {
 			log.Printf("处理 PayPal 捕获结果失败: event=%s paypal_order_id=%s err=%v\n", eventType, orderID, err)
 		}
 	default:
-		log.Printf("不支持的 PayPal Webhook 事件类型: %s\n", eventType)
+		log.Printf("PayPal webhook 收到未处理的事件类型: event=%s payload_preview=%s\n", eventType, webhookPayloadPreview(payload))
 	}
 
 	c.Status(http.StatusOK)
@@ -345,4 +349,12 @@ func extractPayPalCaptureCompletedData(payload []byte) (string, float64, string,
 	}
 
 	return referenceID, amount, currency, nil
+}
+
+func webhookPayloadPreview(payload []byte) string {
+	const maxLen = 300
+	if len(payload) <= maxLen {
+		return string(payload)
+	}
+	return string(payload[:maxLen]) + "...(truncated)"
 }

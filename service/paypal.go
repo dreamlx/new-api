@@ -284,12 +284,20 @@ func CapturePayPalOrder(orderID string) (*PayPalCaptureResponse, error) {
 
 	if httpResp.StatusCode != http.StatusCreated && httpResp.StatusCode != http.StatusOK {
 		if len(resp.Details) > 0 {
-			return nil, fmt.Errorf("PayPal API 错误: %s - %s", resp.Details[0].Issue, resp.Details[0].Description)
+			return nil, fmt.Errorf("PayPal capture HTTP %d: issue=%s desc=%s", httpResp.StatusCode, resp.Details[0].Issue, resp.Details[0].Description)
 		}
-		return nil, fmt.Errorf("PayPal API 错误: %s", resp.Message)
+		return nil, fmt.Errorf("PayPal capture HTTP %d: message=%s body=%s", httpResp.StatusCode, resp.Message, truncateRespBody(respBody))
 	}
 
 	return &resp, nil
+}
+
+func truncateRespBody(body []byte) string {
+	const maxLen = 300
+	if len(body) <= maxLen {
+		return string(body)
+	}
+	return string(body[:maxLen]) + "...(truncated)"
 }
 
 // VerifyPayPalWebhookSignature 验证 PayPal Webhook 签名
