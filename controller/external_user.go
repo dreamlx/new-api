@@ -95,7 +95,7 @@ func SyncExternalUser(c *gin.Context) {
 			"message": "用户信息同步成功",
 			"data": gin.H{
 				"user_id":          existingUser.Id,
-				"external_user_id": existingUser.ExternalUserId,
+				"external_user_id": existingUser.GetExternalUserId(),
 				"is_new_user":      false,
 			},
 		})
@@ -120,21 +120,21 @@ func SyncExternalUser(c *gin.Context) {
 	}
 
 	user := &model.User{
-		Username:       req.Username,
-		DisplayName:    req.DisplayName,
-		Email:          email,
-		Password:       common.GetRandomString(16),
-		ExternalUserId: req.ExternalUserId,
-		Phone:          req.Phone,
-		WechatUnionId:  req.WechatUnionId,
-		AlipayUserId:   req.AlipayUserId,
-		LoginType:      getLoginType(req.LoginType),
-		IsExternal:     true,
-		ExternalData:   req.ExternalData,
-		Role:           common.RoleCommonUser,
-		Status:         common.UserStatusEnabled,
-		Quota:          common.QuotaForNewUser,
+		Username:      req.Username,
+		DisplayName:   req.DisplayName,
+		Email:         email,
+		Password:      common.GetRandomString(16),
+		Phone:         req.Phone,
+		WechatUnionId: req.WechatUnionId,
+		AlipayUserId:  req.AlipayUserId,
+		LoginType:     getLoginType(req.LoginType),
+		IsExternal:    true,
+		ExternalData:  req.ExternalData,
+		Role:          common.RoleCommonUser,
+		Status:        common.UserStatusEnabled,
+		Quota:         common.QuotaForNewUser,
 	}
+	user.SetExternalUserId(req.ExternalUserId)
 	if req.AffCode != "" {
 		user.AffCode = req.AffCode
 	} else {
@@ -165,7 +165,7 @@ func SyncExternalUser(c *gin.Context) {
 		"message": "用户创建成功",
 		"data": gin.H{
 			"user_id":          user.Id,
-			"external_user_id": user.ExternalUserId,
+			"external_user_id": user.GetExternalUserId(),
 			"is_new_user":      true,
 		},
 	})
@@ -251,7 +251,7 @@ func ExternalUserTopUp(c *gin.Context) {
 			"quota_added":     quotaToAdd,
 			"current_quota":   user.Quota,
 			"current_balance": float64(user.Quota) / common.QuotaPerUnit,
-			"payment_id":     req.PaymentId,
+			"payment_id":      req.PaymentId,
 		},
 	})
 }
@@ -617,7 +617,7 @@ func VerifyExternalUserToken(c *gin.Context) {
 			"is_valid":         isValid,
 			"token_id":         token.Id,
 			"token_name":       token.Name,
-			"external_user_id": user.ExternalUserId,
+			"external_user_id": user.GetExternalUserId(),
 			"status":           token.Status,
 			"status_text":      statusText,
 			"remain_quota":     token.RemainQuota,
@@ -800,7 +800,7 @@ func GetExternalUserStats(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"user_info": gin.H{
-				"external_user_id": user.ExternalUserId,
+				"external_user_id": user.GetExternalUserId(),
 				"username":         user.Username,
 				"display_name":     user.DisplayName,
 				"group":            userGroup,
@@ -863,7 +863,7 @@ func DeleteExternalUser(c *gin.Context) {
 		"data": gin.H{
 			"user_id":                   user.Id,
 			"original_external_user_id": externalUserId,
-			"deleted_external_user_id":  user.ExternalUserId,
+			"deleted_external_user_id":  user.GetExternalUserId(),
 			"tokens_disabled":           tokensDisabled,
 			"deleted_at":                time.Now().UTC().Format(time.RFC3339),
 		},
@@ -1020,7 +1020,7 @@ func DeactivateExternalUser(externalUserId string) (*model.User, int, error) {
 
 	// Release unique fields
 	user.Username = fmt.Sprintf("deleted_%s_%d", user.Username, timestamp)
-	user.ExternalUserId = fmt.Sprintf("deleted_%s_%d", externalUserId, timestamp)
+	user.SetExternalUserId(fmt.Sprintf("deleted_%s_%d", externalUserId, timestamp))
 	user.AccessToken = nil
 	user.AffCode = fmt.Sprintf("del_%d", timestamp) // avoid unique constraint
 

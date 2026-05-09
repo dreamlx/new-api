@@ -12,9 +12,9 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -43,6 +43,10 @@ func setupTestDB() *gorm.DB {
 	common.RedisEnabled = false
 
 	return db
+}
+
+func ptrExternalUserId(externalUserId string) *string {
+	return &externalUserId
 }
 
 func setupTestRouter() *gin.Engine {
@@ -147,7 +151,7 @@ func TestTopupExternalUser(t *testing.T) {
 
 	model.DB.Create(&model.User{
 		Username: "topup_user", Email: "topup@test.com",
-		ExternalUserId: "topup_001", IsExternal: true, Quota: 100000,
+		ExternalUserId: ptrExternalUserId("topup_001"), IsExternal: true, Quota: 100000,
 	})
 
 	tests := []struct {
@@ -192,7 +196,7 @@ func TestExternalUserDeduct(t *testing.T) {
 
 	model.DB.Create(&model.User{
 		Username: "deduct_user", Email: "deduct@test.com",
-		ExternalUserId: "deduct_001", IsExternal: true, Quota: 10000000, // $20
+		ExternalUserId: ptrExternalUserId("deduct_001"), IsExternal: true, Quota: 10000000, // $20
 	})
 
 	tests := []struct {
@@ -250,7 +254,7 @@ func TestCreateExternalUserToken(t *testing.T) {
 
 	model.DB.Create(&model.User{
 		Username: "token_user", Email: "token@test.com",
-		ExternalUserId: "token_001", IsExternal: true, Quota: 20000000, // $40
+		ExternalUserId: ptrExternalUserId("token_001"), IsExternal: true, Quota: 20000000, // $40
 	})
 
 	tests := []struct {
@@ -327,7 +331,7 @@ func TestDeleteExternalUserToken(t *testing.T) {
 
 	user := &model.User{
 		Username: "del_token_user", Email: "del_token@test.com",
-		ExternalUserId: "del_token_001", IsExternal: true,
+		ExternalUserId: ptrExternalUserId("del_token_001"), IsExternal: true,
 	}
 	model.DB.Create(user)
 
@@ -375,7 +379,7 @@ func TestGetExternalUserTokens(t *testing.T) {
 
 	user := &model.User{
 		Username: "list_user", Email: "list@test.com",
-		ExternalUserId: "list_001", IsExternal: true,
+		ExternalUserId: ptrExternalUserId("list_001"), IsExternal: true,
 	}
 	model.DB.Create(user)
 
@@ -410,7 +414,7 @@ func TestVerifyExternalUserToken(t *testing.T) {
 
 	user := &model.User{
 		Username: "verify_user", Email: "verify@test.com",
-		ExternalUserId: "verify_001", IsExternal: true,
+		ExternalUserId: ptrExternalUserId("verify_001"), IsExternal: true,
 	}
 	model.DB.Create(user)
 
@@ -495,7 +499,7 @@ func TestGetExternalUserStats(t *testing.T) {
 
 	model.DB.Create(&model.User{
 		Username: "stats_user", Email: "stats@test.com",
-		ExternalUserId: "stats_001", IsExternal: true, Quota: 5000000,
+		ExternalUserId: ptrExternalUserId("stats_001"), IsExternal: true, Quota: 5000000,
 	})
 
 	w := doRequest(router, "GET", "/api/user/external/stats_001/stats", nil)
@@ -516,7 +520,7 @@ func TestGetExternalUserLogs(t *testing.T) {
 
 	user := &model.User{
 		Username: "logs_user", Email: "logs@test.com",
-		ExternalUserId: "logs_001", IsExternal: true,
+		ExternalUserId: ptrExternalUserId("logs_001"), IsExternal: true,
 	}
 	model.DB.Create(user)
 
@@ -525,7 +529,7 @@ func TestGetExternalUserLogs(t *testing.T) {
 		model.LOG_DB.Create(&model.Log{
 			UserId: user.Id, Username: user.Username,
 			CreatedAt: common.GetTimestamp() - int64(i*100),
-			Type: model.LogTypeConsume, ModelName: "deepseek-chat",
+			Type:      model.LogTypeConsume, ModelName: "deepseek-chat",
 			Quota: 1000, PromptTokens: 100, CompletionTokens: 50,
 		})
 	}
@@ -562,7 +566,7 @@ func TestDeleteExternalUser(t *testing.T) {
 
 	user := &model.User{
 		Username: "del_user", Email: "del@test.com",
-		ExternalUserId: "del_001", IsExternal: true,
+		ExternalUserId: ptrExternalUserId("del_001"), IsExternal: true,
 		Status: common.UserStatusEnabled,
 	}
 	model.DB.Create(user)
@@ -617,7 +621,7 @@ func TestTopupIdempotency(t *testing.T) {
 
 	model.DB.Create(&model.User{
 		Username: "idempotent_user", Email: "idempotent@test.com",
-		ExternalUserId: "idempotent_001", IsExternal: true, Quota: 0,
+		ExternalUserId: ptrExternalUserId("idempotent_001"), IsExternal: true, Quota: 0,
 	})
 
 	body := map[string]interface{}{
@@ -652,7 +656,7 @@ func TestDeleteExternalUserTokenNoRefund(t *testing.T) {
 	initialQuota := 20000000
 	user := &model.User{
 		Username: "norefund_user", Email: "norefund@test.com",
-		ExternalUserId: "norefund_001", IsExternal: true, Quota: initialQuota,
+		ExternalUserId: ptrExternalUserId("norefund_001"), IsExternal: true, Quota: initialQuota,
 	}
 	model.DB.Create(user)
 
@@ -693,7 +697,7 @@ func TestCreateExternalUserTokenWithModelLimits(t *testing.T) {
 
 	model.DB.Create(&model.User{
 		Username: "ml_user", Email: "ml@test.com",
-		ExternalUserId: "ml_001", IsExternal: true, Quota: 20000000,
+		ExternalUserId: ptrExternalUserId("ml_001"), IsExternal: true, Quota: 20000000,
 	})
 
 	t.Run("带模型限制", func(t *testing.T) {
@@ -742,7 +746,7 @@ func TestCreateExternalUserTokenWithGroup(t *testing.T) {
 
 	model.DB.Create(&model.User{
 		Username: "grp_user", Email: "grp@test.com",
-		ExternalUserId: "grp_001", IsExternal: true, Quota: 20000000,
+		ExternalUserId: ptrExternalUserId("grp_001"), IsExternal: true, Quota: 20000000,
 	})
 
 	t.Run("指定有效分组", func(t *testing.T) {
@@ -806,7 +810,7 @@ func TestCreateExternalUserTokenUnlimitedQuota(t *testing.T) {
 	initialQuota := 10000000
 	model.DB.Create(&model.User{
 		Username: "unl_user", Email: "unl@test.com",
-		ExternalUserId: "unl_001", IsExternal: true, Quota: initialQuota,
+		ExternalUserId: ptrExternalUserId("unl_001"), IsExternal: true, Quota: initialQuota,
 	})
 
 	t.Run("无限额度模式-不扣用户余额", func(t *testing.T) {

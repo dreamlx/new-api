@@ -296,6 +296,9 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := normalizeEmptyExternalUserIds(); err != nil {
+		return err
+	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -364,6 +367,9 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := normalizeEmptyExternalUserIds(); err != nil {
+		return err
+	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -383,6 +389,13 @@ func migrateLOGDB() error {
 		return err
 	}
 	return nil
+}
+
+func normalizeEmptyExternalUserIds() error {
+	if !DB.Migrator().HasTable(&User{}) || !DB.Migrator().HasColumn(&User{}, "external_user_id") {
+		return nil
+	}
+	return DB.Model(&User{}).Where("external_user_id = ?", "").Update("external_user_id", nil).Error
 }
 
 type sqliteColumnDef struct {

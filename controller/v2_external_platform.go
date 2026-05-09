@@ -325,17 +325,17 @@ func getOrCreatePlatformUser(username, platformId string) (*model.User, error) {
 
 	email := fmt.Sprintf("%s@platform.local", platformId)
 	user = model.User{
-		Username:       username,
-		DisplayName:    "Platform: " + platformId,
-		Email:          email,
-		Password:       common.GetRandomString(32),
-		AffCode:        common.GetRandomString(16),
-		ExternalUserId: "platform_" + platformId,
-		IsExternal:     true,
-		Role:           common.RoleCommonUser,
-		Status:         common.UserStatusEnabled,
-		Quota:          PlatformQuotaForNewUser,
+		Username:    username,
+		DisplayName: "Platform: " + platformId,
+		Email:       email,
+		Password:    common.GetRandomString(32),
+		AffCode:     common.GetRandomString(16),
+		IsExternal:  true,
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Quota:       PlatformQuotaForNewUser,
 	}
+	user.SetExternalUserId("platform_" + platformId)
 
 	if err := model.DB.Create(&user).Error; err != nil {
 		// 并发场景：另一个 goroutine 已赢得竞争，重查即可

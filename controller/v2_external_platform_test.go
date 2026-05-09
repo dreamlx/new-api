@@ -202,7 +202,7 @@ func TestV2GetPlatformLogs(t *testing.T) {
 	user := &model.User{
 		Username:       "platform_logtest",
 		Email:          "logtest@platform.local",
-		ExternalUserId: "platform_logtest",
+		ExternalUserId: ptrExternalUserId("platform_logtest"),
 		IsExternal:     true,
 		Quota:          PlatformQuotaForNewUser,
 	}

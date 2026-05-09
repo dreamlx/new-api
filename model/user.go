@@ -52,15 +52,32 @@ type User struct {
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 
 	// External user integration fields
-	Phone          string `json:"phone" gorm:"type:varchar(20);column:phone;default:''"`
-	WechatOpenId   string `json:"wechat_openid" gorm:"type:varchar(100);column:wechat_openid;default:''"`
-	WechatUnionId  string `json:"wechat_unionid" gorm:"type:varchar(100);column:wechat_unionid;default:''"`
-	AlipayUserId   string `json:"alipay_userid" gorm:"type:varchar(100);column:alipay_userid;default:''"`
-	ExternalUserId string `json:"external_user_id" gorm:"type:varchar(100);column:external_user_id;uniqueIndex"`
-	LoginType      string `json:"login_type" gorm:"type:varchar(20);column:login_type;default:'email'"`
-	IsExternal     bool   `json:"is_external" gorm:"default:false"`
-	ExternalData   string `json:"external_data" gorm:"type:text;column:external_data"`
-	WisemodelKey   string `json:"wisemodel_key" gorm:"type:varchar(100);column:wisemodel_key;index"`
+	Phone          string  `json:"phone" gorm:"type:varchar(20);column:phone;default:''"`
+	WechatOpenId   string  `json:"wechat_openid" gorm:"type:varchar(100);column:wechat_openid;default:''"`
+	WechatUnionId  string  `json:"wechat_unionid" gorm:"type:varchar(100);column:wechat_unionid;default:''"`
+	AlipayUserId   string  `json:"alipay_userid" gorm:"type:varchar(100);column:alipay_userid;default:''"`
+	ExternalUserId *string `json:"external_user_id,omitempty" gorm:"type:varchar(100);column:external_user_id;uniqueIndex"`
+	LoginType      string  `json:"login_type" gorm:"type:varchar(20);column:login_type;default:'email'"`
+	IsExternal     bool    `json:"is_external" gorm:"default:false"`
+	ExternalData   string  `json:"external_data" gorm:"type:text;column:external_data"`
+	WisemodelKey   string  `json:"wisemodel_key" gorm:"type:varchar(100);column:wisemodel_key;index"`
+}
+
+// GetExternalUserId returns the external user identifier without triggering any database access.
+func (user *User) GetExternalUserId() string {
+	if user == nil || user.ExternalUserId == nil {
+		return ""
+	}
+	return *user.ExternalUserId
+}
+
+// SetExternalUserId stores empty external identifiers as NULL in the database.
+func (user *User) SetExternalUserId(externalUserId string) {
+	if externalUserId == "" {
+		user.ExternalUserId = nil
+		return
+	}
+	user.ExternalUserId = &externalUserId
 }
 
 // GetUserByPhone returns user by phone number (used by WiseModel integration).
