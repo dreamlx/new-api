@@ -1,0 +1,94 @@
+stages:
+  - sync
+
+variables:
+  GIT_DEPTH: "0"
+
+.before_sync:
+  before_script:
+    # 安装 git 和 openssh-client
+    - apk add --no-cache git openssh-client bash
+    # 设置 CI 用户信息
+    - git config --global user.name "gitlab-ci-sync-bot"
+    - git config --global user.email "1304697749@qq.com"
+    # 配置 GitLab 仓库推送地址，使用 CI 变量中的 access token
+    - git remote set-url origin "https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    # 配置 GitHub SSH 私钥
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - echo "$GITHUB_SYNC_SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/github_sync_key
+    - chmod 600 ~/.ssh/github_sync_key
+    - ssh-keyscan github.com >> ~/.ssh/known_hosts
+    - |
+      cat > ~/.ssh/config <<EOF
+      Host github.com
+        IdentityFile ~/.ssh/github_sync_key
+        IdentitiesOnly yes
+      EOF
+    # 配置 GitHub 远程
+    - git remote remove github || true
+    - git remote add github "$GITHUB_REPO_SSH"
+
+# 当 GitLab 的 main 分支有 push 时，将其推送到 GitHub main
+push_main_to_github:
+  stage: sync
+  extends: .before_sync
+  image: alpine:latest
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      when: on_success
+    - when: never
+  script:
+    - git fetch origin main
+    - git checkout -B main origin/main
+    - git push github main:main
+
+# 定时任务：同步 GitHub 与 GitLab main，并将 main 的变更合并到 ospreyai-main
+sync_upstream_and_internal:
+  stage: sync
+  extends: .before_sync
+  image: alpine:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: on_success
+    - when: never
+  script:
+    # 拉取 GitLab 与 GitHub 的最新 main
+    - git fetch origin main
+    - git fetch github main
+    # 将 GitHub main 合并到本地 main
+    - git checkout -B main origin/main
+    - git merge --no-edit github/main || exit 1
+    # 推送更新后的 main 到 GitLab 和 GitHub
+    - git push origin main
+    - git push github main:main
+    # 合并 main 到 ospreyai-main
+    - git fetch origin ospreyai-main || true
+    - |
+      if git show-ref --quiet refs/heads/ospreyai-main; then
+        git checkout ospreyai-main
+      elif git show-ref --quiet refs/remotes/origin/ospreyai-main; then
+        git checkout -B ospreyai-main origin/ospreyai-main
+      else
+        git checkout -b ospreyai-main main
+      fi
+    - git merge --no-edit main || exit 1
+    - git push origin ospreyai-main
+
+# 可选：当 ospreyai-main 有新的 push 时，尝试合并到 main（自动“回写”主干）
+sync_internal_to_main:
+  stage: sync
+  extends: .before_sync
+  image: alpine:latest
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "ospreyai-main" && $CI_PIPELINE_SOURCE == "push"'
+      when: on_success
+    - when: never
+  script:
+    # 更新本地和远程 main
+    - git fetch origin main
+    - git checkout -B main origin/main
+    # 合并 ospreyai-main 到 main
+    - git merge --no-edit origin/ospreyai-main || exit 1
+    # 推送 main 到 GitLab 与 GitHub
+    - git push origin main
+    - git push github main:main
