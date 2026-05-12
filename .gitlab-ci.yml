@@ -4,16 +4,57 @@ stages:
 variables:
   GIT_DEPTH: "0"
 
+  # 固定的 CI 同步分支名：
+  # - 分支存在时，后续流水线会更新同一个同步分支
+  # - GitLab 会复用该源分支对应的打开中的 MR，避免重复创建大量 MR
+  SYNC_GITHUB_TO_MAIN_BRANCH: "ci/sync-github-main-to-main"
+  SYNC_MAIN_TO_OSPREYAI_BRANCH: "ci/sync-main-to-ospreyai-main"
+  SYNC_OSPREYAI_TO_MAIN_BRANCH: "ci/sync-ospreyai-main-to-main"
+
 .before_sync:
   before_script:
-    # 安装 git 和 openssh-client
+    # 基础依赖
     - apk add --no-cache git openssh-client bash
-    # 设置 CI 用户信息
+
+    # CI 产生的 merge commit 作者信息
     - git config --global user.name "gitlab-ci-sync-bot"
     - git config --global user.email "1304697749@qq.com"
-    # 配置 GitLab 仓库推送地址，使用 CI 变量中的 access token
-    - git remote set-url origin "https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_FQDN}/${CI_PROJECT_PATH}.git"
-    # 配置 GitHub SSH 私钥
+
+    # 必要变量校验
+    - ': "${GITLAB_PUSH_TOKEN:?GITLAB_PUSH_TOKEN is required}"'
+    - ': "${GITHUB_SYNC_SSH_PRIVATE_KEY:?GITHUB_SYNC_SSH_PRIVATE_KEY is required}"'
+    - ': "${GITHUB_REPO_SSH:?GITHUB_REPO_SSH is required}"'
+    - ': "${CI_SERVER_URL:?CI_SERVER_URL is required}"'
+    - ': "${CI_PROJECT_PATH:?CI_PROJECT_PATH is required}"'
+
+    # 使用 GitLab 自带 CI_SERVER_URL 自动适配 http / https / 端口
+    # 例如：
+    #   http://211.93.0.206:23080
+    #   https://gitlab.example.com
+    - |
+      echo "CI_SERVER_URL=$CI_SERVER_URL"
+      echo "CI_SERVER_FQDN=$CI_SERVER_FQDN"
+      echo "CI_SERVER_PROTOCOL=$CI_SERVER_PROTOCOL"
+      echo "CI_SERVER_PORT=$CI_SERVER_PORT"
+
+      CI_SERVER_URL_CLEAN="${CI_SERVER_URL%/}"
+
+      case "$CI_SERVER_URL_CLEAN" in
+        http://*|https://*)
+          ;;
+        *)
+          echo "ERROR: CI_SERVER_URL must start with http:// or https://, got: $CI_SERVER_URL_CLEAN"
+          exit 1
+          ;;
+      esac
+
+      GITLAB_AUTH_BASE_URL="$(printf '%s' "$CI_SERVER_URL_CLEAN" | sed -E "s#^(https?://)#\1oauth2:${GITLAB_PUSH_TOKEN}@#")"
+      git remote set-url origin "${GITLAB_AUTH_BASE_URL}/${CI_PROJECT_PATH}.git"
+
+    # 脱敏输出 origin，便于确认协议、端口和路径是否正确
+    - git remote get-url origin | sed -E 's#oauth2:[^@]+@#oauth2:***@#'
+
+    # 配置 GitHub SSH 密钥
     - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     - echo "$GITHUB_SYNC_SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/github_sync_key
     - chmod 600 ~/.ssh/github_sync_key
@@ -24,26 +65,49 @@ variables:
         IdentityFile ~/.ssh/github_sync_key
         IdentitiesOnly yes
       EOF
+
     # 配置 GitHub 远程
     - git remote remove github || true
     - git remote add github "$GITHUB_REPO_SSH"
 
-# 当 GitLab 的 main 分支有 push 时，将其推送到 GitHub main
-push_main_to_github:
+# -------------------------------------------------------------------
+# 1) GitLab main -> GitHub main
+#    当 main 通过 MR 合并后产生 push 流水线，尝试把 GitLab main 推到 GitHub main。
+#    若 GitHub main 存在 GitLab main 尚未包含的提交，则中止，避免覆盖 GitHub 变更。
+# -------------------------------------------------------------------
+push_gitlab_main_to_github_main:
   stage: sync
   extends: .before_sync
   image: alpine:latest
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
       when: on_success
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
     - when: never
   script:
     - git fetch origin main
+    - git fetch github main
     - git checkout -B main origin/main
+    - |
+      if git merge-base --is-ancestor github/main main; then
+        echo "GitHub main is already an ancestor of GitLab main. Safe to push."
+      else
+        echo "ERROR: GitHub main contains commits not yet merged into GitLab main."
+        echo "Please wait for or create the GitHub main -> GitLab main sync MR first."
+        exit 1
+      fi
     - git push github main:main
 
-# 定时任务：同步 GitHub 与 GitLab main，并将 main 的变更合并到 ospreyai-main
-sync_upstream_and_internal:
+# -------------------------------------------------------------------
+# 2) GitHub main -> GitLab main
+#    由 Schedule 触发：
+#    - 拉取 GitHub main
+#    - 基于 GitLab main 创建/更新同步分支
+#    - 合并 github/main
+#    - 推送同步分支并通过 git push options 自动创建 MR 到 main
+# -------------------------------------------------------------------
+sync_github_main_to_gitlab_main_mr:
   stage: sync
   extends: .before_sync
   image: alpine:latest
@@ -52,43 +116,113 @@ sync_upstream_and_internal:
       when: on_success
     - when: never
   script:
-    # 拉取 GitLab 与 GitHub 的最新 main
     - git fetch origin main
     - git fetch github main
-    # 将 GitHub main 合并到本地 main
-    - git checkout -B main origin/main
-    - git merge --no-edit github/main || exit 1
-    # 推送更新后的 main 到 GitLab 和 GitHub
-    - git push origin main
-    - git push github main:main
-    # 合并 main 到 ospreyai-main
-    - git fetch origin ospreyai-main || true
+    - git checkout -B "$SYNC_GITHUB_TO_MAIN_BRANCH" origin/main
     - |
-      if git show-ref --quiet refs/heads/ospreyai-main; then
-        git checkout ospreyai-main
-      elif git show-ref --quiet refs/remotes/origin/ospreyai-main; then
-        git checkout -B ospreyai-main origin/ospreyai-main
-      else
-        git checkout -b ospreyai-main main
+      if ! git merge --no-edit github/main; then
+        echo "ERROR: Merge conflict when merging github/main into GitLab main sync branch."
+        echo "Resolve manually, then push/update the MR branch if needed."
+        exit 1
       fi
-    - git merge --no-edit main || exit 1
-    - git push origin ospreyai-main
+    - |
+      if git diff --quiet origin/main HEAD; then
+        echo "No content changes from GitHub main to GitLab main. Skip MR."
+        exit 0
+      fi
+    - git fetch origin "+refs/heads/${SYNC_GITHUB_TO_MAIN_BRANCH}:refs/remotes/origin/${SYNC_GITHUB_TO_MAIN_BRANCH}" || true
+    - |
+      git push \
+        -o merge_request.create \
+        -o merge_request.target=main \
+        -o merge_request.title="ci(sync): GitHub main -> GitLab main" \
+        -o merge_request.description="Automated synchronization branch created by GitLab CI. Please review and merge if appropriate." \
+        -o merge_request.remove_source_branch \
+        --force-with-lease \
+        origin \
+        "${SYNC_GITHUB_TO_MAIN_BRANCH}:${SYNC_GITHUB_TO_MAIN_BRANCH}"
 
-# 可选：当 ospreyai-main 有新的 push 时，尝试合并到 main（自动“回写”主干）
-sync_internal_to_main:
+# -------------------------------------------------------------------
+# 3) GitLab main -> ospreyai-main
+#    在 main 更新后，创建/更新 MR：
+#      ci/sync-main-to-ospreyai-main -> ospreyai-main
+# -------------------------------------------------------------------
+sync_main_to_ospreyai_main_mr:
+  stage: sync
+  extends: .before_sync
+  image: alpine:latest
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "schedule"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+    - when: never
+  script:
+    - git fetch origin main ospreyai-main
+    - git checkout -B "$SYNC_MAIN_TO_OSPREYAI_BRANCH" origin/ospreyai-main
+    - |
+      if ! git merge --no-edit origin/main; then
+        echo "ERROR: Merge conflict when merging main into ospreyai-main sync branch."
+        echo "Resolve manually, then push/update the MR branch if needed."
+        exit 1
+      fi
+    - |
+      if git diff --quiet origin/ospreyai-main HEAD; then
+        echo "No content changes from main to ospreyai-main. Skip MR."
+        exit 0
+      fi
+    - git fetch origin "+refs/heads/${SYNC_MAIN_TO_OSPREYAI_BRANCH}:refs/remotes/origin/${SYNC_MAIN_TO_OSPREYAI_BRANCH}" || true
+    - |
+      git push \
+        -o merge_request.create \
+        -o merge_request.target=ospreyai-main \
+        -o merge_request.title="ci(sync): GitLab main -> ospreyai-main" \
+        -o merge_request.description="Automated synchronization branch created by GitLab CI. Please review and merge if appropriate." \
+        -o merge_request.remove_source_branch \
+        --force-with-lease \
+        origin \
+        "${SYNC_MAIN_TO_OSPREYAI_BRANCH}:${SYNC_MAIN_TO_OSPREYAI_BRANCH}"
+
+# -------------------------------------------------------------------
+# 4) ospreyai-main -> GitLab main
+#    当 ospreyai-main 通过 MR 合并后产生 push 流水线，创建/更新 MR：
+#      ci/sync-ospreyai-main-to-main -> main
+# -------------------------------------------------------------------
+sync_ospreyai_main_to_main_mr:
   stage: sync
   extends: .before_sync
   image: alpine:latest
   rules:
     - if: '$CI_COMMIT_BRANCH == "ospreyai-main" && $CI_PIPELINE_SOURCE == "push"'
       when: on_success
+    - if: '$CI_COMMIT_BRANCH == "ospreyai-main" && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
     - when: never
   script:
-    # 更新本地和远程 main
-    - git fetch origin main
-    - git checkout -B main origin/main
-    # 合并 ospreyai-main 到 main
-    - git merge --no-edit origin/ospreyai-main || exit 1
-    # 推送 main 到 GitLab 与 GitHub
-    - git push origin main
-    - git push github main:main
+    - git fetch origin main ospreyai-main
+    - git checkout -B "$SYNC_OSPREYAI_TO_MAIN_BRANCH" origin/main
+    - |
+      if ! git merge --no-edit origin/ospreyai-main; then
+        echo "ERROR: Merge conflict when merging ospreyai-main into main sync branch."
+        echo "Resolve manually, then push/update the MR branch if needed."
+        exit 1
+      fi
+    - |
+      if git diff --quiet origin/main HEAD; then
+        echo "No content changes from ospreyai-main to main. Skip MR."
+        exit 0
+      fi
+    - git fetch origin "+refs/heads/${SYNC_OSPREYAI_TO_MAIN_BRANCH}:refs/remotes/origin/${SYNC_OSPREYAI_TO_MAIN_BRANCH}" || true
+    - |
+      git push \
+        -o merge_request.create \
+        -o merge_request.target=main \
+        -o merge_request.title="ci(sync): ospreyai-main -> GitLab main" \
+        -o merge_request.description="Automated synchronization branch created by GitLab CI. Please review and merge if appropriate." \
+        -o merge_request.remove_source_branch \
+        --force-with-lease \
+        origin \
+        "${SYNC_OSPREYAI_TO_MAIN_BRANCH}:${SYNC_OSPREYAI_TO_MAIN_BRANCH}"
+
