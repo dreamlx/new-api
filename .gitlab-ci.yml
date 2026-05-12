@@ -12,7 +12,7 @@ variables:
     - git config --global user.name "gitlab-ci-sync-bot"
     - git config --global user.email "1304697749@qq.com"
     # 配置 GitLab 仓库推送地址，使用 CI 变量中的 access token
-    - git remote set-url origin "https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    - git remote set-url origin "https://oauth2:${GITLAB_PUSH_TOKEN}@${CI_SERVER_FQDN}/${CI_PROJECT_PATH}.git"
     # 配置 GitHub SSH 私钥
     - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     - echo "$GITHUB_SYNC_SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/github_sync_key
