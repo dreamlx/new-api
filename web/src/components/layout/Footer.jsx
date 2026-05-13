@@ -198,7 +198,7 @@ const FooterBar = () => {
 
           <div className='text-sm'>
             <span className='!text-semi-color-text-2'>
-              {t('内容由AI生成，请注意甄别')}
+              {t('内容由AI生成，请注意甄别')} @ {systemName}
             </span>
           </div>
 
@@ -236,7 +236,7 @@ const FooterBar = () => {
             ></div>
             <div className='text-sm flex-shrink-0'>
               <span className='!text-semi-color-text-2'>
-                {t('内容由AI生成，请注意甄别')}
+                {t('内容由AI生成，请注意甄别')} @ {systemName}
               </span>
             </div>
             <div className='text-sm flex-shrink-0'>
