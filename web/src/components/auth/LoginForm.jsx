@@ -1,3 +1,5 @@
+import { Button, Card, Checkbox, Divider, Form, Icon, Modal, } from '@douyinfe/semi-ui';
+import { IconGithubLogo, IconMail, IconLock, IconKey, } from '@douyinfe/semi-icons';
 /*
 Copyright (C) 2025 QuantumNous
 
@@ -16,56 +18,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { UserContext } from '../../context/User';
-import { StatusContext } from '../../context/Status';
-import {
-  API,
-  getLogo,
-  showError,
-  showInfo,
-  showSuccess,
-  updateAPI,
-  getSystemName,
-  getOAuthProviderIcon,
-  setUserData,
-  onGitHubOAuthClicked,
-  onDiscordOAuthClicked,
-  onOIDCClicked,
-  onLinuxDOOAuthClicked,
-  onCustomOAuthClicked,
-  prepareCredentialRequestOptions,
-  buildAssertionResult,
-  isPasskeySupported,
-} from '../../helpers';
-import Turnstile from 'react-turnstile';
-import {
-  Button,
-  Card,
-  Checkbox,
-  Divider,
-  Form,
-  Icon,
-  Modal,
-} from '@douyinfe/semi-ui';
 import Title from '@douyinfe/semi-ui/lib/es/typography/title';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
 import TelegramLoginButton from 'react-telegram-login';
-
-import {
-  IconGithubLogo,
-  IconMail,
-  IconLock,
-  IconKey,
-} from '@douyinfe/semi-icons';
-import OIDCIcon from '../common/logo/OIDCIcon';
-import WeChatIcon from '../common/logo/WeChatIcon';
-import LinuxDoIcon from '../common/logo/LinuxDoIcon';
-import TwoFAVerification from './TwoFAVerification';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
+import Turnstile from 'react-turnstile';
+
+import { API, getLogo, showError, showInfo, showSuccess, updateAPI, getSystemName, getOAuthProviderIcon, setUserData, onGitHubOAuthClicked, onDiscordOAuthClicked, onOIDCClicked, onLinuxDOOAuthClicked, onCustomOAuthClicked, prepareCredentialRequestOptions, buildAssertionResult, isPasskeySupported, } from '../../helpers';
+import LinuxDoIcon from '../common/logo/LinuxDoIcon';
+import { StatusContext } from '../../context/Status';
+import TwoFAVerification from './TwoFAVerification';
+import WeChatIcon from '../common/logo/WeChatIcon';
+import { UserContext } from '../../context/User';
+import OIDCIcon from '../common/logo/OIDCIcon';
+
 
 const LoginForm = () => {
   let navigate = useNavigate();
@@ -696,6 +665,12 @@ const LoginForm = () => {
                 </div>
               )}
 
+              <div className='text-left mt-2'>
+                <span className='text-xs text-semi-color-text-2'>
+                  *{t('注册登录即代表已阅读并同意我们的用户协议与隐私政策')}
+                </span>
+              </div>
+
               {!status.self_use_mode_enabled && (
                 <div className='mt-6 text-center text-sm'>
                   <Text>
@@ -801,6 +776,12 @@ const LoginForm = () => {
                     </Checkbox>
                   </div>
                 )}
+
+                <div className='text-left mt-2'>
+                  <span className='text-xs text-semi-color-text-2'>
+                    *{t('注册登录即代表已阅读并同意我们的用户协议与隐私政策')}
+                  </span>
+                </div>
 
                 <div className='space-y-2 pt-2'>
                   <Button
