@@ -16,12 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 import React, { useEffect, useState, useMemo, useContext } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Typography } from '@douyinfe/semi-ui';
+
 import { getFooterHTML, getLogo, getSystemName } from '../../helpers';
 import { StatusContext } from '../../context/Status';
+
 
 const FooterBar = () => {
   const { t } = useTranslation();
@@ -196,6 +197,12 @@ const FooterBar = () => {
           </div>
 
           <div className='text-sm'>
+            <span className='!text-semi-color-text-2'>
+              {t('内容由AI生成，请注意甄别')} @ {systemName}
+            </span>
+          </div>
+
+          <div className='text-sm'>
             <span className='!text-semi-color-text-1'>
               {t('设计与开发由')}{' '}
             </span>
@@ -227,6 +234,11 @@ const FooterBar = () => {
               className='custom-footer na-cb6feafeb3990c78 text-sm !text-semi-color-text-1'
               dangerouslySetInnerHTML={{ __html: footer }}
             ></div>
+            <div className='text-sm flex-shrink-0'>
+              <span className='!text-semi-color-text-2'>
+                {t('内容由AI生成，请注意甄别')} @ {systemName}
+              </span>
+            </div>
             <div className='text-sm flex-shrink-0'>
               <span className='!text-semi-color-text-1'>
                 {t('设计与开发由')}{' '}

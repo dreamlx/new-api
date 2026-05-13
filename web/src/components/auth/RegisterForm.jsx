@@ -1,3 +1,5 @@
+import { IconGithubLogo, IconMail, IconUser, IconLock, IconKey, } from '@douyinfe/semi-icons';
+import { Button, Card, Checkbox, Divider, Form, Icon, Modal, } from '@douyinfe/semi-ui';
 /*
 Copyright (C) 2025 QuantumNous
 
@@ -16,54 +18,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import {
-  API,
-  getLogo,
-  showError,
-  showInfo,
-  showSuccess,
-  updateAPI,
-  getSystemName,
-  getOAuthProviderIcon,
-  setUserData,
-  onDiscordOAuthClicked,
-  onCustomOAuthClicked,
-} from '../../helpers';
-import Turnstile from 'react-turnstile';
-import {
-  Button,
-  Card,
-  Checkbox,
-  Divider,
-  Form,
-  Icon,
-  Modal,
-} from '@douyinfe/semi-ui';
 import Title from '@douyinfe/semi-ui/lib/es/typography/title';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
-import {
-  IconGithubLogo,
-  IconMail,
-  IconUser,
-  IconLock,
-  IconKey,
-} from '@douyinfe/semi-icons';
-import {
-  onGitHubOAuthClicked,
-  onLinuxDOOAuthClicked,
-  onOIDCClicked,
-} from '../../helpers';
-import OIDCIcon from '../common/logo/OIDCIcon';
-import LinuxDoIcon from '../common/logo/LinuxDoIcon';
-import WeChatIcon from '../common/logo/WeChatIcon';
 import TelegramLoginButton from 'react-telegram-login/src';
-import { UserContext } from '../../context/User';
-import { StatusContext } from '../../context/Status';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
+import Turnstile from 'react-turnstile';
+
+import { API, getLogo, showError, showInfo, showSuccess, updateAPI, getSystemName, getOAuthProviderIcon, setUserData, onDiscordOAuthClicked, onCustomOAuthClicked, } from '../../helpers';
+import { onGitHubOAuthClicked, onLinuxDOOAuthClicked, onOIDCClicked, } from '../../helpers';
+import LinuxDoIcon from '../common/logo/LinuxDoIcon';
+import { StatusContext } from '../../context/Status';
+import WeChatIcon from '../common/logo/WeChatIcon';
+import { UserContext } from '../../context/User';
+import OIDCIcon from '../common/logo/OIDCIcon';
+
 
 const RegisterForm = () => {
   let navigate = useNavigate();
@@ -536,6 +507,12 @@ const RegisterForm = () => {
                 </Button>
               </div>
 
+              <div className='text-left mt-2'>
+                <span className='text-xs text-semi-color-text-2'>
+                  *{t('注册登录即代表已阅读并同意我们的用户协议与隐私政策')}
+                </span>
+              </div>
+
               <div className='mt-6 text-center text-sm'>
                 <Text>
                   {t('已有账户？')}{' '}
@@ -674,6 +651,12 @@ const RegisterForm = () => {
                     </Checkbox>
                   </div>
                 )}
+
+                <div className='text-left mt-2'>
+                  <span className='text-xs text-semi-color-text-2'>
+                    *{t('注册登录即代表已阅读并同意我们的用户协议与隐私政策')}
+                  </span>
+                </div>
 
                 <div className='space-y-2 pt-2'>
                   <Button
