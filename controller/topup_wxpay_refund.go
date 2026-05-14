@@ -93,13 +93,23 @@ func WxpayRefundNotify(c *gin.Context) {
 		return
 	}
 
-	// Only act when we are transitioning out of refund_pending. If the row
-	// is in an unexpected state (e.g. status not success, or refund_status
-	// is empty/failed), still flip to success per WeChat's authoritative
-	// answer but log loudly so ops can investigate the upstream sequence.
+	// Defense-in-depth fail-closed gating: only deduct quota when BOTH
+	// invariants hold:
+	//   (a) the parent topup is still in success state (was paid for real); and
+	//   (b) the refund was initiated by an admin (refund_status=pending).
+	// If either invariant is broken we log loudly and ack to WeChat so they
+	// stop retrying, but we do NOT touch quota. Ops then reconciles from logs.
+	if topUp.Status != common.TopUpStatusSuccess {
+		log.Printf("wxpay refund notify: REFUSING SUCCESS — parent topup not in success state tradeNo=%s status=%q refund_status=%q",
+			tradeNo, topUp.Status, topUp.RefundStatus)
+		wxpaySuccess(c)
+		return
+	}
 	if topUp.RefundStatus != common.RefundStatusPending {
-		log.Printf("wxpay refund notify: unexpected refund_status=%q tradeNo=%s; trusting upstream SUCCESS",
-			topUp.RefundStatus, tradeNo)
+		log.Printf("wxpay refund notify: REFUSING SUCCESS — refund not in pending state tradeNo=%s status=%q refund_status=%q",
+			tradeNo, topUp.Status, topUp.RefundStatus)
+		wxpaySuccess(c)
+		return
 	}
 
 	refundedQuota := computeRefundQuota(topUp)

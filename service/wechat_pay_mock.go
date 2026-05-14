@@ -9,12 +9,12 @@ import (
 )
 
 type MockWechatPayService struct {
-	NativePrepayFunc             func(ctx context.Context, outTradeNo string, description string, amountCents int64, notifyURL string) (string, error)
-	QueryOrderByOutTradeNoFunc   func(ctx context.Context, outTradeNo string) (*payments.Transaction, error)
-	CloseOrderFunc               func(ctx context.Context, outTradeNo string) error
-	DecryptNotificationFunc      func(ctx context.Context, request *http.Request) (*NotificationResult, error)
+	NativePrepayFunc              func(ctx context.Context, outTradeNo string, description string, amountCents int64, notifyURL string) (string, error)
+	QueryOrderByOutTradeNoFunc    func(ctx context.Context, outTradeNo string) (*payments.Transaction, error)
+	CloseOrderFunc                func(ctx context.Context, outTradeNo string) error
+	DecryptNotificationFunc       func(ctx context.Context, request *http.Request) (*NotificationResult, error)
 	DecryptRefundNotificationFunc func(ctx context.Context, request *http.Request) (*RefundNotificationResult, error)
-	RefundFunc                   func(ctx context.Context, outTradeNo string, outRefundNo string, totalCents int64, refundCents int64, reason string) error
+	RefundFunc                    func(ctx context.Context, outTradeNo string, outRefundNo string, totalCents int64, refundCents int64, reason string) error
 }
 
 func (m *MockWechatPayService) NativePrepay(ctx context.Context, outTradeNo string, description string, amountCents int64, notifyURL string) (string, error) {

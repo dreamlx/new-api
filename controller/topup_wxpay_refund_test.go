@@ -216,3 +216,132 @@ func TestWxpayRefundNotifyMissingOutTradeNo(t *testing.T) {
 	rec := postWxpayRefundNotify(t)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
+
+// TestWxpayRefundNotifySuccessRejectsNonSuccessTopUp verifies fail-closed
+// gating: if the parent topup is not in the success state (e.g. anomaly,
+// pending), the handler MUST NOT proceed with CompleteRefund + quota
+// deduction even when WeChat reports SUCCESS. The handler still acks 200
+// SUCCESS to stop WeChat's retry storm but ops sees the warning in logs.
+func TestWxpayRefundNotifySuccessRejectsNonSuccessTopUp(t *testing.T) {
+	db := setupRefundTestDB(t)
+	user := seedRefundUser(t, db)
+	tradeNo := "wxpay_refund_bad_parent_status"
+
+	// Seed a topup whose parent status is anomaly (not success) but whose
+	// refund_status is pending — mimicking a corrupted/raced row.
+	topUp := &model.TopUp{
+		UserId:         user.Id,
+		Amount:         100,
+		Money:          100.0,
+		TradeNo:        tradeNo,
+		PaymentMethod:  PaymentMethodWxpay,
+		CreateTime:     1,
+		Status:         common.TopUpStatusAnomaly,
+		PayAmountCents: 10000,
+		Currency:       "CNY",
+		QuotaGranted:   50000,
+		RefundStatus:   common.RefundStatusPending,
+		RefundAdminId:  2,
+		RefundReason:   "test reason",
+	}
+	require.NoError(t, db.Create(topUp).Error)
+
+	mock := &service.MockWechatPayService{
+		DecryptRefundNotificationFunc: func(_ context.Context, _ *http.Request) (*service.RefundNotificationResult, error) {
+			return &service.RefundNotificationResult{
+				OutTradeNo:   tradeNo,
+				OutRefundNo:  "RFD" + tradeNo,
+				RefundId:     "wx_refund_id_42",
+				RefundStatus: "SUCCESS",
+				RefundAmount: 10000,
+				SuccessTime:  1700000000,
+			}, nil
+		},
+	}
+	withWxpayService(t, mock)
+
+	rec := postWxpayRefundNotify(t)
+	// Ack 200 SUCCESS so WeChat stops retrying.
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "SUCCESS")
+
+	// Refund state must NOT have flipped to success and quota must NOT have
+	// been deducted.
+	var loaded model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", tradeNo).First(&loaded).Error)
+	require.Equal(t, common.RefundStatusPending, loaded.RefundStatus,
+		"RefundStatus must remain pending; gating must refuse to advance")
+	require.Equal(t, int64(0), loaded.RefundedQuota)
+	require.Equal(t, int64(0), loaded.RefundTime)
+
+	var u model.User
+	require.NoError(t, db.First(&u, user.Id).Error)
+	require.Equal(t, 500000, u.Quota, "quota must not be deducted when parent topup is not in success state")
+
+	var logCount int64
+	require.NoError(t, db.Model(&model.Log{}).Where("user_id = ? AND type = ?", user.Id, model.LogTypeRefund).Count(&logCount).Error)
+	require.Equal(t, int64(0), logCount, "no refund log when gating refuses the notify")
+}
+
+// TestWxpayRefundNotifySuccessRejectsNonPendingRefundStatus verifies the
+// second fail-closed guard: if refund_status is not pending (e.g. empty
+// or refund_failed) we MUST NOT deduct quota even when WeChat reports
+// SUCCESS, because no admin actually initiated this refund through our
+// own /api/topup/refund flow.
+func TestWxpayRefundNotifySuccessRejectsNonPendingRefundStatus(t *testing.T) {
+	db := setupRefundTestDB(t)
+	user := seedRefundUser(t, db)
+	tradeNo := "wxpay_refund_bad_refund_status"
+
+	// Parent topup IS success, but refund_status is refund_failed (no admin
+	// re-initiated the refund). A SUCCESS notify in this state is suspect.
+	topUp := &model.TopUp{
+		UserId:         user.Id,
+		Amount:         100,
+		Money:          100.0,
+		TradeNo:        tradeNo,
+		PaymentMethod:  PaymentMethodWxpay,
+		CreateTime:     1,
+		Status:         common.TopUpStatusSuccess,
+		PayAmountCents: 10000,
+		Currency:       "CNY",
+		QuotaGranted:   50000,
+		RefundStatus:   common.RefundStatusFailed,
+	}
+	require.NoError(t, db.Create(topUp).Error)
+
+	mock := &service.MockWechatPayService{
+		DecryptRefundNotificationFunc: func(_ context.Context, _ *http.Request) (*service.RefundNotificationResult, error) {
+			return &service.RefundNotificationResult{
+				OutTradeNo:   tradeNo,
+				OutRefundNo:  "RFD" + tradeNo,
+				RefundId:     "wx_refund_id_99",
+				RefundStatus: "SUCCESS",
+				RefundAmount: 10000,
+				SuccessTime:  1700000000,
+			}, nil
+		},
+	}
+	withWxpayService(t, mock)
+
+	rec := postWxpayRefundNotify(t)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "SUCCESS")
+
+	// RefundStatus must stay refund_failed (unchanged), no quota deducted.
+	var loaded model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", tradeNo).First(&loaded).Error)
+	require.Equal(t, common.RefundStatusFailed, loaded.RefundStatus,
+		"RefundStatus must not flip from refund_failed when no admin initiated the refund")
+	require.Equal(t, int64(0), loaded.RefundedQuota)
+	require.Equal(t, int64(0), loaded.RefundTime)
+
+	var u model.User
+	require.NoError(t, db.First(&u, user.Id).Error)
+	require.Equal(t, 500000, u.Quota,
+		"quota must not be deducted when refund was not in pending state")
+
+	var logCount int64
+	require.NoError(t, db.Model(&model.Log{}).Where("user_id = ? AND type = ?", user.Id, model.LogTypeRefund).Count(&logCount).Error)
+	require.Equal(t, int64(0), logCount)
+}

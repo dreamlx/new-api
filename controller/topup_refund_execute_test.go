@@ -167,9 +167,9 @@ func TestRefundExecuteAlipayHappyPath(t *testing.T) {
 	require.NoError(t, db.Model(&model.Log{}).Where("user_id = ? AND type = ?", user.Id, model.LogTypeRefund).Count(&logCount).Error)
 	require.Equal(t, int64(1), logCount, "expected one refund log entry")
 
-	// out_request_no must start with RFD<tradeno>
-	require.Contains(t, capturedOutRequestNo, topUp.TradeNo)
-	require.True(t, len(capturedOutRequestNo) > len("RFD"+topUp.TradeNo))
+	// out_request_no must be deterministic: exactly "RFD"+tradeNo so retries
+	// produce the same id and Alipay can idempotently reject duplicates.
+	require.Equal(t, "RFD"+topUp.TradeNo, capturedOutRequestNo)
 }
 
 func TestRefundExecuteAlipaySDKError(t *testing.T) {

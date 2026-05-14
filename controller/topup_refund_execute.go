@@ -122,6 +122,31 @@ func RefundExecute(c *gin.Context) {
 		return
 	}
 
+	// Persist the deterministic outRefundNo as refund_trade_no immediately so
+	// any refund_pending row has a provider correlator from the moment it
+	// enters that state. The conditional WHERE (refund_status=pending) is the
+	// concurrency safety net: if another writer mutated the row out from
+	// under us between MarkRefundPending and now, treat it as a race-lost
+	// refund attempt and bail out. For alipay we may overwrite this value
+	// later with the SDK-returned TradeNo (which is the canonical id at the
+	// provider). For wxpay the outRefundNo itself is the correlator.
+	outRefundNo := "RFD" + topUp.TradeNo
+	res := model.DB.Model(&model.TopUp{}).
+		Where("trade_no = ? AND refund_status = ?", topUp.TradeNo, common.RefundStatusPending).
+		Update("refund_trade_no", outRefundNo)
+	if res.Error != nil {
+		log.Printf("refund execute: persist refund_trade_no failed tradeNo=%s err=%v", topUp.TradeNo, res.Error)
+		_ = model.MarkRefundFailed(model.DB, topUp.TradeNo, fmt.Sprintf("persist refund_trade_no error: %v", res.Error))
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "error", "data": "数据库错误"})
+		return
+	}
+	if res.RowsAffected == 0 {
+		log.Printf("refund execute: refund_trade_no UPDATE matched 0 rows tradeNo=%s — concurrent mutation", topUp.TradeNo)
+		_ = model.MarkRefundFailed(model.DB, topUp.TradeNo, "concurrent mutation after MarkRefundPending")
+		c.JSON(http.StatusConflict, gin.H{"message": "error", "data": "订单状态已变更"})
+		return
+	}
+
 	// Re-read so we have the freshly-stamped refund_admin_id / refund_reason
 	// when dispatching to the provider.
 	topUp = model.GetTopUpByTradeNo(topUp.TradeNo)
@@ -157,7 +182,10 @@ func dispatchAlipayRefund(c *gin.Context, ctx context.Context, topUp *model.TopU
 		return
 	}
 
-	outRequestNo := fmt.Sprintf("RFD%s%d", topUp.TradeNo, time.Now().Unix())
+	// Deterministic out_request_no: "RFD" + tradeNo. Stable across retries so
+	// if a network blip causes a resubmit, Alipay idempotently rejects the
+	// duplicate instead of treating it as a brand-new refund.
+	outRequestNo := "RFD" + topUp.TradeNo
 	refundAmount := common.CentsToMoneyStr(topUp.PayAmountCents)
 
 	rsp, err := svc.TradeRefund(ctx, topUp.TradeNo, refundAmount, outRequestNo, reason)
@@ -217,20 +245,16 @@ func dispatchWxpayRefund(c *gin.Context, ctx context.Context, topUp *model.TopUp
 		return
 	}
 
-	outRefundNo := fmt.Sprintf("RFD%s%d", topUp.TradeNo, time.Now().Unix())
+	// outRefundNo (deterministic "RFD"+tradeNo) was already persisted as
+	// refund_trade_no in RefundExecute right after MarkRefundPending. We
+	// recompute it here so the SDK call uses the same value.
+	outRefundNo := "RFD" + topUp.TradeNo
 
 	if err := svc.Refund(ctx, topUp.TradeNo, outRefundNo, topUp.PayAmountCents, topUp.PayAmountCents, reason); err != nil {
 		log.Printf("refund execute: wxpay Refund failed tradeNo=%s err=%v", topUp.TradeNo, err)
 		_ = model.MarkRefundFailed(model.DB, topUp.TradeNo, fmt.Sprintf("wxpay sdk error: %v", err))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "退款失败"})
 		return
-	}
-
-	// Store the out_refund_no so the notify handler can correlate via a
-	// dedicated identifier without parsing the refund_reason field.
-	if err := model.DB.Model(&model.TopUp{}).Where("trade_no = ?", topUp.TradeNo).
-		Update("refund_trade_no", outRefundNo).Error; err != nil {
-		log.Printf("refund execute: wxpay store refund_trade_no failed tradeNo=%s err=%v", topUp.TradeNo, err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
