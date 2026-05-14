@@ -21,6 +21,28 @@ type TopUp struct {
 	CreateTime       int64   `json:"create_time"`
 	CompleteTime     int64   `json:"complete_time"`
 	Status           string  `json:"status"`
+
+	// 金额整数化 (v2 新增)
+	PayAmountCents int64  `json:"pay_amount_cents"`
+	Currency       string `json:"currency" gorm:"type:varchar(8)"`
+	QuotaGranted   int64  `json:"quota_granted"`
+
+	// 订单超时
+	ExpireTime int64 `json:"expire_time" gorm:"index"`
+
+	// 对账字段
+	ProviderTxId string `json:"provider_tx_id" gorm:"type:varchar(255);index"`
+	PaidAt       int64  `json:"paid_at"`
+	CallbackRaw  string `json:"-" gorm:"type:text"`
+
+	// 退款状态机
+	RefundStatus      string `json:"refund_status" gorm:"type:varchar(32);index;not null;default:''"`
+	RefundRequestTime int64  `json:"refund_request_time"`
+	RefundTime        int64  `json:"refund_time"`
+	RefundReason      string `json:"refund_reason" gorm:"type:text"`
+	RefundTradeNo     string `json:"refund_trade_no" gorm:"type:varchar(255);index"`
+	RefundAdminId     int    `json:"refund_admin_id"`
+	RefundedQuota     int64  `json:"refunded_quota"`
 }
 
 func (topUp *TopUp) Insert() error {
