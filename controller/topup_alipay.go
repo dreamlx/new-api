@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
+	"github.com/smartwalle/alipay/v3"
 )
 
 const (
@@ -170,3 +174,192 @@ func RequestAlipay(c *gin.Context) {
 }
 
 // (AlipayNotify implementation lives in the next task.)
+
+// alipayNotifyResponse is what the SDK ultimately expects us to send back.
+// Alipay's spec dictates a literal "success" (no JSON) when we've accepted
+// the callback; any other body triggers retries (up to 8 times). We return
+// "failure" for non-recoverable validation errors and for signature errors
+// so that the retry pressure surfaces operator issues quickly.
+const (
+	alipayNotifyOK  = "success"
+	alipayNotifyErr = "failure"
+)
+
+// alipayParseGmt converts an Alipay "gmt_payment" string like
+// "2026-05-14 12:00:01" (Asia/Shanghai) to a Unix timestamp. On parse failure
+// it falls back to the current time, since timestamp accuracy is not critical
+// to idempotency or accounting.
+func alipayParseGmt(gmt string) int64 {
+	if gmt == "" {
+		return time.Now().Unix()
+	}
+	// Alipay uses Asia/Shanghai for gmt_payment.
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.Local
+	}
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", gmt, loc)
+	if err != nil {
+		return time.Now().Unix()
+	}
+	return t.Unix()
+}
+
+// AlipayNotify handles asynchronous payment notifications from Alipay.
+//
+// POST /api/user/alipay/notify (application/x-www-form-urlencoded)
+//
+// Validation order (all must pass before granting quota):
+//  1. Parse form
+//  2. VerifySign
+//  3. DecodeNotification
+//  4. app_id matches setting.AlipayAppId
+//  5. seller_id matches setting.AlipaySellerId (when configured)
+//  6. trade_status is TRADE_SUCCESS or TRADE_FINISHED
+//  7. out_trade_no exists in DB as a pending TopUp
+//  8. total_amount (cents) equals TopUp.PayAmountCents
+//
+// Idempotency is enforced via the (in-memory) LockOrder mutex and the
+// CompleteTopUpByCondition conditional update (multi-replica safe). Quota is
+// granted only when RowsAffected == 1.
+//
+// On amount mismatch the order is marked anomaly and we respond "failure" so
+// Alipay retries while the operator investigates. On signature/decode errors
+// we respond "failure" without touching state. On a duplicate (already
+// completed) callback we still respond "success".
+func AlipayNotify(c *gin.Context) {
+	if err := c.Request.ParseForm(); err != nil {
+		log.Printf("alipay notify: parse form failed: %v", err)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+	values := c.Request.PostForm
+	if len(values) == 0 {
+		// Some setups POST as application/x-www-form-urlencoded; others may
+		// arrive as multipart or query-string. Fall back to the merged Form.
+		values = c.Request.Form
+	}
+	if len(values) == 0 {
+		log.Printf("alipay notify: empty form")
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+
+	svc, err := alipayServiceProvider()
+	if err != nil || svc == nil {
+		log.Printf("alipay notify: service unavailable: %v", err)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+
+	ctx := context.Background()
+
+	if err := svc.VerifySign(ctx, values); err != nil {
+		log.Printf("alipay notify: signature verification failed: %v", err)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+
+	notification, err := svc.DecodeNotification(ctx, values)
+	if err != nil || notification == nil {
+		log.Printf("alipay notify: decode failed: %v", err)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+
+	// Identity checks: app_id and seller_id (when set) must match our config.
+	if notification.AppId != "" && setting.AlipayAppId != "" && notification.AppId != setting.AlipayAppId {
+		log.Printf("alipay notify: app_id mismatch: got=%s want=%s tradeNo=%s",
+			notification.AppId, setting.AlipayAppId, notification.OutTradeNo)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+	if setting.AlipaySellerId != "" && notification.SellerId != "" && notification.SellerId != setting.AlipaySellerId {
+		log.Printf("alipay notify: seller_id mismatch: got=%s want=%s tradeNo=%s",
+			notification.SellerId, setting.AlipaySellerId, notification.OutTradeNo)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+
+	// Only accept terminal-paid statuses.
+	status := notification.TradeStatus
+	if status != alipay.TradeStatusSuccess && status != alipay.TradeStatusFinished {
+		log.Printf("alipay notify: non-paid trade_status=%s tradeNo=%s", status, notification.OutTradeNo)
+		// Non-paid notifications (e.g. WAIT_BUYER_PAY) are still well-formed;
+		// respond success so Alipay does not retry them indefinitely.
+		c.String(http.StatusOK, alipayNotifyOK)
+		return
+	}
+
+	tradeNo := notification.OutTradeNo
+	if tradeNo == "" {
+		log.Printf("alipay notify: missing out_trade_no")
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+
+	// Short-circuit lock; reduces duplicate-callback contention within one
+	// replica. The DB conditional update is the authoritative idempotency
+	// boundary across replicas.
+	LockOrder(tradeNo)
+	defer UnlockOrder(tradeNo)
+
+	topUp := model.GetTopUpByTradeNo(tradeNo)
+	if topUp == nil {
+		log.Printf("alipay notify: top-up not found tradeNo=%s", tradeNo)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+
+	// Amount equality (integer cents) — the canonical safety check.
+	notifyCents, err := common.AlipayAmountToCents(notification.TotalAmount)
+	if err != nil {
+		reason := fmt.Sprintf("invalid total_amount=%q err=%v", notification.TotalAmount, err)
+		log.Printf("alipay notify: %s tradeNo=%s", reason, tradeNo)
+		_ = model.SetTopUpAnomaly(model.DB, tradeNo, reason)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+	if topUp.PayAmountCents > 0 && notifyCents != topUp.PayAmountCents {
+		reason := fmt.Sprintf("amount mismatch: notify=%d expected=%d", notifyCents, topUp.PayAmountCents)
+		log.Printf("alipay notify: %s tradeNo=%s", reason, tradeNo)
+		_ = model.SetTopUpAnomaly(model.DB, tradeNo, reason)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+
+	// Authoritative idempotent completion (multi-replica safe).
+	paidAt := alipayParseGmt(notification.GmtPayment)
+	rowsAffected, err := model.CompleteTopUpByCondition(model.DB, tradeNo, notification.TradeNo, paidAt)
+	if err != nil {
+		log.Printf("alipay notify: CompleteTopUpByCondition failed tradeNo=%s err=%v", tradeNo, err)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+	if rowsAffected == 0 {
+		// Order was already completed by another replica / duplicate callback.
+		// Respond success so Alipay stops retrying.
+		log.Printf("alipay notify: idempotent skip tradeNo=%s (already completed)", tradeNo)
+		c.String(http.StatusOK, alipayNotifyOK)
+		return
+	}
+
+	// Grant quota.
+	dAmount := decimal.NewFromInt(topUp.Amount)
+	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
+	if quotaToAdd > 0 {
+		if err := model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true); err != nil {
+			// We have already flipped status=success; surface the error in logs.
+			log.Printf("alipay notify: IncreaseUserQuota failed tradeNo=%s userId=%d err=%v",
+				tradeNo, topUp.UserId, err)
+		} else {
+			model.RecordLog(topUp.UserId, model.LogTypeTopup,
+				fmt.Sprintf("使用支付宝在线充值成功，充值金额：%s，订单号：%s",
+					logger.LogQuota(quotaToAdd), tradeNo))
+		}
+	}
+
+	c.String(http.StatusOK, alipayNotifyOK)
+}
+
