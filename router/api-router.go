@@ -76,6 +76,7 @@ func SetApiRouter(router *gin.Engine) {
 			userRoute.POST("/alipay/notify", controller.AlipayNotify)
 			userRoute.GET("/alipay/return", controller.AlipayReturn)
 			userRoute.POST("/wxpay/notify", controller.WxpayNotify)
+			userRoute.POST("/wxpay/refund/notify", controller.WxpayRefundNotify)
 			userRoute.GET("/groups", controller.GetUserGroups)
 
 			selfRoute := userRoute.Group("/")

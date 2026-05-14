@@ -35,6 +35,12 @@ type WechatPayService interface {
 	// Returns a NotificationResult with the essential payment fields.
 	DecryptNotification(ctx context.Context, request *http.Request) (*NotificationResult, error)
 
+	// DecryptRefundNotification decrypts and verifies a WeChat Pay refund
+	// notification. The SDK uses the same RSA+AES-GCM transport as for payment
+	// notifications, but the ciphertext payload is a refunddomestic.Refund,
+	// not a payments.Transaction, so we need a separate decode method.
+	DecryptRefundNotification(ctx context.Context, request *http.Request) (*RefundNotificationResult, error)
+
 	// Refund submits a refund request for a previously paid order.
 	Refund(ctx context.Context, outTradeNo string, outRefundNo string, totalCents int64, refundCents int64, reason string) error
 }
@@ -47,6 +53,20 @@ type NotificationResult struct {
 	TradeState    string // SUCCESS / NOTPAY / CLOSED etc.
 	AmountTotal   int64  // order total in cents (Fen)
 	PaidAt        int64  // payment success time as unix timestamp, 0 if not paid
+	Raw           string // original decrypted JSON for audit/logging
+}
+
+// RefundNotificationResult represents a decrypted WeChat Pay refund
+// notification. RefundStatus uses the SDK's literal values
+// ("SUCCESS"/"CLOSED"/"PROCESSING"/"ABNORMAL"); the controller decides
+// which ones map to refund_success vs refund_failed in our state machine.
+type RefundNotificationResult struct {
+	OutTradeNo    string // merchant order number
+	OutRefundNo   string // merchant refund number we generated
+	RefundId      string // WeChat-side refund identifier
+	RefundStatus  string // SUCCESS / CLOSED / PROCESSING / ABNORMAL
+	RefundAmount  int64  // amount actually refunded, in cents (Fen)
+	SuccessTime   int64  // success time as unix timestamp, 0 if not finalised
 	Raw           string // original decrypted JSON for audit/logging
 }
 
@@ -174,6 +194,50 @@ func (s *RealWechatPayService) DecryptNotification(ctx context.Context, request 
 	// Preserve the raw decrypted JSON for audit
 	raw, err := common.Marshal(txn)
 	if err == nil {
+		result.Raw = string(raw)
+	}
+
+	return result, nil
+}
+
+// DecryptRefundNotification verifies the RSA signature and decrypts the
+// AES-256-GCM ciphertext of a WeChat Pay refund notification. The SDK's
+// notify.Handler is reused, but the inner payload deserialises to a
+// refunddomestic.Refund (not a payments.Transaction).
+func (s *RealWechatPayService) DecryptRefundNotification(ctx context.Context, request *http.Request) (*RefundNotificationResult, error) {
+	handler, err := notify.NewRSANotifyHandler(s.apiV3Key, s.verifier)
+	if err != nil {
+		return nil, fmt.Errorf("wechat refund notify handler init failed: %w", err)
+	}
+
+	var rfd refunddomestic.Refund
+	_, err = handler.ParseNotifyRequest(ctx, request, &rfd)
+	if err != nil {
+		return nil, fmt.Errorf("wechat decrypt refund notification failed: %w", err)
+	}
+
+	result := &RefundNotificationResult{}
+
+	if rfd.OutTradeNo != nil {
+		result.OutTradeNo = *rfd.OutTradeNo
+	}
+	if rfd.OutRefundNo != nil {
+		result.OutRefundNo = *rfd.OutRefundNo
+	}
+	if rfd.RefundId != nil {
+		result.RefundId = *rfd.RefundId
+	}
+	if rfd.Status != nil {
+		result.RefundStatus = string(*rfd.Status)
+	}
+	if rfd.Amount != nil && rfd.Amount.Refund != nil {
+		result.RefundAmount = *rfd.Amount.Refund
+	}
+	if rfd.SuccessTime != nil {
+		result.SuccessTime = rfd.SuccessTime.Unix()
+	}
+
+	if raw, err := common.Marshal(rfd); err == nil {
 		result.Raw = string(raw)
 	}
 

@@ -9,11 +9,12 @@ import (
 )
 
 type MockWechatPayService struct {
-	NativePrepayFunc           func(ctx context.Context, outTradeNo string, description string, amountCents int64, notifyURL string) (string, error)
-	QueryOrderByOutTradeNoFunc func(ctx context.Context, outTradeNo string) (*payments.Transaction, error)
-	CloseOrderFunc             func(ctx context.Context, outTradeNo string) error
-	DecryptNotificationFunc    func(ctx context.Context, request *http.Request) (*NotificationResult, error)
-	RefundFunc                 func(ctx context.Context, outTradeNo string, outRefundNo string, totalCents int64, refundCents int64, reason string) error
+	NativePrepayFunc             func(ctx context.Context, outTradeNo string, description string, amountCents int64, notifyURL string) (string, error)
+	QueryOrderByOutTradeNoFunc   func(ctx context.Context, outTradeNo string) (*payments.Transaction, error)
+	CloseOrderFunc               func(ctx context.Context, outTradeNo string) error
+	DecryptNotificationFunc      func(ctx context.Context, request *http.Request) (*NotificationResult, error)
+	DecryptRefundNotificationFunc func(ctx context.Context, request *http.Request) (*RefundNotificationResult, error)
+	RefundFunc                   func(ctx context.Context, outTradeNo string, outRefundNo string, totalCents int64, refundCents int64, reason string) error
 }
 
 func (m *MockWechatPayService) NativePrepay(ctx context.Context, outTradeNo string, description string, amountCents int64, notifyURL string) (string, error) {
@@ -42,6 +43,13 @@ func (m *MockWechatPayService) DecryptNotification(ctx context.Context, request 
 		return m.DecryptNotificationFunc(ctx, request)
 	}
 	return &NotificationResult{}, nil
+}
+
+func (m *MockWechatPayService) DecryptRefundNotification(ctx context.Context, request *http.Request) (*RefundNotificationResult, error) {
+	if m.DecryptRefundNotificationFunc != nil {
+		return m.DecryptRefundNotificationFunc(ctx, request)
+	}
+	return &RefundNotificationResult{}, nil
 }
 
 func (m *MockWechatPayService) Refund(ctx context.Context, outTradeNo string, outRefundNo string, totalCents int64, refundCents int64, reason string) error {
