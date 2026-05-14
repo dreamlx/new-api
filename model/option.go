@@ -90,6 +90,21 @@ func InitOptionMap() {
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
 	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
+	common.OptionMap["AlipayEnabled"] = strconv.FormatBool(setting.AlipayEnabled)
+	common.OptionMap["AlipayAppId"] = setting.AlipayAppId
+	common.OptionMap["AlipayPrivateKey"] = setting.AlipayPrivateKey
+	common.OptionMap["AlipayPublicKey"] = setting.AlipayPublicKey
+	common.OptionMap["AlipaySellerId"] = setting.AlipaySellerId
+	common.OptionMap["AlipayIsSandbox"] = strconv.FormatBool(setting.AlipayIsSandbox)
+	common.OptionMap["AlipayMinTopUp"] = strconv.Itoa(setting.AlipayMinTopUp)
+	common.OptionMap["WxpayEnabled"] = strconv.FormatBool(setting.WxpayEnabled)
+	common.OptionMap["WxpayMchId"] = setting.WxpayMchId
+	common.OptionMap["WxpayMchSerialNo"] = setting.WxpayMchSerialNo
+	common.OptionMap["WxpayApiV3Key"] = setting.WxpayApiV3Key
+	common.OptionMap["WxpayPrivateKey"] = setting.WxpayPrivateKey
+	common.OptionMap["WxpayAppId"] = setting.WxpayAppId
+	common.OptionMap["WxpayNotifyURL"] = setting.WxpayNotifyURL
+	common.OptionMap["WxpayMinTopUp"] = strconv.Itoa(setting.WxpayMinTopUp)
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
 	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
@@ -377,6 +392,26 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
+	case "WxpayEnabled":
+		setting.WxpayEnabled = value == "true"
+	case "WxpayMchId":
+		setting.WxpayMchId = value
+		setting.ResetWechatPayClient()
+	case "WxpayMchSerialNo":
+		setting.WxpayMchSerialNo = value
+		setting.ResetWechatPayClient()
+	case "WxpayApiV3Key":
+		setting.WxpayApiV3Key = value
+		setting.ResetWechatPayClient()
+	case "WxpayPrivateKey":
+		setting.WxpayPrivateKey = value
+		setting.ResetWechatPayClient()
+	case "WxpayAppId":
+		setting.WxpayAppId = value
+	case "WxpayNotifyURL":
+		setting.WxpayNotifyURL = value
+	case "WxpayMinTopUp":
+		setting.WxpayMinTopUp, _ = strconv.Atoi(value)
 	case "WaffoEnabled":
 		setting.WaffoEnabled = value == "true"
 	case "WaffoApiKey":
@@ -417,6 +452,24 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.PayPalMode = value
 	case "PayPalMinTopUp":
 		setting.PayPalMinTopUp, _ = strconv.Atoi(value)
+	case "AlipayEnabled":
+		setting.AlipayEnabled = value == "true"
+	case "AlipayAppId":
+		setting.AlipayAppId = value
+		setting.ResetAlipayClient()
+	case "AlipayPrivateKey":
+		setting.AlipayPrivateKey = value
+		setting.ResetAlipayClient()
+	case "AlipayPublicKey":
+		setting.AlipayPublicKey = value
+		setting.ResetAlipayClient()
+	case "AlipaySellerId":
+		setting.AlipaySellerId = value
+	case "AlipayIsSandbox":
+		setting.AlipayIsSandbox = value == "true"
+		setting.ResetAlipayClient()
+	case "AlipayMinTopUp":
+		setting.AlipayMinTopUp, _ = strconv.Atoi(value)
 	case "TopupGroupRatio":
 		err = common.UpdateTopupGroupRatioByJSONString(value)
 	case "GitHubClientId":
