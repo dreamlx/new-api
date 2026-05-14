@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"strconv"
 	"sync"
@@ -397,6 +398,45 @@ func EpayNotify(c *gin.Context) {
 	} else {
 		log.Printf("易支付异常回调: %v", verifyInfo)
 	}
+}
+
+// GetTopUpStatus returns the current state of a top-up order by trade_no.
+//
+// GET /api/user/topup/status?trade_no=USR...
+//
+// Ownership: the order's UserId MUST match the JWT-authenticated user id.
+// Foreign or non-existent trade numbers return the same 404 "订单不存在"
+// response, so a probing user cannot enumerate or confirm other users'
+// trade numbers via response-shape differences.
+func GetTopUpStatus(c *gin.Context) {
+	tradeNo := c.Query("trade_no")
+	if tradeNo == "" {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "参数错误"})
+		return
+	}
+
+	userId := c.GetInt("id")
+	topUp := model.GetTopUpByTradeNo(tradeNo)
+	if topUp == nil || topUp.UserId != userId {
+		// Return the same response for "not found" and "not yours" to avoid
+		// leaking the existence of other users' trade numbers.
+		c.JSON(http.StatusNotFound, gin.H{"message": "error", "data": "订单不存在"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "success",
+		"data": gin.H{
+			"trade_no":       topUp.TradeNo,
+			"status":         topUp.Status,
+			"amount":         topUp.Amount,
+			"money":          topUp.Money,
+			"payment_method": topUp.PaymentMethod,
+			"create_time":    topUp.CreateTime,
+			"paid_at":        topUp.PaidAt,
+			"expire_time":    topUp.ExpireTime,
+		},
+	})
 }
 
 func RequestAmount(c *gin.Context) {
