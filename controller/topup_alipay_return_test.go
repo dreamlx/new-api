@@ -14,7 +14,6 @@ import (
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
-	"github.com/smartwalle/alipay/v3"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -69,16 +68,11 @@ func TestAlipayReturnSuccess(t *testing.T) {
 
 	mock := &service.MockAlipayService{
 		VerifySignFunc: func(_ context.Context, _ url.Values) error { return nil },
-		DecodeNotificationFunc: func(_ context.Context, vals url.Values) (*alipay.Notification, error) {
-			return buildDecodedNotification(vals), nil
-		},
 	}
 	withAlipayService(t, mock)
 
 	q := url.Values{}
 	q.Set("out_trade_no", "alipay_return_ok")
-	q.Set("trade_no", "alipay_tx_ok")
-	q.Set("total_amount", "100.00")
 
 	recorder := getAlipayReturn(t, q)
 
@@ -99,16 +93,11 @@ func TestAlipayReturnPending(t *testing.T) {
 
 	mock := &service.MockAlipayService{
 		VerifySignFunc: func(_ context.Context, _ url.Values) error { return nil },
-		DecodeNotificationFunc: func(_ context.Context, vals url.Values) (*alipay.Notification, error) {
-			return buildDecodedNotification(vals), nil
-		},
 	}
 	withAlipayService(t, mock)
 
 	q := url.Values{}
 	q.Set("out_trade_no", "alipay_return_pending")
-	q.Set("trade_no", "alipay_tx_pending")
-	q.Set("total_amount", "100.00")
 
 	recorder := getAlipayReturn(t, q)
 
@@ -179,16 +168,11 @@ func TestAlipayReturnTopUpNotFound(t *testing.T) {
 
 	mock := &service.MockAlipayService{
 		VerifySignFunc: func(_ context.Context, _ url.Values) error { return nil },
-		DecodeNotificationFunc: func(_ context.Context, vals url.Values) (*alipay.Notification, error) {
-			return buildDecodedNotification(vals), nil
-		},
 	}
 	withAlipayService(t, mock)
 
 	q := url.Values{}
 	q.Set("out_trade_no", "alipay_return_orphan")
-	q.Set("trade_no", "alipay_tx_orphan")
-	q.Set("total_amount", "100.00")
 
 	recorder := getAlipayReturn(t, q)
 

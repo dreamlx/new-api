@@ -399,9 +399,6 @@ func alipayReturnRedirect(c *gin.Context, status, tradeNo string) {
 func AlipayReturn(c *gin.Context) {
 	values := c.Request.URL.Query()
 
-	// Signature check — even though this is a UX-only path, a verified
-	// signature means the parameters genuinely came from Alipay and we can
-	// trust the out_trade_no for the lookup below.
 	svc, err := alipayServiceProvider()
 	if err != nil || svc == nil {
 		log.Printf("alipay return: service unavailable: %v", err)
