@@ -474,3 +474,13 @@ func CompleteTopUpByCondition(db *gorm.DB, tradeNo string, providerTxId string, 
 		})
 	return result.RowsAffected, result.Error
 }
+
+// SetTopUpAnomaly 标记订单为异常状态（验签失败/金额不一致等）
+func SetTopUpAnomaly(db *gorm.DB, tradeNo string, reason string) error {
+	return db.Model(&TopUp{}).
+		Where("trade_no = ?", tradeNo).
+		Updates(map[string]interface{}{
+			"status":       common.TopUpStatusAnomaly,
+			"callback_raw": reason,
+		}).Error
+}

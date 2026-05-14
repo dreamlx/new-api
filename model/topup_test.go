@@ -191,3 +191,24 @@ func TestCompleteTopUpByConditionRejectsEmptyTradeNo(t *testing.T) {
 	require.Equal(t, int64(0), affected)
 	require.Contains(t, err.Error(), "trade_no")
 }
+
+func TestSetTopUpAnomaly(t *testing.T) {
+	db := setupTopUpTestDB(t)
+
+	topUp := &TopUp{
+		UserId:  1,
+		Amount:  100,
+		Money:   2.0,
+		TradeNo: "anomaly_test_001",
+		Status:  common.TopUpStatusPending,
+	}
+	require.NoError(t, db.Create(topUp).Error)
+
+	err := SetTopUpAnomaly(db, "anomaly_test_001", "amount mismatch: expected 200, got 150")
+	require.NoError(t, err)
+
+	var loaded TopUp
+	require.NoError(t, db.Where("trade_no = ?", "anomaly_test_001").First(&loaded).Error)
+	require.Equal(t, common.TopUpStatusAnomaly, loaded.Status)
+	require.Contains(t, loaded.CallbackRaw, "amount mismatch")
+}
