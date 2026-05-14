@@ -182,3 +182,12 @@ func TestCompleteTopUpByConditionUnknownTradeNo(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(0), affected)
 }
+
+func TestCompleteTopUpByConditionRejectsEmptyTradeNo(t *testing.T) {
+	db := setupTopUpTestDB(t)
+
+	affected, err := CompleteTopUpByCondition(db, "", "tx_z", 789)
+	require.Error(t, err)
+	require.Equal(t, int64(0), affected)
+	require.Contains(t, err.Error(), "trade_no")
+}
