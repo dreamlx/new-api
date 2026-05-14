@@ -216,6 +216,16 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/migrate_console_setting", controller.MigrateConsoleSetting) // 用于迁移检测的旧键，下个版本会删除
 		}
 
+		// Refund administration (root-only). Two-step prepare -> execute
+		// flow: prepare issues an HMAC-signed confirm_token bound to the
+		// {trade_no, admin_id, expires} triple; execute verifies it and
+		// dispatches the SDK call. See controller/topup_refund.go.
+		topupRefundRoute := apiRouter.Group("/topup/refund")
+		topupRefundRoute.Use(middleware.RootAuth(), middleware.CriticalRateLimit())
+		{
+			topupRefundRoute.POST("/prepare", controller.RefundPrepare)
+		}
+
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
 		customOAuthRoute.Use(middleware.RootAuth())
