@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -23,6 +26,11 @@ const (
 	wxpayDescriptionFormat = "TopUp Order #%s"
 
 	wxpayNotifyPath = "/api/user/wxpay/notify"
+
+	// WeChat Pay APIv3 acknowledgement codes per
+	// https://pay.weixin.qq.com/wiki/doc/apiv3/wechatpay/wechatpay4_1.shtml
+	wxpayNotifyOK   = "SUCCESS"
+	wxpayNotifyFail = "FAIL"
 )
 
 // wechatPayServiceProvider returns a WechatPayService instance. Tests override
@@ -140,4 +148,110 @@ func RequestWxpay(c *gin.Context) {
 			"trade_no": tradeNo,
 		},
 	})
+}
+
+func wxpayFail(c *gin.Context, status int, message string) {
+	c.JSON(status, gin.H{"code": wxpayNotifyFail, "message": message})
+}
+
+func wxpaySuccess(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"code": wxpayNotifyOK, "message": "成功"})
+}
+
+// WxpayNotify handles asynchronous WeChat Pay APIv3 payment notifications.
+//
+// POST /api/user/wxpay/notify (application/json, signed + AES-GCM encrypted)
+//
+// The SDK's notify.Handler verifies the WeChat-Pay-Signature header and
+// decrypts the ciphertext into a payments.Transaction in one call.
+//
+// Validation order (all must pass before granting quota):
+//  1. Service available
+//  2. Signature verify + AES-GCM decrypt (SDK)
+//  3. out_trade_no present
+//  4. trade_state == SUCCESS (anything else: ack-and-skip to stop retries)
+//  5. TopUp row exists
+//  6. amount_total (cents) equals TopUp.PayAmountCents
+//
+// Idempotency: in-memory LockOrder + DB conditional update via
+// CompleteTopUpByCondition (multi-replica safe). Quota is granted only when
+// RowsAffected == 1.
+func WxpayNotify(c *gin.Context) {
+	svc, err := wechatPayServiceProvider()
+	if err != nil || svc == nil {
+		log.Printf("wxpay notify: service unavailable: %v", err)
+		wxpayFail(c, http.StatusInternalServerError, "service unavailable")
+		return
+	}
+
+	ctx := context.Background()
+	result, err := svc.DecryptNotification(ctx, c.Request)
+	if err != nil || result == nil {
+		log.Printf("wxpay notify: decrypt failed: %v", err)
+		wxpayFail(c, http.StatusUnauthorized, "decrypt failed")
+		return
+	}
+
+	tradeNo := result.OutTradeNo
+	if tradeNo == "" {
+		log.Printf("wxpay notify: missing out_trade_no")
+		wxpayFail(c, http.StatusBadRequest, "missing out_trade_no")
+		return
+	}
+
+	// Non-SUCCESS states (NOTPAY/USERPAYING/CLOSED/...) are well-formed
+	// notifications we do not act on. Acknowledge with SUCCESS to stop retries.
+	if result.TradeState != "SUCCESS" {
+		log.Printf("wxpay notify: non-success trade_state=%s tradeNo=%s", result.TradeState, tradeNo)
+		wxpaySuccess(c)
+		return
+	}
+
+	LockOrder(tradeNo)
+	defer UnlockOrder(tradeNo)
+
+	topUp := model.GetTopUpByTradeNo(tradeNo)
+	if topUp == nil {
+		log.Printf("wxpay notify: top-up not found tradeNo=%s", tradeNo)
+		wxpayFail(c, http.StatusNotFound, "topup not found")
+		return
+	}
+
+	if topUp.PayAmountCents > 0 && result.AmountTotal != topUp.PayAmountCents {
+		reason := fmt.Sprintf("amount mismatch: notify=%d expected=%d", result.AmountTotal, topUp.PayAmountCents)
+		log.Printf("wxpay notify: %s tradeNo=%s", reason, tradeNo)
+		_ = model.SetTopUpAnomaly(model.DB, tradeNo, reason)
+		wxpayFail(c, http.StatusBadRequest, "amount mismatch")
+		return
+	}
+
+	rowsAffected, err := model.CompleteTopUpByCondition(model.DB, tradeNo, result.TransactionId, result.PaidAt)
+	if err != nil {
+		log.Printf("wxpay notify: CompleteTopUpByCondition failed tradeNo=%s err=%v", tradeNo, err)
+		wxpayFail(c, http.StatusInternalServerError, "db error")
+		return
+	}
+	if rowsAffected == 0 {
+		log.Printf("wxpay notify: idempotent skip tradeNo=%s (already completed)", tradeNo)
+		wxpaySuccess(c)
+		return
+	}
+
+	dAmount := decimal.NewFromInt(topUp.Amount)
+	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
+	if quotaToAdd > 0 {
+		if err := model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true); err != nil {
+			// Quota grant failed AFTER status flip; ack SUCCESS so WeChat does not
+			// retry-storm, and surface the inconsistency through logs for ops.
+			log.Printf("wxpay notify: IncreaseUserQuota failed tradeNo=%s userId=%d err=%v",
+				tradeNo, topUp.UserId, err)
+		} else {
+			model.RecordLog(topUp.UserId, model.LogTypeTopup,
+				fmt.Sprintf("使用微信在线充值成功，充值金额：%s，订单号：%s",
+					logger.LogQuota(quotaToAdd), tradeNo))
+		}
+	}
+
+	wxpaySuccess(c)
 }
