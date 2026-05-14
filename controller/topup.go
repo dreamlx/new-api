@@ -106,6 +106,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"enable_waffo_topup": enableWaffo,
 		"enable_paypal_topup": setting.PayPalClientId != "" && setting.PayPalClientSecret != "",
 		"enable_alipay_topup": setting.AlipayEnabled,
+		"enable_wxpay_topup":  setting.WxpayEnabled,
 		"waffo_pay_methods": func() interface{} {
 			if enableWaffo {
 				return setting.GetWaffoPayMethods()
@@ -119,6 +120,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"waffo_min_topup":     setting.WaffoMinTopUp,
 		"paypal_min_topup":    setting.PayPalMinTopUp,
 		"alipay_min_topup":    setting.AlipayMinTopUp,
+		"wxpay_min_topup":     setting.WxpayMinTopUp,
 		"amount_options":      operation_setting.GetPaymentSetting().AmountOptions,
 		"discount":            operation_setting.GetPaymentSetting().AmountDiscount,
 	}

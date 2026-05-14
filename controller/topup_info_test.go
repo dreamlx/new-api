@@ -64,3 +64,61 @@ func TestGetTopUpInfoAlipayDisabled(t *testing.T) {
 	require.NoError(t, common.UnmarshalJsonStr(recorder.Body.String(), &resp))
 	require.Equal(t, false, resp.Data["enable_alipay_topup"])
 }
+
+// TestGetTopUpInfoIncludesWxpayFields verifies the response surface adds
+// the symmetric WeChat Pay fields the frontend needs to render the wxpay button.
+func TestGetTopUpInfoIncludesWxpayFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originalEnabled := setting.WxpayEnabled
+	originalMin := setting.WxpayMinTopUp
+	setting.WxpayEnabled = true
+	setting.WxpayMinTopUp = 3
+	t.Cleanup(func() {
+		setting.WxpayEnabled = originalEnabled
+		setting.WxpayMinTopUp = originalMin
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/user/topup/info", nil)
+
+	GetTopUpInfo(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var resp struct {
+		Data map[string]interface{} `json:"data"`
+	}
+	require.NoError(t, common.UnmarshalJsonStr(recorder.Body.String(), &resp))
+
+	require.Equal(t, true, resp.Data["enable_wxpay_topup"], "enable_wxpay_topup must be true when WxpayEnabled=true")
+	require.Equal(t, float64(3), resp.Data["wxpay_min_topup"])
+}
+
+func TestGetTopUpInfoWxpayDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originalEnabled := setting.WxpayEnabled
+	originalMin := setting.WxpayMinTopUp
+	setting.WxpayEnabled = false
+	setting.WxpayMinTopUp = 7
+	t.Cleanup(func() {
+		setting.WxpayEnabled = originalEnabled
+		setting.WxpayMinTopUp = originalMin
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/user/topup/info", nil)
+
+	GetTopUpInfo(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var resp struct {
+		Data map[string]interface{} `json:"data"`
+	}
+	require.NoError(t, common.UnmarshalJsonStr(recorder.Body.String(), &resp))
+	require.Equal(t, false, resp.Data["enable_wxpay_topup"])
+	require.Equal(t, float64(7), resp.Data["wxpay_min_topup"])
+}
