@@ -224,6 +224,7 @@ func SetApiRouter(router *gin.Engine) {
 		topupRefundRoute.Use(middleware.RootAuth(), middleware.CriticalRateLimit())
 		{
 			topupRefundRoute.POST("/prepare", controller.RefundPrepare)
+			topupRefundRoute.POST("", controller.RefundExecute)
 		}
 
 		// Custom OAuth provider management (root only)
