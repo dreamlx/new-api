@@ -75,6 +75,7 @@ func SetApiRouter(router *gin.Engine) {
 			userRoute.GET("/epay/notify", controller.EpayNotify)
 			userRoute.POST("/alipay/notify", controller.AlipayNotify)
 			userRoute.GET("/alipay/return", controller.AlipayReturn)
+			userRoute.POST("/wxpay/notify", controller.WxpayNotify)
 			userRoute.GET("/groups", controller.GetUserGroups)
 
 			selfRoute := userRoute.Group("/")
@@ -104,6 +105,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPay)
 				selfRoute.POST("/paypal/pay", middleware.CriticalRateLimit(), controller.RequestPayPalTopUp)
 				selfRoute.POST("/alipay/pay", middleware.CriticalRateLimit(), controller.RequestAlipay)
+				selfRoute.POST("/wxpay/pay", middleware.CriticalRateLimit(), controller.RequestWxpay)
 				selfRoute.POST("/aff_transfer", controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 
