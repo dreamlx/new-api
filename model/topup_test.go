@@ -121,3 +121,64 @@ func TestTopUpCallbackRawHiddenInSlice(t *testing.T) {
 	require.NotContains(t, string(jsonBytes), "secret_two")
 	require.NotContains(t, string(jsonBytes), "callback_raw")
 }
+
+func TestCompleteTopUpByCondition(t *testing.T) {
+	db := setupTopUpTestDB(t)
+
+	topUp := &TopUp{
+		UserId:  1,
+		Amount:  100,
+		Money:   2.0,
+		TradeNo: "cond_test_001",
+		Status:  common.TopUpStatusPending,
+	}
+	require.NoError(t, db.Create(topUp).Error)
+
+	// 第一次调用应成功（影响 1 行）
+	affected, err := CompleteTopUpByCondition(db, "cond_test_001", "provider_tx_001", 1234567890)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), affected)
+
+	var loaded TopUp
+	require.NoError(t, db.Where("trade_no = ?", "cond_test_001").First(&loaded).Error)
+	require.Equal(t, common.TopUpStatusSuccess, loaded.Status)
+	require.Equal(t, "provider_tx_001", loaded.ProviderTxId)
+	require.Equal(t, int64(1234567890), loaded.PaidAt)
+	require.Greater(t, loaded.CompleteTime, int64(0))
+
+	// 第二次调用应幂等（影响 0 行）— 这是多副本场景的核心保证
+	affected, err = CompleteTopUpByCondition(db, "cond_test_001", "provider_tx_002", 9999999999)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), affected)
+
+	// 验证 provider_tx_id 没有被覆盖
+	require.NoError(t, db.Where("trade_no = ?", "cond_test_001").First(&loaded).Error)
+	require.Equal(t, "provider_tx_001", loaded.ProviderTxId, "first call's provider_tx_id must not be overwritten")
+	require.Equal(t, int64(1234567890), loaded.PaidAt, "first call's paid_at must not be overwritten")
+}
+
+func TestCompleteTopUpByConditionRejectsNonPending(t *testing.T) {
+	db := setupTopUpTestDB(t)
+
+	// 创建一个已是 success 状态的订单
+	topUp := &TopUp{
+		UserId:  2,
+		Amount:  100,
+		Money:   2.0,
+		TradeNo: "non_pending_001",
+		Status:  common.TopUpStatusSuccess,
+	}
+	require.NoError(t, db.Create(topUp).Error)
+
+	affected, err := CompleteTopUpByCondition(db, "non_pending_001", "tx_x", 123)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), affected, "must not update non-pending orders")
+}
+
+func TestCompleteTopUpByConditionUnknownTradeNo(t *testing.T) {
+	db := setupTopUpTestDB(t)
+
+	affected, err := CompleteTopUpByCondition(db, "does_not_exist", "tx_y", 456)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), affected)
+}

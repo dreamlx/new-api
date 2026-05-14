@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -456,4 +457,18 @@ func RechargeWaffo(tradeNo string) (err error) {
 	}
 
 	return nil
+}
+
+// CompleteTopUpByCondition 用 DB 条件更新完成订单（多副本幂等）
+// 仅当 status='pending' 时更新为 success；返回影响行数。
+func CompleteTopUpByCondition(db *gorm.DB, tradeNo string, providerTxId string, paidAt int64) (int64, error) {
+	result := db.Model(&TopUp{}).
+		Where("trade_no = ? AND status = ?", tradeNo, common.TopUpStatusPending).
+		Updates(map[string]interface{}{
+			"status":         common.TopUpStatusSuccess,
+			"provider_tx_id": providerTxId,
+			"paid_at":        paidAt,
+			"complete_time":  time.Now().Unix(),
+		})
+	return result.RowsAffected, result.Error
 }
