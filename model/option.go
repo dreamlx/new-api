@@ -332,6 +332,8 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.DefaultUseAutoGroup = boolValue
 		case "ExposeRatioEnabled":
 			ratio_setting.SetExposeRatioEnabled(boolValue)
+		case "WxpayEnabled":
+			setting.WxpayEnabled = boolValue
 		}
 	}
 	switch key {
@@ -392,8 +394,6 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
-	case "WxpayEnabled":
-		setting.WxpayEnabled = value == "true"
 	case "WxpayMchId":
 		setting.WxpayMchId = value
 		setting.ResetWechatPayClient()
