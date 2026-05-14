@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -361,5 +362,76 @@ func AlipayNotify(c *gin.Context) {
 	}
 
 	c.String(http.StatusOK, alipayNotifyOK)
+}
+
+// alipayReturnRedirect issues a 302 to the console topup page with the given
+// status (success|pending|fail). The frontend reads `pay` from the query
+// string and renders the appropriate UI. The trade_no is forwarded so the
+// console can highlight the relevant order in the history list.
+func alipayReturnRedirect(c *gin.Context, status, tradeNo string) {
+	q := url.Values{}
+	q.Set("pay", status)
+	if tradeNo != "" {
+		q.Set("trade_no", tradeNo)
+	}
+	target := system_setting.ServerAddress + "/console/topup?" + q.Encode()
+	c.Redirect(http.StatusFound, target)
+}
+
+// AlipayReturn handles the synchronous browser redirect after the user pays
+// on the Alipay-hosted page.
+//
+// GET /api/user/alipay/return
+//
+// This is a UX-only convenience: the authoritative state transition lives in
+// AlipayNotify (server-to-server). We NEVER grant quota here — the buyer
+// could open the return URL manually and forge query params. Worst case the
+// user sees `pay=pending` for a few seconds until the async notify wins the
+// race; that is acceptable.
+//
+// Behaviour:
+//  1. If signature verification fails, redirect to pay=fail.
+//  2. If out_trade_no is missing, redirect to pay=fail (we can't even tell
+//     the user which order they paid for, so treat as a malformed bounce).
+//  3. If the local TopUp is already success (notify won the race),
+//     redirect to pay=success.
+//  4. Otherwise (including unknown order), redirect to pay=pending.
+func AlipayReturn(c *gin.Context) {
+	values := c.Request.URL.Query()
+
+	// Signature check — even though this is a UX-only path, a verified
+	// signature means the parameters genuinely came from Alipay and we can
+	// trust the out_trade_no for the lookup below.
+	svc, err := alipayServiceProvider()
+	if err != nil || svc == nil {
+		log.Printf("alipay return: service unavailable: %v", err)
+		alipayReturnRedirect(c, "fail", "")
+		return
+	}
+	if err := svc.VerifySign(c.Request.Context(), values); err != nil {
+		log.Printf("alipay return: signature verification failed: %v", err)
+		alipayReturnRedirect(c, "fail", "")
+		return
+	}
+
+	tradeNo := values.Get("out_trade_no")
+	if tradeNo == "" {
+		log.Printf("alipay return: missing out_trade_no")
+		alipayReturnRedirect(c, "fail", "")
+		return
+	}
+
+	topUp := model.GetTopUpByTradeNo(tradeNo)
+	if topUp == nil {
+		log.Printf("alipay return: top-up not found tradeNo=%s (notify may not have fired yet)", tradeNo)
+		alipayReturnRedirect(c, "pending", tradeNo)
+		return
+	}
+
+	if topUp.Status == common.TopUpStatusSuccess {
+		alipayReturnRedirect(c, "success", tradeNo)
+		return
+	}
+	alipayReturnRedirect(c, "pending", tradeNo)
 }
 
