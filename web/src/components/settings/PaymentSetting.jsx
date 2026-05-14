@@ -25,6 +25,8 @@ import SettingsPaymentGatewayStripe from '../../pages/Setting/Payment/SettingsPa
 import SettingsPaymentGatewayCreem from '../../pages/Setting/Payment/SettingsPaymentGatewayCreem';
 import SettingsPaymentGatewayWaffo from '../../pages/Setting/Payment/SettingsPaymentGatewayWaffo';
 import SettingsPaymentGatewayPayPal from '../../pages/Setting/Payment/SettingsPaymentGatewayPayPal';
+import SettingsPaymentGatewayAlipay from '../../pages/Setting/Payment/SettingsPaymentGatewayAlipay';
+import SettingsPaymentGatewayWxpay from '../../pages/Setting/Payment/SettingsPaymentGatewayWxpay';
 import { API, showError, toBoolean } from '../../helpers';
 import { useTranslation } from 'react-i18next';
 
@@ -55,6 +57,23 @@ const PaymentSetting = () => {
     PayPalWebhookSecret: '',
     PayPalMode: 'sandbox',
     PayPalMinTopUp: 1,
+
+    AlipayEnabled: false,
+    AlipayAppId: '',
+    AlipayPrivateKey: '',
+    AlipayPublicKey: '',
+    AlipaySellerId: '',
+    AlipayIsSandbox: false,
+    AlipayMinTopUp: 1,
+
+    WxpayEnabled: false,
+    WxpayAppId: '',
+    WxpayMchId: '',
+    WxpayMchSerialNo: '',
+    WxpayApiV3Key: '',
+    WxpayPrivateKey: '',
+    WxpayNotifyURL: '',
+    WxpayMinTopUp: 1,
   });
 
   let [loading, setLoading] = useState(false);
@@ -104,6 +123,8 @@ const PaymentSetting = () => {
           case 'StripeUnitPrice':
           case 'StripeMinTopUp':
           case 'PayPalMinTopUp':
+          case 'AlipayMinTopUp':
+          case 'WxpayMinTopUp':
             newInputs[item.key] = parseFloat(item.value);
             break;
           default:
@@ -157,6 +178,12 @@ const PaymentSetting = () => {
         </Card>
         <Card style={{ marginTop: '10px' }}>
           <SettingsPaymentGatewayPayPal options={inputs} refresh={onRefresh} />
+        </Card>
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsPaymentGatewayAlipay options={inputs} refresh={onRefresh} />
+        </Card>
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsPaymentGatewayWxpay options={inputs} refresh={onRefresh} />
         </Card>
       </Spin>
     </>
