@@ -484,3 +484,50 @@ func SetTopUpAnomaly(db *gorm.DB, tradeNo string, reason string) error {
 			"callback_raw": reason,
 		}).Error
 }
+
+// MarkRefundPending 标记退款为 pending（DB 条件更新，幂等）
+// 仅当 status=success 且 refund_status 为空或 failed 时更新
+func MarkRefundPending(db *gorm.DB, tradeNo string, adminId int, reason string) (int64, error) {
+	result := db.Model(&TopUp{}).
+		Where("trade_no = ? AND status = ? AND (refund_status = ? OR refund_status = ?)",
+			tradeNo, common.TopUpStatusSuccess, common.RefundStatusNone, common.RefundStatusFailed).
+		Updates(map[string]interface{}{
+			"refund_status":       common.RefundStatusPending,
+			"refund_request_time": common.GetTimestamp(),
+			"refund_admin_id":     adminId,
+			"refund_reason":       reason,
+		})
+	return result.RowsAffected, result.Error
+}
+
+// CompleteRefund 完成退款（success）
+func CompleteRefund(db *gorm.DB, tradeNo string, refundTradeNo string, refundedQuota int64) error {
+	return db.Model(&TopUp{}).
+		Where("trade_no = ?", tradeNo).
+		Updates(map[string]interface{}{
+			"refund_status":   common.RefundStatusSuccess,
+			"refund_time":     common.GetTimestamp(),
+			"refund_trade_no": refundTradeNo,
+			"refunded_quota":  refundedQuota,
+		}).Error
+}
+
+// MarkRefundFailed 标记退款失败
+func MarkRefundFailed(db *gorm.DB, tradeNo string, reason string) error {
+	return db.Model(&TopUp{}).
+		Where("trade_no = ?", tradeNo).
+		Updates(map[string]interface{}{
+			"refund_status": common.RefundStatusFailed,
+			"callback_raw":  reason,
+		}).Error
+}
+
+// MarkRefundAnomaly 标记退款异常（超时/对账不一致）
+func MarkRefundAnomaly(db *gorm.DB, tradeNo string, reason string) error {
+	return db.Model(&TopUp{}).
+		Where("trade_no = ?", tradeNo).
+		Updates(map[string]interface{}{
+			"refund_status": common.RefundStatusAnomaly,
+			"callback_raw":  reason,
+		}).Error
+}

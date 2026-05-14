@@ -212,3 +212,124 @@ func TestSetTopUpAnomaly(t *testing.T) {
 	require.Equal(t, common.TopUpStatusAnomaly, loaded.Status)
 	require.Contains(t, loaded.CallbackRaw, "amount mismatch")
 }
+
+func TestRefundStateMachine(t *testing.T) {
+	db := setupTopUpTestDB(t)
+
+	topUp := &TopUp{
+		UserId:       1,
+		Amount:       100,
+		Money:        2.0,
+		TradeNo:      "refund_test_001",
+		Status:       common.TopUpStatusSuccess,
+		QuotaGranted: 100,
+	}
+	require.NoError(t, db.Create(topUp).Error)
+
+	// Step 1: Mark refund pending
+	affected, err := MarkRefundPending(db, "refund_test_001", 1, "user request")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), affected)
+
+	var loaded TopUp
+	require.NoError(t, db.Where("trade_no = ?", "refund_test_001").First(&loaded).Error)
+	require.Equal(t, common.RefundStatusPending, loaded.RefundStatus)
+	require.Equal(t, 1, loaded.RefundAdminId)
+	require.Contains(t, loaded.RefundReason, "user request")
+	require.Greater(t, loaded.RefundRequestTime, int64(0))
+
+	// Step 2: Complete refund
+	err = CompleteRefund(db, "refund_test_001", "refund_tx_001", 100)
+	require.NoError(t, err)
+
+	require.NoError(t, db.Where("trade_no = ?", "refund_test_001").First(&loaded).Error)
+	require.Equal(t, common.RefundStatusSuccess, loaded.RefundStatus)
+	require.Equal(t, "refund_tx_001", loaded.RefundTradeNo)
+	require.Equal(t, int64(100), loaded.RefundedQuota)
+	require.Greater(t, loaded.RefundTime, int64(0))
+}
+
+func TestMarkRefundPendingIdempotency(t *testing.T) {
+	db := setupTopUpTestDB(t)
+
+	topUp := &TopUp{
+		UserId:        1,
+		Amount:        100,
+		Money:         2.0,
+		TradeNo:       "refund_idem_001",
+		Status:        common.TopUpStatusSuccess,
+		RefundStatus:  common.RefundStatusPending,
+		RefundAdminId: 1,
+	}
+	require.NoError(t, db.Create(topUp).Error)
+
+	// Already refund_pending — must NOT update (0 rows affected)
+	affected, err := MarkRefundPending(db, "refund_idem_001", 2, "retry")
+	require.NoError(t, err)
+	require.Equal(t, int64(0), affected)
+
+	var loaded TopUp
+	require.NoError(t, db.Where("trade_no = ?", "refund_idem_001").First(&loaded).Error)
+	require.Equal(t, 1, loaded.RefundAdminId, "admin_id must not be overwritten")
+}
+
+func TestMarkRefundPendingRejectsNonSuccess(t *testing.T) {
+	db := setupTopUpTestDB(t)
+
+	topUp := &TopUp{
+		UserId:  1,
+		Amount:  100,
+		Money:   2.0,
+		TradeNo: "refund_nonsuccess_001",
+		Status:  common.TopUpStatusPending,
+	}
+	require.NoError(t, db.Create(topUp).Error)
+
+	affected, err := MarkRefundPending(db, "refund_nonsuccess_001", 1, "test")
+	require.NoError(t, err)
+	require.Equal(t, int64(0), affected)
+}
+
+func TestMarkRefundFailed(t *testing.T) {
+	db := setupTopUpTestDB(t)
+
+	topUp := &TopUp{
+		UserId:       1,
+		Amount:       100,
+		Money:        2.0,
+		TradeNo:      "refund_fail_001",
+		Status:       common.TopUpStatusSuccess,
+		RefundStatus: common.RefundStatusPending,
+	}
+	require.NoError(t, db.Create(topUp).Error)
+
+	err := MarkRefundFailed(db, "refund_fail_001", "bank rejected")
+	require.NoError(t, err)
+
+	var loaded TopUp
+	require.NoError(t, db.Where("trade_no = ?", "refund_fail_001").First(&loaded).Error)
+	require.Equal(t, common.RefundStatusFailed, loaded.RefundStatus)
+	require.Contains(t, loaded.CallbackRaw, "bank rejected")
+}
+
+func TestMarkRefundAnomaly(t *testing.T) {
+	db := setupTopUpTestDB(t)
+
+	topUp := &TopUp{
+		UserId:       1,
+		Amount:       100,
+		Money:        2.0,
+		TradeNo:      "refund_anomaly_001",
+		Status:       common.TopUpStatusSuccess,
+		RefundStatus: common.RefundStatusPending,
+	}
+	require.NoError(t, db.Create(topUp).Error)
+
+	err := MarkRefundAnomaly(db, "refund_anomaly_001", "timeout 7 days")
+	require.NoError(t, err)
+
+	var loaded TopUp
+	require.NoError(t, db.Where("trade_no = ?", "refund_anomaly_001").First(&loaded).Error)
+	require.Equal(t, common.RefundStatusAnomaly, loaded.RefundStatus)
+	require.Contains(t, loaded.CallbackRaw, "timeout")
+}
