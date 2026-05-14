@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 	"github.com/shopspring/decimal"
+	"github.com/smartwalle/alipay/v3"
 )
 
 func GetTopUpInfo(c *gin.Context) {
@@ -424,6 +426,22 @@ func GetTopUpStatus(c *gin.Context) {
 		return
 	}
 
+	// Active-query fallback: if the order is still pending and stale enough
+	// that the async webhook should have arrived, poll the upstream provider
+	// once. Reduces user-visible latency when the webhook is slow without
+	// hammering the SDK on every poll.
+	if topUp.Status == common.TopUpStatusPending && (time.Now().Unix()-topUp.CreateTime) > topUpActiveQueryStaleSeconds {
+		if tryActiveQueryTopUp(c.Request.Context(), topUp) {
+			// Re-fetch only when the active query completed the order, so the
+			// response reflects the new success state. Anomaly state (set on
+			// amount mismatch) is intentionally not surfaced; the user keeps
+			// seeing "pending" while ops investigates via logs.
+			if refreshed := model.GetTopUpByTradeNo(tradeNo); refreshed != nil {
+				topUp = refreshed
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "success",
 		"data": gin.H{
@@ -437,6 +455,158 @@ func GetTopUpStatus(c *gin.Context) {
 			"expire_time":    topUp.ExpireTime,
 		},
 	})
+}
+
+// topUpActiveQueryStaleSeconds is the minimum age (in seconds) a pending
+// order must reach before GetTopUpStatus will fall back to an upstream SDK
+// query. The threshold exists so frequent polling from the QR-code page does
+// not turn into an SDK request storm; the async webhook usually wins within
+// a few seconds of the user paying.
+const topUpActiveQueryStaleSeconds = 5
+
+// tryActiveQueryTopUp pokes the upstream provider for a single pending order
+// and, if the provider confirms the payment, completes the order through
+// the same idempotent path as the async notify handlers. Errors are logged
+// and swallowed: failure to actively query MUST NOT fail the status read.
+//
+// Returns true only when the order transitioned to a terminal SUCCESS state
+// during this call (so the caller knows to re-fetch). Returns false on any
+// non-success outcome including network errors, provider-still-pending, and
+// amount mismatches (which set anomaly but stay invisible to the user).
+func tryActiveQueryTopUp(ctx context.Context, topUp *model.TopUp) bool {
+	switch topUp.PaymentMethod {
+	case PaymentMethodAlipay:
+		return activeQueryAlipay(ctx, topUp)
+	case PaymentMethodWxpay:
+		return activeQueryWxpay(ctx, topUp)
+	}
+	return false
+}
+
+func activeQueryAlipay(ctx context.Context, topUp *model.TopUp) bool {
+	svc, err := alipayServiceProvider()
+	if err != nil || svc == nil {
+		log.Printf("topup active query: alipay service unavailable tradeNo=%s err=%v", topUp.TradeNo, err)
+		return false
+	}
+	rsp, err := svc.TradeQuery(ctx, topUp.TradeNo)
+	if err != nil || rsp == nil {
+		log.Printf("topup active query: alipay TradeQuery failed tradeNo=%s err=%v", topUp.TradeNo, err)
+		return false
+	}
+	if rsp.TradeStatus != alipay.TradeStatusSuccess && rsp.TradeStatus != alipay.TradeStatusFinished {
+		return false
+	}
+	cents, err := common.AlipayAmountToCents(rsp.TotalAmount)
+	if err != nil {
+		reason := fmt.Sprintf("active query: invalid total_amount=%q err=%v", rsp.TotalAmount, err)
+		log.Printf("topup active query: %s tradeNo=%s", reason, topUp.TradeNo)
+		_ = model.SetTopUpAnomaly(model.DB, topUp.TradeNo, reason)
+		return false
+	}
+	if topUp.PayAmountCents > 0 && cents != topUp.PayAmountCents {
+		reason := fmt.Sprintf("active query amount mismatch: provider=%d expected=%d", cents, topUp.PayAmountCents)
+		log.Printf("topup active query: %s tradeNo=%s", reason, topUp.TradeNo)
+		_ = model.SetTopUpAnomaly(model.DB, topUp.TradeNo, reason)
+		return false
+	}
+	paidAt := alipayParseGmt(rsp.SendPayDate)
+	_, err = finalizeTopUpSuccess(topUp, rsp.TradeNo, paidAt, "使用支付宝")
+	if err != nil {
+		log.Printf("topup active query: alipay finalize failed tradeNo=%s err=%v", topUp.TradeNo, err)
+	}
+	// err==nil means the row is now terminal (either we flipped it this call,
+	// or a concurrent caller already did and we observed rows=0).
+	return err == nil
+}
+
+func activeQueryWxpay(ctx context.Context, topUp *model.TopUp) bool {
+	svc, err := wechatPayServiceProvider()
+	if err != nil || svc == nil {
+		log.Printf("topup active query: wxpay service unavailable tradeNo=%s err=%v", topUp.TradeNo, err)
+		return false
+	}
+	tx, err := svc.QueryOrderByOutTradeNo(ctx, topUp.TradeNo)
+	if err != nil || tx == nil {
+		log.Printf("topup active query: wxpay QueryOrderByOutTradeNo failed tradeNo=%s err=%v", topUp.TradeNo, err)
+		return false
+	}
+	if tx.TradeState == nil || *tx.TradeState != "SUCCESS" {
+		return false
+	}
+	var providerTxId string
+	if tx.TransactionId != nil {
+		providerTxId = *tx.TransactionId
+	}
+	var amountTotal int64
+	if tx.Amount != nil && tx.Amount.Total != nil {
+		amountTotal = *tx.Amount.Total
+	}
+	if topUp.PayAmountCents > 0 && amountTotal != topUp.PayAmountCents {
+		reason := fmt.Sprintf("active query amount mismatch: provider=%d expected=%d", amountTotal, topUp.PayAmountCents)
+		log.Printf("topup active query: %s tradeNo=%s", reason, topUp.TradeNo)
+		_ = model.SetTopUpAnomaly(model.DB, topUp.TradeNo, reason)
+		return false
+	}
+	var paidAt int64
+	if tx.SuccessTime != nil {
+		if pt, perr := time.Parse(time.RFC3339, *tx.SuccessTime); perr == nil {
+			paidAt = pt.Unix()
+		}
+	}
+	_, err = finalizeTopUpSuccess(topUp, providerTxId, paidAt, "使用微信")
+	if err != nil {
+		log.Printf("topup active query: wxpay finalize failed tradeNo=%s err=%v", topUp.TradeNo, err)
+	}
+	return err == nil
+}
+
+// finalizeTopUpSuccess is the shared idempotent completion path used by the
+// alipay/wxpay async notify handlers and by the active-query fallback in
+// GetTopUpStatus. It performs:
+//  1. CompleteTopUpByCondition (multi-replica safe; only flips pending->success)
+//  2. IncreaseUserQuota
+//  3. RecordLog
+//
+// providerPrefix is the human-readable Chinese provider name used in the log
+// message ("使用支付宝" / "使用微信"), preserving the legacy log format that
+// operators may be parsing.
+//
+// Returns granted=true only when this call actually flipped the order to
+// success (RowsAffected==1). granted=false means a concurrent completion
+// won the race; the caller should treat it as a successful idempotent skip.
+//
+// The caller MUST hold LockOrder(topUp.TradeNo) when invoking this from a
+// path where contention with other notify deliveries is expected; the DB
+// conditional update is the authoritative cross-replica boundary.
+func finalizeTopUpSuccess(topUp *model.TopUp, providerTxId string, paidAt int64, providerPrefix string) (granted bool, err error) {
+	rowsAffected, err := model.CompleteTopUpByCondition(model.DB, topUp.TradeNo, providerTxId, paidAt)
+	if err != nil {
+		return false, err
+	}
+	if rowsAffected == 0 {
+		// Already completed by a concurrent caller; idempotent no-op.
+		return false, nil
+	}
+
+	dAmount := decimal.NewFromInt(topUp.Amount)
+	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
+	if quotaToAdd <= 0 {
+		return true, nil
+	}
+	if err := model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true); err != nil {
+		// Status already flipped to success; surface the error to the caller
+		// but treat the order as granted so the caller does not retry the
+		// completion (which would be a no-op anyway).
+		log.Printf("finalizeTopUpSuccess: IncreaseUserQuota failed tradeNo=%s userId=%d err=%v",
+			topUp.TradeNo, topUp.UserId, err)
+		return true, err
+	}
+	model.RecordLog(topUp.UserId, model.LogTypeTopup,
+		fmt.Sprintf("%s在线充值成功，充值金额：%s，订单号：%s",
+			providerPrefix, logger.LogQuota(quotaToAdd), topUp.TradeNo))
+	return true, nil
 }
 
 func RequestAmount(c *gin.Context) {

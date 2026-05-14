@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -225,32 +224,20 @@ func WxpayNotify(c *gin.Context) {
 		return
 	}
 
-	rowsAffected, err := model.CompleteTopUpByCondition(model.DB, tradeNo, result.TransactionId, result.PaidAt)
-	if err != nil {
+	granted, err := finalizeTopUpSuccess(topUp, result.TransactionId, result.PaidAt, "使用微信")
+	if err != nil && !granted {
 		log.Printf("wxpay notify: CompleteTopUpByCondition failed tradeNo=%s err=%v", tradeNo, err)
 		wxpayFail(c, http.StatusInternalServerError, "db error")
 		return
 	}
-	if rowsAffected == 0 {
-		log.Printf("wxpay notify: idempotent skip tradeNo=%s (already completed)", tradeNo)
-		wxpaySuccess(c)
-		return
+	if err != nil {
+		// granted==true but IncreaseUserQuota failed after the status flip;
+		// ack SUCCESS so WeChat does not retry-storm; ops reconciles via logs.
+		log.Printf("wxpay notify: IncreaseUserQuota failed tradeNo=%s userId=%d err=%v",
+			tradeNo, topUp.UserId, err)
 	}
-
-	dAmount := decimal.NewFromInt(topUp.Amount)
-	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-	quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
-	if quotaToAdd > 0 {
-		if err := model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true); err != nil {
-			// Quota grant failed AFTER status flip; ack SUCCESS so WeChat does not
-			// retry-storm, and surface the inconsistency through logs for ops.
-			log.Printf("wxpay notify: IncreaseUserQuota failed tradeNo=%s userId=%d err=%v",
-				tradeNo, topUp.UserId, err)
-		} else {
-			model.RecordLog(topUp.UserId, model.LogTypeTopup,
-				fmt.Sprintf("使用微信在线充值成功，充值金额：%s，订单号：%s",
-					logger.LogQuota(quotaToAdd), tradeNo))
-		}
+	if !granted && err == nil {
+		log.Printf("wxpay notify: idempotent skip tradeNo=%s (already completed)", tradeNo)
 	}
 
 	wxpaySuccess(c)

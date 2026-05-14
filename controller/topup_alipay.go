@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -329,36 +328,25 @@ func AlipayNotify(c *gin.Context) {
 		return
 	}
 
-	// Authoritative idempotent completion (multi-replica safe).
+	// Authoritative idempotent completion (multi-replica safe). The shared
+	// helper performs CompleteTopUpByCondition + IncreaseUserQuota + RecordLog.
 	paidAt := alipayParseGmt(notification.GmtPayment)
-	rowsAffected, err := model.CompleteTopUpByCondition(model.DB, tradeNo, notification.TradeNo, paidAt)
-	if err != nil {
+	granted, err := finalizeTopUpSuccess(topUp, notification.TradeNo, paidAt, "使用支付宝")
+	if err != nil && !granted {
+		// DB conditional update itself failed; let Alipay retry.
 		log.Printf("alipay notify: CompleteTopUpByCondition failed tradeNo=%s err=%v", tradeNo, err)
 		c.String(http.StatusOK, alipayNotifyErr)
 		return
 	}
-	if rowsAffected == 0 {
-		// Order was already completed by another replica / duplicate callback.
-		// Respond success so Alipay stops retrying.
-		log.Printf("alipay notify: idempotent skip tradeNo=%s (already completed)", tradeNo)
-		c.String(http.StatusOK, alipayNotifyOK)
-		return
+	if err != nil {
+		// granted==true but IncreaseUserQuota failed after the status flip;
+		// status is already success, so we ack success and surface the
+		// inconsistency via logs for ops to reconcile.
+		log.Printf("alipay notify: IncreaseUserQuota failed tradeNo=%s userId=%d err=%v",
+			tradeNo, topUp.UserId, err)
 	}
-
-	// Grant quota.
-	dAmount := decimal.NewFromInt(topUp.Amount)
-	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-	quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
-	if quotaToAdd > 0 {
-		if err := model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true); err != nil {
-			// We have already flipped status=success; surface the error in logs.
-			log.Printf("alipay notify: IncreaseUserQuota failed tradeNo=%s userId=%d err=%v",
-				tradeNo, topUp.UserId, err)
-		} else {
-			model.RecordLog(topUp.UserId, model.LogTypeTopup,
-				fmt.Sprintf("使用支付宝在线充值成功，充值金额：%s，订单号：%s",
-					logger.LogQuota(quotaToAdd), tradeNo))
-		}
+	if !granted && err == nil {
+		log.Printf("alipay notify: idempotent skip tradeNo=%s (already completed)", tradeNo)
 	}
 
 	c.String(http.StatusOK, alipayNotifyOK)
