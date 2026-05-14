@@ -22,6 +22,8 @@
 
 ### Task 1: 新增常量定义
 
+> **Erratum (2026-05-14)**: 计划原版要求新增 `common.LogTypeRefund = 7`，但实施时发现 `model.LogTypeRefund = 6` 已存在并被多处使用（`controller/midjourney.go`、`service/task_billing.go`）。**Task 1 实际只新增 6 个状态常量**（不含 `LogTypeRefund`）。后续涉及退款日志的 task 直接使用 `model.LogTypeRefund`。
+
 **Files:**
 - Modify: `common/constants.go`
 
@@ -38,7 +40,6 @@ import (
 
 func TestNewPaymentConstants(t *testing.T) {
 	require.Equal(t, "anomaly", TopUpStatusAnomaly)
-	require.Equal(t, "refund", LogTypeRefund)
 	require.Equal(t, "", RefundStatusNone)
 	require.Equal(t, "refund_pending", RefundStatusPending)
 	require.Equal(t, "refund_success", RefundStatusSuccess)
@@ -63,10 +64,6 @@ const (
 )
 
 const (
-	LogTypeRefund = 7
-)
-
-const (
 	RefundStatusNone    = ""
 	RefundStatusPending = "refund_pending"
 	RefundStatusSuccess = "refund_success"
@@ -74,6 +71,8 @@ const (
 	RefundStatusAnomaly = "refund_anomaly"
 )
 ```
+
+> **注**: 不要新增 `LogTypeRefund`，使用已存在的 `model.LogTypeRefund = 6`。
 
 **Step 4: 运行测试验证通过**
 
@@ -89,8 +88,10 @@ git add common/constants.go common/constants_test.go
 git commit -m "feat(common): add payment constants for alipay/wxpay
 
 - TopUpStatusAnomaly for validation failures
-- LogTypeRefund for refund audit logs
 - RefundStatus* for refund state machine
+
+LogTypeRefund intentionally omitted — model.LogTypeRefund already
+defined as 6 in model/log.go.
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
@@ -194,7 +195,7 @@ type TopUp struct {
 	CallbackRaw  string `json:"-" gorm:"type:text"` // 脱敏，不返回前端
 	
 	// 退款状态机
-	RefundStatus      string `json:"refund_status" gorm:"type:varchar(32);index"`
+	RefundStatus      string `json:"refund_status" gorm:"type:varchar(32);index;not null;default:''"`
 	RefundRequestTime int64  `json:"refund_request_time"`
 	RefundTime        int64  `json:"refund_time"`
 	RefundReason      string `json:"refund_reason" gorm:"type:text"`
