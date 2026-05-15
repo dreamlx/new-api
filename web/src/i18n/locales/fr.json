@@ -3695,6 +3695,10 @@
     "WiseModel 消耗额度": "",
     "WiseModel 资源包 ID": "",
     "Worker地址": "Adresse du Worker",
-    "Worker密钥": "Clé du Worker"
+    "Worker密钥": "Clé du Worker",
+    "微信支付公钥 ID": "ID de clé publique WeChat Pay",
+    "微信支付公钥": "Clé publique WeChat Pay",
+    "pub_key.pem 完整内容，需包含 BEGIN/END PUBLIC KEY": "Contenu complet de pub_key.pem, avec BEGIN/END PUBLIC KEY",
+    "当前使用微信支付公钥模式。API v3 密钥、商户私钥与微信支付公钥为敏感信息，仅在初次配置或更换时填写。留空表示沿用已保存的值。": "Le mode actuel utilise la clé publique WeChat Pay. La clé API v3, la clé privée du marchand et la clé publique WeChat Pay sont sensibles. Renseignez-les uniquement lors de la configuration initiale ou d'un remplacement. Laissez vide pour conserver la valeur enregistrée."
   }
 }

@@ -3689,6 +3689,10 @@
     "WiseModel 消耗额度": "",
     "WiseModel 资源包 ID": "",
     "Worker地址": "Worker位址",
-    "Worker密钥": "Worker密鑰"
+    "Worker密钥": "Worker密鑰",
+    "微信支付公钥 ID": "微信支付公鑰 ID",
+    "微信支付公钥": "微信支付公鑰",
+    "pub_key.pem 完整内容，需包含 BEGIN/END PUBLIC KEY": "pub_key.pem 完整內容，需包含 BEGIN/END PUBLIC KEY",
+    "当前使用微信支付公钥模式。API v3 密钥、商户私钥与微信支付公钥为敏感信息，仅在初次配置或更换时填写。留空表示沿用已保存的值。": "目前使用微信支付公鑰模式。API v3 密鑰、商戶私鑰與微信支付公鑰為敏感資訊，僅在初次設定或更換時填寫。留空表示沿用已儲存的值。"
   }
 }

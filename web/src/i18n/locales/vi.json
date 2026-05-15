@@ -4230,6 +4230,10 @@
     "WiseModel 消耗额度": "",
     "WiseModel 资源包 ID": "",
     "Worker地址": "Địa chỉ Worker",
-    "Worker密钥": "Khóa Worker"
+    "Worker密钥": "Khóa Worker",
+    "微信支付公钥 ID": "ID khóa công khai WeChat Pay",
+    "微信支付公钥": "Khóa công khai WeChat Pay",
+    "pub_key.pem 完整内容，需包含 BEGIN/END PUBLIC KEY": "Toàn bộ nội dung pub_key.pem, bao gồm BEGIN/END PUBLIC KEY",
+    "当前使用微信支付公钥模式。API v3 密钥、商户私钥与微信支付公钥为敏感信息，仅在初次配置或更换时填写。留空表示沿用已保存的值。": "Chế độ hiện tại sử dụng khóa công khai WeChat Pay. Khóa API v3, khóa riêng của thương nhân và khóa công khai WeChat Pay là thông tin nhạy cảm. Chỉ nhập khi cấu hình lần đầu hoặc thay thế. Để trống để giữ giá trị đã lưu."
   }
 }

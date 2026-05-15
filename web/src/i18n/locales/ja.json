@@ -3664,6 +3664,10 @@
     "WiseModel 消耗额度": "",
     "WiseModel 资源包 ID": "",
     "Worker地址": "Workerアドレス",
-    "Worker密钥": "WorkerAPIキー"
+    "Worker密钥": "WorkerAPIキー",
+    "微信支付公钥 ID": "WeChat Pay公開鍵ID",
+    "微信支付公钥": "WeChat Pay公開鍵",
+    "pub_key.pem 完整内容，需包含 BEGIN/END PUBLIC KEY": "pub_key.pem の全文。BEGIN/END PUBLIC KEY を含めてください",
+    "当前使用微信支付公钥模式。API v3 密钥、商户私钥与微信支付公钥为敏感信息，仅在初次配置或更换时填写。留空表示沿用已保存的值。": "現在はWeChat Pay公開鍵モードを使用しています。API v3キー、加盟店秘密鍵、WeChat Pay公開鍵は機密情報です。初回設定または交換時のみ入力してください。空欄の場合は保存済みの値を使用します。"
   }
 }

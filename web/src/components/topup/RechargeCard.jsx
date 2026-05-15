@@ -35,7 +35,7 @@ import {
   Tabs,
   TabPane,
 } from '@douyinfe/semi-ui';
-import { SiAlipay, SiWechat, SiStripe, SiPaypal } from 'react-icons/si';
+import { SiAlipay, SiStripe, SiPaypal } from 'react-icons/si';
 import {
   CreditCard,
   Coins,
@@ -49,6 +49,7 @@ import { IconGift } from '@douyinfe/semi-icons';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
 import { getCurrencyConfig } from '../../helpers/render';
 import SubscriptionPlansCard from './SubscriptionPlansCard';
+import WeChatPayIcon from '../common/logo/WeChatPayIcon';
 
 const { Text } = Typography;
 
@@ -110,6 +111,23 @@ const RechargeCard = ({
   const initialTabSetRef = useRef(false);
   const showAmountSkeleton = useMinimumLoadingTime(amountLoading);
   const [activeTab, setActiveTab] = useState('topup');
+  const visiblePayMethods = (payMethods || []).filter((method) => {
+    if (!method || method.type === 'waffo') {
+      return false;
+    }
+    const isStandaloneGateway =
+      method.type === 'stripe' || method.type === 'paypal';
+    if (!enableOnlineTopUp && !isStandaloneGateway) {
+      return false;
+    }
+    if (method.type === 'alipay' && enableAlipayTopUp) {
+      return false;
+    }
+    if (method.type === 'wxpay' && enableWxpayTopUp) {
+      return false;
+    }
+    return true;
+  });
   const shouldShowSubscription =
     !subscriptionLoading && subscriptionPlans.length > 0;
 
@@ -298,11 +316,11 @@ const RechargeCard = ({
                       style={{ width: '100%' }}
                     />
                   </Col>
-                  {(payMethods && payMethods.filter(m => m.type !== 'waffo').length > 0) || enableAlipayTopUp || enableWxpayTopUp ? (
+                  {visiblePayMethods.length > 0 || enableAlipayTopUp || enableWxpayTopUp ? (
                   <Col xs={24} sm={24} md={24} lg={14} xl={14}>
                     <Form.Slot label={t('选择支付方式')}>
                         <Space wrap>
-                          {payMethods.filter(m => m.type !== 'waffo').map((payMethod) => {
+                          {visiblePayMethods.map((payMethod) => {
                             const minTopupVal = Number(payMethod.min_topup) || 0;
                             const isStripe = payMethod.type === 'stripe';
                             const isPayPal = payMethod.type === 'paypal';
@@ -326,7 +344,7 @@ const RechargeCard = ({
                                   payMethod.type === 'alipay' ? (
                                     <SiAlipay size={18} color='#1677FF' />
                                   ) : payMethod.type === 'wxpay' ? (
-                                    <SiWechat size={18} color='#07C160' />
+                                    <WeChatPayIcon size={18} />
                                   ) : payMethod.type === 'stripe' ? (
                                     <SiStripe size={18} color='#635BFF' />
                                   ) : payMethod.type === 'paypal' ? (
@@ -406,7 +424,7 @@ const RechargeCard = ({
                                 onClick={() => directWxpayTopUp?.()}
                                 disabled={tooLow}
                                 loading={paymentLoading && payWay === 'direct-wxpay'}
-                                icon={<SiWechat size={18} color='#07C160' />}
+                                icon={<WeChatPayIcon size={18} />}
                                 className='!rounded-lg !px-4 !py-2'
                               >
                                 {t('微信支付')}

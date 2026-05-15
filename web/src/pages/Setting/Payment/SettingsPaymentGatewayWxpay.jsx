@@ -52,6 +52,8 @@ export default function SettingsPaymentGatewayWxpay(props) {
     WxpayMchSerialNo: '',
     WxpayApiV3Key: '',
     WxpayPrivateKey: '',
+    WxpayPublicKeyId: '',
+    WxpayPublicKey: '',
     WxpayNotifyURL: '',
     WxpayMinTopUp: 1,
   });
@@ -68,6 +70,8 @@ export default function SettingsPaymentGatewayWxpay(props) {
         WxpayMchSerialNo: props.options.WxpayMchSerialNo || '',
         WxpayApiV3Key: props.options.WxpayApiV3Key || '',
         WxpayPrivateKey: props.options.WxpayPrivateKey || '',
+        WxpayPublicKeyId: props.options.WxpayPublicKeyId || '',
+        WxpayPublicKey: props.options.WxpayPublicKey || '',
         WxpayNotifyURL: props.options.WxpayNotifyURL || '',
         WxpayMinTopUp:
           props.options.WxpayMinTopUp !== undefined
@@ -99,6 +103,7 @@ export default function SettingsPaymentGatewayWxpay(props) {
         'WxpayAppId',
         'WxpayMchId',
         'WxpayMchSerialNo',
+        'WxpayPublicKeyId',
         'WxpayNotifyURL',
       ];
       plainFields.forEach((key) => {
@@ -127,6 +132,17 @@ export default function SettingsPaymentGatewayWxpay(props) {
         options.push({
           key: 'WxpayPrivateKey',
           value: inputs.WxpayPrivateKey,
+        });
+      }
+
+      if (
+        inputs.WxpayPublicKey &&
+        inputs.WxpayPublicKey !== originInputs.WxpayPublicKey &&
+        !isMaskedSecret(inputs.WxpayPublicKey)
+      ) {
+        options.push({
+          key: 'WxpayPublicKey',
+          value: inputs.WxpayPublicKey,
         });
       }
 
@@ -210,7 +226,7 @@ export default function SettingsPaymentGatewayWxpay(props) {
           <Banner
             type='warning'
             description={t(
-              'API v3 密钥与商户私钥为敏感信息，仅在初次配置或更换证书时填写。留空表示沿用已保存的值。',
+              '当前使用微信支付公钥模式。API v3 密钥、商户私钥与微信支付公钥为敏感信息，仅在初次配置或更换时填写。留空表示沿用已保存的值。',
             )}
           />
           <Row gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}>
@@ -233,6 +249,29 @@ export default function SettingsPaymentGatewayWxpay(props) {
                 field='WxpayMchSerialNo'
                 label={t('商户证书序列号')}
                 placeholder={t('商户 API 证书序列号')}
+              />
+            </Col>
+          </Row>
+          <Row
+            gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+            style={{ marginTop: 16 }}
+          >
+            <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+              <Form.Input
+                field='WxpayPublicKeyId'
+                label={t('微信支付公钥 ID')}
+                placeholder='PUB_KEY_ID_...'
+              />
+            </Col>
+            <Col xs={24} sm={24} md={16} lg={16} xl={16}>
+              <Form.TextArea
+                field='WxpayPublicKey'
+                label={t('微信支付公钥')}
+                placeholder={t(
+                  'pub_key.pem 完整内容，需包含 BEGIN/END PUBLIC KEY',
+                )}
+                type='password'
+                rows={4}
               />
             </Col>
           </Row>

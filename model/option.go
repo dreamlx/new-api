@@ -102,6 +102,8 @@ func InitOptionMap() {
 	common.OptionMap["WxpayMchSerialNo"] = setting.WxpayMchSerialNo
 	common.OptionMap["WxpayApiV3Key"] = setting.WxpayApiV3Key
 	common.OptionMap["WxpayPrivateKey"] = setting.WxpayPrivateKey
+	common.OptionMap["WxpayPublicKeyId"] = setting.WxpayPublicKeyId
+	common.OptionMap["WxpayPublicKey"] = setting.WxpayPublicKey
 	common.OptionMap["WxpayAppId"] = setting.WxpayAppId
 	common.OptionMap["WxpayNotifyURL"] = setting.WxpayNotifyURL
 	common.OptionMap["WxpayMinTopUp"] = strconv.Itoa(setting.WxpayMinTopUp)
@@ -405,6 +407,12 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.ResetWechatPayClient()
 	case "WxpayPrivateKey":
 		setting.WxpayPrivateKey = value
+		setting.ResetWechatPayClient()
+	case "WxpayPublicKeyId":
+		setting.WxpayPublicKeyId = value
+		setting.ResetWechatPayClient()
+	case "WxpayPublicKey":
+		setting.WxpayPublicKey = value
 		setting.ResetWechatPayClient()
 	case "WxpayAppId":
 		setting.WxpayAppId = value
