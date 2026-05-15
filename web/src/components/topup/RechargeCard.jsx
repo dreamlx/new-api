@@ -427,7 +427,7 @@ const RechargeCard = ({
                                 icon={<WeChatPayIcon size={18} />}
                                 className='!rounded-lg !px-4 !py-2'
                               >
-                                {t('微信支付')}
+                                {t('微信')}
                               </Button>
                             );
                             return tooLow ? (
