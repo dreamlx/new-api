@@ -238,15 +238,21 @@ func TestRefundStateMachine(t *testing.T) {
 	require.Contains(t, loaded.RefundReason, "user request")
 	require.Greater(t, loaded.RefundRequestTime, int64(0))
 
-	// Step 2: Complete refund
-	err = CompleteRefund(db, "refund_test_001", "refund_tx_001", 100)
+	// Step 2: Complete refund — conditional update returns rowsAffected=1
+	rows, err := CompleteRefund(db, "refund_test_001", "refund_tx_001", 100)
 	require.NoError(t, err)
+	require.Equal(t, int64(1), rows)
 
 	require.NoError(t, db.Where("trade_no = ?", "refund_test_001").First(&loaded).Error)
 	require.Equal(t, common.RefundStatusSuccess, loaded.RefundStatus)
 	require.Equal(t, "refund_tx_001", loaded.RefundTradeNo)
 	require.Equal(t, int64(100), loaded.RefundedQuota)
 	require.Greater(t, loaded.RefundTime, int64(0))
+
+	// Step 3: second call must be idempotent (rowsAffected=0, no error)
+	rows, err = CompleteRefund(db, "refund_test_001", "refund_tx_001", 100)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), rows)
 }
 
 func TestMarkRefundPendingIdempotency(t *testing.T) {

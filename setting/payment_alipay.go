@@ -25,7 +25,13 @@ var (
 
 // GetAlipayClient returns a cached Alipay client (initialized once).
 // Returns nil if Alipay is not configured.
+//
+// The whole body holds alipayClientMu so that ResetAlipayClient's pointer
+// reassignment cannot race with a concurrent caller's read. sync.Once still
+// guarantees one-time initialisation per epoch.
 func GetAlipayClient() *alipay.Client {
+	alipayClientMu.Lock()
+	defer alipayClientMu.Unlock()
 	alipayClientOnce.Do(func() {
 		if AlipayAppId == "" || AlipayPrivateKey == "" {
 			return

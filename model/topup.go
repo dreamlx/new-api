@@ -475,10 +475,11 @@ func CompleteTopUpByCondition(db *gorm.DB, tradeNo string, providerTxId string, 
 	return result.RowsAffected, result.Error
 }
 
-// SetTopUpAnomaly 标记订单为异常状态（验签失败/金额不一致等）
+// SetTopUpAnomaly 标记订单为异常状态（验签失败/金额不一致等）。
+// 仅当 status='pending' 时更新，避免赛跑覆盖已完成订单。
 func SetTopUpAnomaly(db *gorm.DB, tradeNo string, reason string) error {
 	return db.Model(&TopUp{}).
-		Where("trade_no = ?", tradeNo).
+		Where("trade_no = ? AND status = ?", tradeNo, common.TopUpStatusPending).
 		Updates(map[string]interface{}{
 			"status":       common.TopUpStatusAnomaly,
 			"callback_raw": reason,
@@ -500,32 +501,38 @@ func MarkRefundPending(db *gorm.DB, tradeNo string, adminId int, reason string) 
 	return result.RowsAffected, result.Error
 }
 
-// CompleteRefund 完成退款（success）
-func CompleteRefund(db *gorm.DB, tradeNo string, refundTradeNo string, refundedQuota int64) error {
-	return db.Model(&TopUp{}).
-		Where("trade_no = ?", tradeNo).
+// CompleteRefund 完成退款（success）。条件更新：仅当 refund_status='refund_pending'
+// 时执行，跨副本/重复回调时只有一行被更新，返回 RowsAffected 让调用方决定是否
+// 扣除额度。这是退款流程的跨副本幂等关键点（对应 CompleteTopUpByCondition 在
+// 充值路径的角色）。
+func CompleteRefund(db *gorm.DB, tradeNo string, refundTradeNo string, refundedQuota int64) (int64, error) {
+	result := db.Model(&TopUp{}).
+		Where("trade_no = ? AND refund_status = ?", tradeNo, common.RefundStatusPending).
 		Updates(map[string]interface{}{
 			"refund_status":   common.RefundStatusSuccess,
 			"refund_time":     common.GetTimestamp(),
 			"refund_trade_no": refundTradeNo,
 			"refunded_quota":  refundedQuota,
-		}).Error
+		})
+	return result.RowsAffected, result.Error
 }
 
-// MarkRefundFailed 标记退款失败
+// MarkRefundFailed 标记退款失败。仅当 refund_status='refund_pending' 时更新，
+// 避免赛跑覆盖一个已经走到 refund_success 的行。
 func MarkRefundFailed(db *gorm.DB, tradeNo string, reason string) error {
 	return db.Model(&TopUp{}).
-		Where("trade_no = ?", tradeNo).
+		Where("trade_no = ? AND refund_status = ?", tradeNo, common.RefundStatusPending).
 		Updates(map[string]interface{}{
 			"refund_status": common.RefundStatusFailed,
 			"callback_raw":  reason,
 		}).Error
 }
 
-// MarkRefundAnomaly 标记退款异常（超时/对账不一致）
+// MarkRefundAnomaly 标记退款异常（超时/对账不一致）。仅当 refund_status='refund_pending'
+// 时更新，避免赛跑覆盖。
 func MarkRefundAnomaly(db *gorm.DB, tradeNo string, reason string) error {
 	return db.Model(&TopUp{}).
-		Where("trade_no = ?", tradeNo).
+		Where("trade_no = ? AND refund_status = ?", tradeNo, common.RefundStatusPending).
 		Updates(map[string]interface{}{
 			"refund_status": common.RefundStatusAnomaly,
 			"callback_raw":  reason,

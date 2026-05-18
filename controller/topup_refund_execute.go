@@ -202,9 +202,25 @@ func dispatchAlipayRefund(c *gin.Context, ctx context.Context, topUp *model.TopU
 		refundTradeNo = rsp.TradeNo
 	}
 
-	if err := model.CompleteRefund(model.DB, topUp.TradeNo, refundTradeNo, refundedQuota); err != nil {
+	rowsAffected, err := model.CompleteRefund(model.DB, topUp.TradeNo, refundTradeNo, refundedQuota)
+	if err != nil {
 		log.Printf("refund execute: CompleteRefund failed tradeNo=%s err=%v", topUp.TradeNo, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "error", "data": "状态更新失败"})
+		return
+	}
+	if rowsAffected == 0 {
+		// Conditional update did not match — another path (cron reconciler /
+		// wxpay refund notify / second admin click) already moved the row out
+		// of refund_pending. Treat as idempotent success without deducting
+		// quota again.
+		log.Printf("refund execute: CompleteRefund idempotent skip tradeNo=%s (already finalized)", topUp.TradeNo)
+		c.JSON(http.StatusOK, gin.H{
+			"message": "success",
+			"data": gin.H{
+				"status":   common.RefundStatusSuccess,
+				"trade_no": topUp.TradeNo,
+			},
+		})
 		return
 	}
 
@@ -251,9 +267,17 @@ func dispatchWxpayRefund(c *gin.Context, ctx context.Context, topUp *model.TopUp
 	outRefundNo := "RFD" + topUp.TradeNo
 
 	if err := svc.Refund(ctx, topUp.TradeNo, outRefundNo, topUp.PayAmountCents, topUp.PayAmountCents, reason); err != nil {
-		log.Printf("refund execute: wxpay Refund failed tradeNo=%s err=%v", topUp.TradeNo, err)
-		_ = model.MarkRefundFailed(model.DB, topUp.TradeNo, fmt.Sprintf("wxpay sdk error: %v", err))
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "退款失败"})
+		// The SDK error here is ambiguous: WeChat may have accepted the
+		// refund before the transport failed. Marking refund_failed would
+		// later block the (legitimate) async SUCCESS notification due to
+		// the fail-closed gating in WxpayRefundNotify, silently losing the
+		// money. Instead leave the row in refund_pending so that either
+		//   (a) the async notify arrives and finalises it, or
+		//   (b) ReconcileStaleRefundsPending flips it to refund_anomaly
+		//       after 24h for manual operator review.
+		log.Printf("refund execute: wxpay Refund SDK error tradeNo=%s err=%v (kept refund_pending for cron reconcile)",
+			topUp.TradeNo, err)
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "退款请求已提交但确认失败，请稍后查看订单状态"})
 		return
 	}
 

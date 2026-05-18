@@ -118,9 +118,18 @@ func WxpayRefundNotify(c *gin.Context) {
 		refundTradeNo = result.RefundId
 	}
 
-	if err := model.CompleteRefund(model.DB, tradeNo, refundTradeNo, refundedQuota); err != nil {
+	rowsAffected, err := model.CompleteRefund(model.DB, tradeNo, refundTradeNo, refundedQuota)
+	if err != nil {
 		log.Printf("wxpay refund notify: CompleteRefund failed tradeNo=%s err=%v", tradeNo, err)
 		wxpayFail(c, http.StatusInternalServerError, "db error")
+		return
+	}
+	if rowsAffected == 0 {
+		// Another replica / duplicate notification already finalised this
+		// refund. Ack SUCCESS so WeChat stops retrying and skip the quota
+		// deduction (it was applied by the winning caller).
+		log.Printf("wxpay refund notify: idempotent skip tradeNo=%s (already finalized)", tradeNo)
+		wxpaySuccess(c)
 		return
 	}
 

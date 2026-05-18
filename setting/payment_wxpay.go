@@ -55,7 +55,13 @@ func missingWechatPayConfigFields() []string {
 
 // GetWechatPayClient returns a cached WeChat Pay client (initialized once).
 // Returns nil if WeChat Pay is not configured.
+//
+// The whole body holds wxpayClientMu so that ResetWechatPayClient's pointer
+// reassignment cannot race with a concurrent caller's read. sync.Once still
+// guarantees one-time initialisation per epoch.
 func GetWechatPayClient() *core.Client {
+	wxpayClientMu.Lock()
+	defer wxpayClientMu.Unlock()
 	wxpayClientOnce.Do(func() {
 		if missing := missingWechatPayConfigFields(); len(missing) > 0 {
 			common.SysError("WeChat Pay client not configured, missing: " + strings.Join(missing, ", "))
@@ -109,5 +115,7 @@ func GetWechatPayVerifier() auth.Verifier {
 	if GetWechatPayClient() == nil {
 		return nil
 	}
+	wxpayClientMu.Lock()
+	defer wxpayClientMu.Unlock()
 	return wxpayVerifier
 }

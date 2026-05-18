@@ -120,40 +120,43 @@ func main() {
 	}()
 
 	// Alipay / WeChat Pay expiry + refund reconciliation cron.
-	// Skipped at startup when neither provider is enabled to avoid wasted
-	// DB scans on deployments not using direct-integration payments.
-	if setting.AlipayEnabled || setting.WxpayEnabled {
-		go func() {
-			closeTicker := time.NewTicker(5 * time.Minute)
-			refundTicker := time.NewTicker(1 * time.Hour)
-			defer closeTicker.Stop()
-			defer refundTicker.Stop()
-			for {
-				select {
-				case <-closeTicker.C:
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-					ok, fail, err := service.CloseExpiredPendingTopUps(ctx)
-					cancel()
-					if err != nil {
-						common.SysError(fmt.Sprintf("CloseExpiredPendingTopUps error: %v", err))
-					} else if ok > 0 || fail > 0 {
-						common.SysLog(fmt.Sprintf("CloseExpiredPendingTopUps: ok=%d fail=%d", ok, fail))
-					}
-				case <-refundTicker.C:
-					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-					n, err := service.ReconcileStaleRefundsPending(ctx)
-					cancel()
-					if err != nil {
-						common.SysError(fmt.Sprintf("ReconcileStaleRefundsPending error: %v", err))
-					} else if n > 0 {
-						common.SysLog(fmt.Sprintf("ReconcileStaleRefundsPending: anomaly=%d", n))
-					}
+	// The goroutine always starts; each tick re-checks the enable flags so
+	// that admins flipping AlipayEnabled / WxpayEnabled via the dashboard
+	// don't have to restart the process for the cron to kick in.
+	go func() {
+		closeTicker := time.NewTicker(5 * time.Minute)
+		refundTicker := time.NewTicker(1 * time.Hour)
+		defer closeTicker.Stop()
+		defer refundTicker.Stop()
+		for {
+			select {
+			case <-closeTicker.C:
+				if !setting.AlipayEnabled && !setting.WxpayEnabled {
+					continue
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				ok, fail, err := service.CloseExpiredPendingTopUps(ctx)
+				cancel()
+				if err != nil {
+					common.SysError(fmt.Sprintf("CloseExpiredPendingTopUps error: %v", err))
+				} else if ok > 0 || fail > 0 {
+					common.SysLog(fmt.Sprintf("CloseExpiredPendingTopUps: ok=%d fail=%d", ok, fail))
+				}
+			case <-refundTicker.C:
+				if !setting.AlipayEnabled && !setting.WxpayEnabled {
+					continue
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				n, err := service.ReconcileStaleRefundsPending(ctx)
+				cancel()
+				if err != nil {
+					common.SysError(fmt.Sprintf("ReconcileStaleRefundsPending error: %v", err))
+				} else if n > 0 {
+					common.SysLog(fmt.Sprintf("ReconcileStaleRefundsPending: anomaly=%d", n))
 				}
 			}
-		}()
-	} else {
-		common.SysLog("payment expiry cron skipped (no provider enabled)")
-	}
+		}
+	}()
 
 	// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
 	service.StartCodexCredentialAutoRefreshTask()

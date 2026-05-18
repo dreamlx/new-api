@@ -275,9 +275,17 @@ func TestRefundExecuteWxpaySDKError(t *testing.T) {
 
 	require.Contains(t, rec.Body.String(), "error")
 
+	// WeChat refund SDK errors are ambiguous (the provider may have accepted
+	// the refund before the transport failed). The row stays in refund_pending
+	// so that either (a) a delayed async SUCCESS notification finalises it,
+	// or (b) ReconcileStaleRefundsPending flips it to refund_anomaly after
+	// 24h for manual review. Moving it to refund_failed here would
+	// silently block (a), losing the money. See fix in commit applying
+	// review findings.
 	var loaded model.TopUp
 	require.NoError(t, db.Where("trade_no = ?", "exec_wx_err").First(&loaded).Error)
-	require.Equal(t, common.RefundStatusFailed, loaded.RefundStatus)
+	require.Equal(t, common.RefundStatusPending, loaded.RefundStatus,
+		"wxpay SDK error must keep refund_pending for cron reconcile, not flip to refund_failed")
 
 	var u model.User
 	require.NoError(t, db.First(&u, user.Id).Error)
