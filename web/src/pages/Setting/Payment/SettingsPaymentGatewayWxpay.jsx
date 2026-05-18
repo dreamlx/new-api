@@ -157,27 +157,37 @@ export default function SettingsPaymentGatewayWxpay(props) {
         });
       }
 
+      let enabledOption = null;
       if (originInputs.WxpayEnabled !== inputs.WxpayEnabled) {
-        options.push({
+        enabledOption = {
           key: 'WxpayEnabled',
           value: inputs.WxpayEnabled ? 'true' : 'false',
-        });
+        };
       }
 
-      if (options.length === 0) {
+      if (options.length === 0 && !enabledOption) {
         showSuccess(t('更新成功'));
         setLoading(false);
         return;
       }
 
-      const requestQueue = options.map((opt) =>
-        API.put('/api/option/', {
-          key: opt.key,
-          value: opt.value,
-        }),
-      );
-
-      const results = await Promise.all(requestQueue);
+      const results = [];
+      for (const opt of options) {
+        results.push(
+          await API.put('/api/option/', {
+            key: opt.key,
+            value: opt.value,
+          }),
+        );
+      }
+      if (enabledOption) {
+        results.push(
+          await API.put('/api/option/', {
+            key: enabledOption.key,
+            value: enabledOption.value,
+          }),
+        );
+      }
       const errorResults = results.filter((res) => !res.data.success);
       if (errorResults.length > 0) {
         errorResults.forEach((res) => {

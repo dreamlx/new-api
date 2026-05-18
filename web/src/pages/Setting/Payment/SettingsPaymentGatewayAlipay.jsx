@@ -151,28 +151,41 @@ export default function SettingsPaymentGatewayAlipay(props) {
       }
 
       // The Enabled switch is the toggle the admin will flip most often, so
-      // always submit it when it differs from the saved value.
+      // always submit it when it differs from the saved value. It must be
+      // saved AFTER credentials are persisted, because the backend
+      // AlipayEnabled validation guard rejects enable=true when credentials
+      // are still empty.
+      let enabledOption = null;
       if (originInputs.AlipayEnabled !== inputs.AlipayEnabled) {
-        options.push({
+        enabledOption = {
           key: 'AlipayEnabled',
           value: inputs.AlipayEnabled ? 'true' : 'false',
-        });
+        };
       }
 
-      if (options.length === 0) {
+      if (options.length === 0 && !enabledOption) {
         showSuccess(t('更新成功'));
         setLoading(false);
         return;
       }
 
-      const requestQueue = options.map((opt) =>
-        API.put('/api/option/', {
-          key: opt.key,
-          value: opt.value,
-        }),
-      );
-
-      const results = await Promise.all(requestQueue);
+      const results = [];
+      for (const opt of options) {
+        results.push(
+          await API.put('/api/option/', {
+            key: opt.key,
+            value: opt.value,
+          }),
+        );
+      }
+      if (enabledOption) {
+        results.push(
+          await API.put('/api/option/', {
+            key: enabledOption.key,
+            value: enabledOption.value,
+          }),
+        );
+      }
       const errorResults = results.filter((res) => !res.data.success);
       if (errorResults.length > 0) {
         errorResults.forEach((res) => {

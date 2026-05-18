@@ -2,6 +2,7 @@ package setting
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -32,11 +33,32 @@ var (
 	wxpayClientMu   sync.Mutex
 )
 
+func missingWechatPayConfigFields() []string {
+	missing := make([]string, 0, 5)
+	if WxpayMchId == "" {
+		missing = append(missing, "WxpayMchId")
+	}
+	if WxpayApiV3Key == "" {
+		missing = append(missing, "WxpayApiV3Key")
+	}
+	if WxpayPrivateKey == "" {
+		missing = append(missing, "WxpayPrivateKey")
+	}
+	if WxpayPublicKeyId == "" {
+		missing = append(missing, "WxpayPublicKeyId")
+	}
+	if WxpayPublicKey == "" {
+		missing = append(missing, "WxpayPublicKey")
+	}
+	return missing
+}
+
 // GetWechatPayClient returns a cached WeChat Pay client (initialized once).
 // Returns nil if WeChat Pay is not configured.
 func GetWechatPayClient() *core.Client {
 	wxpayClientOnce.Do(func() {
-		if WxpayMchId == "" || WxpayApiV3Key == "" || WxpayPrivateKey == "" || WxpayPublicKeyId == "" || WxpayPublicKey == "" {
+		if missing := missingWechatPayConfigFields(); len(missing) > 0 {
+			common.SysError("WeChat Pay client not configured, missing: " + strings.Join(missing, ", "))
 			return
 		}
 		privateKey, err := utils.LoadPrivateKey(WxpayPrivateKey)
