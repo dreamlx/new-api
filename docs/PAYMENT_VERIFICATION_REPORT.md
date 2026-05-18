@@ -154,6 +154,6 @@ common/constants.go        — TopUpStatus / RefundStatus 常量
 
 **报告生成时间：** 2026-05-15
 **分支：** `feat/wechat-alipay-payment`
-**总提交数：** 48 commits ahead of `main`
+**总提交数：** 55+ commits ahead of `main`
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

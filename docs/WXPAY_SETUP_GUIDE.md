@@ -160,4 +160,10 @@
 - 退款执行流程：`controller/topup_refund_execute.go`
 - 配置项注册及默认值：`setting/payment_wxpay.go`
 - 微信支付 SDK 封装：`service/wechat_pay.go`
-- 退款超时巡检 cron：`service/refund_anomaly.go`
+- 退款超时巡检 cron：`service/topup_expiry.go`（`ReconcileStaleRefundsPending`）
+
+## 10. 多副本部署注意事项
+
+- **必须显式设置 `CRYPTO_SECRET` 环境变量**，并在所有副本之间保持一致。该秘钥用于签发退款流程中的 `confirm_token`（HMAC-SHA256）。若未显式配置，每个副本启动时会生成各自的随机值，导致在副本 A 上申请的退款 token 在副本 B 上验签失败，退款操作随机性失败。
+- 微信支付 SDK 客户端在每个副本进程内独立缓存（`sync.Once` + 互斥锁）。当通过 admin 后台更新任一微信支付配置项时，仅触发当前副本的 `ResetWechatPayClient`；其他副本会在下一次 admin sync 周期（默认 60 秒）感知到配置变化后自动重置。请避免在配置切换的过渡窗口内立即发起大额支付。
+- 异步退款通知（`/api/user/wxpay/refund/notify`）天然支持多副本：`CompleteRefund` 在 DB 层做条件更新（`WHERE refund_status='refund_pending'`），只有第一个写入成功的副本会扣减用户额度，其他副本走幂等跳过分支。
