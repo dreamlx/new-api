@@ -44,7 +44,7 @@
 | 5 | 微信商户号 MchId | 证书包文件名前缀 `1738223441` | |
 | 6 | 微信商户私钥 | `apiclient_key.pem` | 给本系统 |
 | 7 | 微信商户 API 证书 | `apiclient_cert.pem` | 用 openssl 提取序列号 |
-| 8 | 微信 API 公钥 | `pub_key.pem` | ⚠️ 见 0.4 风险章节 |
+| 8 | 微信支付公钥 | `pub_key.pem` | 见 0.4 公钥模式章节 |
 
 ### 0.3 待确认 ❓ 与缺失 ❌
 
@@ -55,19 +55,24 @@
 | C | 微信关联 AppId | ❌ 必须 | 微信公众平台 / 开放平台 → 公众号或开放平台应用详情 → AppID（关联到这个 MchId） |
 | D | 微信 APIv3 密钥（32 位） | ❌ 必须 | 商户平台 → 账户中心 → API 安全 → APIv3 密钥（如果之前没设过，需要新建） |
 | E | 微信商户证书序列号 MchSerialNo | ❓ 可从文件提取 | 见 1.2 节用 openssl 提取 |
-| F | 公网 HTTPS 域名 | ❌ 必须 | 必须 HTTPS，HTTP 微信和支付宝都不收 |
-| G | 系统 ServerAddress 已配置 | ❌ 必须 | admin → 系统设置 → 通用 → 服务器地址 |
+| F | 微信支付公钥 ID | ❌ 必须 | 商户平台 → 账户中心 → API 安全 → 微信支付公钥，形如 `PUB_KEY_ID_...` |
+| G | 公网 HTTPS 域名 | ❌ 必须 | 必须 HTTPS，HTTP 微信和支付宝都不收 |
+| H | 系统 ServerAddress 已配置 | ❌ 必须 | admin → 系统设置 → 通用 → 服务器地址 |
 
-### 0.4 ⚠️ 已知风险：微信"平台证书 vs API 公钥"
+### 0.4 微信支付公钥模式
 
 你的目录里有 `pub_key.pem`，这是**微信 2024 末改版后**给新接入商户的**回调验签公钥**，用来替代旧的"平台证书自动下载"机制。
 
-**当前实现走的是旧路径**（`WithWechatPayAutoAuthCipher`，会去 `https://api.mch.weixin.qq.com/v3/certificates` 拉平台证书）。两种可能：
+**当前实现已经使用公钥模式**（`WithWechatPayPublicKeyAuthCipher`）。配置微信支付时必须同时填写：
 
-1. **过渡期**：你的商户号仍能下载平台证书 → 当前实现可工作，正常测试。
-2. **纯新接入**：商户号只支持 API 公钥模式 → `NativePrepay` 第一次调用会因 SDK 拿不到平台证书报 `decrypt failed` 或 `certificate visitor not found`。
+- 商户号 `MchId`
+- 商户证书序列号 `MchSerialNo`
+- APIv3 密钥
+- 商户私钥 `apiclient_key.pem`
+- 微信支付公钥 ID（形如 `PUB_KEY_ID_...`）
+- 微信支付公钥 `pub_key.pem`
 
-**应对策略：先按现状跑一次小额。** 如果第 6 章（微信下单）报上述错，把日志发出来，需要补一个 `WithWechatPayPublicKeyAuthCipher` 模式的 PR（约 2 小时工作量）。
+如果微信下单或回调验签失败，优先检查公钥 ID 是否与 `pub_key.pem` 对应，以及 APIv3 密钥是否与商户平台一致。
 
 ---
 
@@ -336,6 +341,8 @@ curl -X POST https://<你的域名>/api/user/alipay/notify \
 | AppId | 0.3 C 拿到的关联 AppId |
 | 商户号 MchId | `1738223441` |
 | 商户证书序列号 | 1.2 节 openssl 输出的 serial |
+| 微信支付公钥 ID | 商户平台提供的 `PUB_KEY_ID_...` |
+| 微信支付公钥 | `pub_key.pem` 完整内容 |
 | APIv3 密钥 | 0.3 D 设置的 32 位字符串 |
 | 商户私钥 | `apiclient_key.pem` 整个文件内容 |
 | 异步通知地址 | 留空（用默认） |
@@ -366,22 +373,14 @@ curl -X POST https://<你的域名>/api/user/alipay/notify \
 grep -i "wechat native prepay\|wxpay\|wechatpay" logs/log.txt | tail -30
 ```
 
-⚠️ **此处最容易撞上 0.4 节的风险**：如果错误是
-
-```
-wechat native prepay failed: ... certificate visitor ...
-wechat native prepay failed: ... no certificate found ...
-wechat native prepay failed: ... decrypt failed ...
-```
-
-说明商户号是新接入、只支持 API 公钥模式，需要切换 SDK 选项。这种情况停下来，把日志发出来。
-
 其他常见错：
 
 | 错误 | 原因 | 修复 |
 |---|---|---|
 | `appid mch_id 不匹配` | AppId 没和这个 MchId 关联 | 商户后台关联 AppId 后重试 |
 | `签名错误` | MchSerialNo 填错 | 重新 openssl 提取 |
+| `verify signature failed` | 微信支付公钥 ID / 公钥不匹配 | 重新从商户平台复制 `PUB_KEY_ID_...` 和 `pub_key.pem` |
+| `decrypt failed` | APIv3 密钥不匹配 | 核对商户平台 APIv3 密钥并重新保存 |
 | `参数错误：amount.total` | 金额非整数分 | 充值金额取整 |
 | `商户号 mch_id 不正确` | MchId 多了空格 | admin 重新填 |
 
@@ -424,24 +423,32 @@ SELECT quota FROM users WHERE id=<普通用户 id>;  -- 比测试前增加 1 * Q
 curl -X POST https://<你的域名>/api/user/wxpay/notify \
   -H 'Content-Type: application/json' \
   -d '{}' -i
-# 期望：HTTP/2 401，body 包含 "code":"FAIL"（无法解密，正常）
+# 期望：HTTP 200，body 包含 "code":"FAIL" 和 "decrypt failed"（无法解密，正常）
 # 后端日志：wxpay notify: decrypt failed: ...
 ```
 
-如果连这一步都 502 / timeout，nginx 路由没通。
+如果连这一步都 502 / timeout，公网反代 / ngrok 路由没通。
 
 ---
 
 ## 第 6 章 · 退款测试
 
+当前前端充值历史页暂未接入退款按钮；常规用户售后按 `docs/REFUND_PRIVATE_DOMAIN_HANDLING.md` 引导到私域人工处理。本章只用于 root 账号的后端退款接口验证或应急演练。
+
 ### 6.1 支付宝退款（同步完成）
 
-用 **root 账号** 登录 → 充值历史 → 找到第 4 章付款的那笔 → 点"退款"。
+用 **root 账号** 登录后，先申请确认令牌，再执行退款。
 
-```
-弹窗 1：填写退款理由（例如 "测试退款"），点"获取确认 token"
-   ↓
-弹窗 2：显示退款摘要 + 5 分钟倒计时，点"确认退款"
+```bash
+curl -X POST https://<你的域名>/api/topup/refund/prepare \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: <root 登录 cookie>' \
+  -d '{"trade_no":"<支付宝付款订单号>"}'
+
+curl -X POST https://<你的域名>/api/topup/refund \
+  -H 'Content-Type: application/json' \
+  -H 'Cookie: <root 登录 cookie>' \
+  -d '{"trade_no":"<支付宝付款订单号>","confirm_token":"<上一步返回的 token>","reason":"测试退款"}'
 ```
 
 **期望：**
@@ -461,7 +468,7 @@ FROM top_ups WHERE trade_no='<付款用的那个>';
 
 ### 6.2 微信退款（异步完成）
 
-同样用 root 在充值历史里对第 5 章那笔 0.01 元订单发起退款。
+同样用 root 对第 5 章那笔 0.01 元订单调用 `/api/topup/refund/prepare` 和 `/api/topup/refund`。
 
 **期望立即效果：**
 - 数据库 `refund_status` 进入 `refund_pending`，不是 success。
@@ -483,10 +490,10 @@ SELECT trade_no, refund_status FROM top_ups WHERE trade_no='<微信付款单号>
 
 ### 6.3 重复退款防护测试
 
-在 6.1 退款完成后，**再点一次"退款"**。
+在 6.1 退款完成后，重复调用 `/api/topup/refund/prepare` 或 `/api/topup/refund`。
 
 **期望：**
-- 前端报 `订单已退款` 或类似拒绝信息
+- 接口返回 `订单已发起退款` / `订单已退款` 或类似拒绝信息
 - 数据库 `refunded_quota` 不变，没有二次扣额度
 
 如果重复退款成功了，立即停止测试上报问题（说明状态机守卫失效）。
@@ -537,14 +544,14 @@ curl https://<你的域名>/api/user/topup/status?trade_no=<B用户的订单号>
 逐项打 ✅ 才算通过：
 
 ```
-□ 4.3 支付宝付款，用户余额增加
-□ 4.4 数据库 top_ups.status=success
-□ 4.5 异步通知日志出现 (idempotent skip 或 充值成功 任一)
-□ 5.5 微信扫码付款，前端 Modal 自动跳成功状态
-□ 5.6 数据库 top_ups.status=success
-□ 5.7 nginx 路由探活返回 401（未签名）
-□ 6.1 支付宝退款，refund_status=success，余额扣回
-□ 6.2 微信退款，refund_status=success（异步完成）
+✅ 4.3 支付宝付款，用户余额增加
+✅ 4.4 数据库 top_ups.status=success
+✅ 4.5 异步通知日志出现 (idempotent skip 或 充值成功 任一)
+✅ 5.5 微信扫码付款，前端 Modal 自动跳成功状态
+✅ 5.6 数据库 top_ups.status=success
+✅ 5.7 公网反代 / ngrok 路由探活返回 FAIL（未签名）
+□ 6.1 支付宝退款，refund_status=refund_success，余额扣回
+□ 6.2 微信退款，refund_status=refund_success（异步完成）
 □ 6.3 重复退款被拒绝
 □ 7.1 订单超时被 cron 关单（可选）
 □ 7.2 异步通知重放幂等（可选）
@@ -585,15 +592,15 @@ grep -iE 'refund_pending|refund_success|MarkRefund|CompleteRefund' logs/log.txt
 grep -iE 'CloseExpiredPendingTopUps|ReconcileStaleRefundsPending' logs/log.txt
 ```
 
-## 附录 C · 测试中遇到 0.4 节那个风险怎么办
+## 附录 C · 微信公钥模式排查
 
-如果第 5.3 节微信下单失败，错误信息含 `certificate visitor` / `no certificate found` / `decrypt failed`：
+如果第 5.3 节微信下单失败，优先核对：
 
-1. 立刻停止测试，把以下信息发给开发：
-   - 失败的 `wechat native prepay failed: ...` 完整一行
-   - 商户号 `1738223441` 是 2024 末之后接入的吗？（去商户后台看入网时间）
-2. 开发会补一个支持 `WithWechatPayPublicKeyAuthCipher` 的小 PR（约 2 小时）
-3. PR 合并 → 重启服务 → admin 多填一项"WechatPayPubKey"（用 `pub_key.pem` 内容）→ 重新测试。
+1. `WxpayPublicKeyId` 是否填写为商户平台提供的 `PUB_KEY_ID_...`，而不是商户证书序列号。
+2. `WxpayPublicKey` 是否为 `pub_key.pem` 完整内容，包含 BEGIN/END 行。
+3. `WxpayPrivateKey` 是否为 `apiclient_key.pem` 完整内容。
+4. `WxpayMchSerialNo` 是否来自同一份商户 API 证书。
+5. APIv3 密钥是否与商户平台当前值一致。
 
 ---
 

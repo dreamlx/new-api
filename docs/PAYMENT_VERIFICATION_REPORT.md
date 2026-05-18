@@ -30,7 +30,7 @@ DB_TYPE=postgres go test ./model -run TestTopUp -v
 |---|---|---|
 | `model` | 15 | TopUp 扩展字段、CompleteTopUpByCondition、SetTopUpAnomaly、4 状态退款机 |
 | `common` | ~10 | MoneyToCents / CentsToMoneyStr / AlipayAmountToCents 边界 |
-| `service` | 9 | CloseExpiredPendingTopUps、ReconcileStaleRefundsPending、CheckWechatCertHealth |
+| `service` | 9 | CloseExpiredPendingTopUps、ReconcileStaleRefundsPending、微信支付 SDK 封装 |
 | `controller` | 70 | RequestAlipay×4、AlipayNotify×5、AlipayReturn×5、RequestWxpay×4、WxpayNotify×6、GetTopUpInfo×4、TopUpStatus×4、ActiveQuery×7、Refund prepare/execute/notify×25 |
 | **合计** | **104+** | 全部 PASS |
 
@@ -97,10 +97,11 @@ cd web && bun run build
 1. 准备真实微信支付商户号（或服务商商户号）+ 已审核应用。
 2. 下载 API 证书 `apiclient_cert.pem` / `apiclient_key.pem`，记录 MchSerialNo。
 3. 在商户后台设置 APIv3 密钥（32 位字符串）。
-4. 在 admin 配置：
+4. 获取微信支付公钥 ID（`PUB_KEY_ID_...`）和微信支付公钥 `pub_key.pem`。
+5. 在 admin 配置：
    - 启用 **微信支付**
-   - AppId / MchId / MchSerialNo / APIv3 密钥 / 商户私钥（apiclient_key.pem 完整内容）
-5. 充值 0.01 元 → 弹出 QR Modal → 手机扫码支付 → 验证：
+   - AppId / MchId / MchSerialNo / 微信支付公钥 ID / 微信支付公钥 / APIv3 密钥 / 商户私钥（apiclient_key.pem 完整内容）
+6. 充值 0.01 元 → 弹出 QR Modal → 手机扫码支付 → 验证：
    - 前端轮询 `/api/user/topup/status` 返回 `status=success`
    - 数据库 `top_ups` 写入 `provider_tx_id`、`paid_at`
    - 用户余额增加 0.01 元对应额度
@@ -126,10 +127,9 @@ controller/topup.go        — GetTopUpStatus + 主动查单 + finalizeTopUpSucc
 service/alipay.go          — AlipayService 接口（隔离 smartwalle/alipay SDK）
 service/wechat_pay.go      — WechatPayService 接口（隔离 wechatpay-go SDK）
 service/topup_expiry.go    — 定时关单 + 退款超时巡检
-service/wechat_cert.go     — 平台证书健康检查
   ↓
 setting/payment_alipay.go  — sync.Once 客户端 + ResetAlipayClient
-setting/payment_wxpay.go   — sync.Once 客户端 + GetWechatPayVerifier
+setting/payment_wxpay.go   — 微信支付公钥模式客户端初始化 + GetWechatPayVerifier
   ↓
 model/topup.go             — TopUp v2 字段 + 退款状态机
 common/money.go            — 金额整数化（避免 float 精度）
