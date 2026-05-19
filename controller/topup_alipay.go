@@ -38,15 +38,10 @@ const (
 // package-level variable so tests can inject a mock implementation without
 // touching the underlying SDK or setting state.
 //
-// The default implementation reads the cached client from setting and wraps it
-// in a RealAlipayService.
-var alipayServiceProvider = func() (service.AlipayService, error) {
-	client := setting.GetAlipayClient()
-	if client == nil {
-		return nil, fmt.Errorf("alipay client not configured")
-	}
-	return service.NewRealAlipayService(client), nil
-}
+// The default delegates to service.NewAlipayServiceFromSettings so the HTTP
+// path and the background sweep (service/topup_expiry.go) construct the
+// provider the same way.
+var alipayServiceProvider = service.NewAlipayServiceFromSettings
 
 // AlipayPayRequest is the JSON body for POST /api/user/alipay/pay.
 type AlipayPayRequest struct {
@@ -102,12 +97,12 @@ func RequestAlipay(c *gin.Context) {
 		return
 	}
 
-	payAmountCents := common.MoneyToCents(payMoney)
+	payAmountCents := service.MoneyToCents(payMoney)
 	if payAmountCents <= 0 {
 		c.JSON(200, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
-	totalAmountStr := common.CentsToMoneyStr(payAmountCents)
+	totalAmountStr := service.CentsToMoneyStr(payAmountCents)
 
 	svc, err := alipayServiceProvider()
 	if err != nil || svc == nil {
@@ -306,7 +301,7 @@ func AlipayNotify(c *gin.Context) {
 	}
 
 	// Amount equality (integer cents) — the canonical safety check.
-	notifyCents, err := common.AlipayAmountToCents(notification.TotalAmount)
+	notifyCents, err := service.AlipayAmountToCents(notification.TotalAmount)
 	if err != nil {
 		reason := fmt.Sprintf("invalid total_amount=%q err=%v", notification.TotalAmount, err)
 		log.Printf("alipay notify: %s tradeNo=%s", reason, tradeNo)

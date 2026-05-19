@@ -34,16 +34,21 @@ const (
 
 // wechatPayServiceProvider returns a WechatPayService instance. Tests override
 // this var to inject a mock without touching the SDK or setting state.
+//
+// The default delegates to service.NewWechatPayServiceFromSettings so the HTTP
+// path and the background sweep (service/topup_expiry.go) construct the
+// provider the same way. HTTP paths still hard-require a non-nil verifier;
+// the wrapper below enforces that invariant which the notify handler relies
+// on (the sweep tolerates a nil verifier because Close doesn't decrypt).
 var wechatPayServiceProvider = func() (service.WechatPayService, error) {
-	client := setting.GetWechatPayClient()
-	if client == nil {
-		return nil, fmt.Errorf("wechat pay client not configured")
+	svc, err := service.NewWechatPayServiceFromSettings()
+	if err != nil {
+		return nil, err
 	}
-	verifier := setting.GetWechatPayVerifier()
-	if verifier == nil {
+	if setting.GetWechatPayVerifier() == nil {
 		return nil, fmt.Errorf("wechat pay verifier not available")
 	}
-	return service.NewRealWechatPayService(client, setting.WxpayMchId, setting.WxpayAppId, setting.WxpayApiV3Key, verifier), nil
+	return svc, nil
 }
 
 type WxpayPayRequest struct {
@@ -90,7 +95,7 @@ func RequestWxpay(c *gin.Context) {
 		return
 	}
 
-	payAmountCents := common.MoneyToCents(payMoney)
+	payAmountCents := service.MoneyToCents(payMoney)
 	if payAmountCents <= 0 {
 		c.JSON(200, gin.H{"message": "error", "data": "充值金额过低"})
 		return

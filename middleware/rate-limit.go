@@ -112,6 +112,27 @@ func DownloadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.DownloadRateLimitNum, common.DownloadRateLimitDuration, "DW")
 }
 
+// WebhookRateLimit is the IP-based throttle applied to public payment-webhook
+// routes (/api/user/{alipay,wxpay}/notify and /api/user/wxpay/refund/notify).
+//
+// Why we need it: each webhook hit triggers an RSA verify + AES-GCM decrypt
+// on the payment SDK, which is CPU-bound. A malicious client could DoS the
+// process by spraying these endpoints with junk payloads. Auth-based limits
+// don't apply because the providers (Alipay / WeChat) are not authenticated.
+//
+// The numbers below are deliberately generous: legitimate providers retry
+// failed webhooks for hours per spec, and we never want to drop a real
+// payment notification under load. Tune via setting if abuse is observed.
+//
+// Marked "WH" so it doesn't share counters with CriticalRateLimit/GlobalAPI.
+func WebhookRateLimit() func(c *gin.Context) {
+	const (
+		webhookRateLimitNum      = 120 // requests per IP per window
+		webhookRateLimitDuration = 60  // seconds
+	)
+	return rateLimitFactory(webhookRateLimitNum, webhookRateLimitDuration, "WH")
+}
+
 func UploadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.UploadRateLimitNum, common.UploadRateLimitDuration, "UP")
 }

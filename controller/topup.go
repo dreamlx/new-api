@@ -497,7 +497,7 @@ func activeQueryAlipay(ctx context.Context, topUp *model.TopUp) bool {
 	if rsp.TradeStatus != alipay.TradeStatusSuccess && rsp.TradeStatus != alipay.TradeStatusFinished {
 		return false
 	}
-	cents, err := common.AlipayAmountToCents(rsp.TotalAmount)
+	cents, err := service.AlipayAmountToCents(rsp.TotalAmount)
 	if err != nil {
 		reason := fmt.Sprintf("active query: invalid total_amount=%q err=%v", rsp.TotalAmount, err)
 		log.Printf("topup active query: %s tradeNo=%s", reason, topUp.TradeNo)

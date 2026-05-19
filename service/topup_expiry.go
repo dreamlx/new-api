@@ -8,7 +8,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/setting"
 )
 
 // staleRefundPendingTTL is the maximum time a refund_pending row may remain
@@ -17,28 +16,17 @@ import (
 // to 16 hours; we use 24 hours to allow comfortable headroom over that window.
 const staleRefundPendingTTL = 24 * time.Hour
 
-// expiryAlipayProvider returns an AlipayService for the closer to call.
-// Swappable in tests; controller has its own provider for HTTP paths so
-// re-defining here avoids a service -> controller import cycle.
+// expiryAlipayProvider / expiryWechatProvider are indirections so the sweep
+// can be tested with mocks without touching the production factory. In
+// production both delegate to the shared NewXxxServiceFromSettings factory
+// (also used by the controller-layer providers) so service construction
+// stays consistent across HTTP and background paths.
 var expiryAlipayProvider = func() (AlipayService, error) {
-	client := setting.GetAlipayClient()
-	if client == nil {
-		return nil, errors.New("alipay client not configured")
-	}
-	return NewRealAlipayService(client), nil
+	return NewAlipayServiceFromSettings()
 }
 
-// expiryWechatProvider returns a WechatPayService for the closer to call.
 var expiryWechatProvider = func() (WechatPayService, error) {
-	client := setting.GetWechatPayClient()
-	if client == nil {
-		return nil, errors.New("wechat pay client not configured")
-	}
-	verifier := setting.GetWechatPayVerifier()
-	// Verifier may be nil here — Close paths do not consume notifications, so
-	// a nil verifier is acceptable for the sweep. The notify handler is the
-	// only consumer that requires a non-nil verifier.
-	return NewRealWechatPayService(client, setting.WxpayMchId, setting.WxpayAppId, setting.WxpayApiV3Key, verifier), nil
+	return NewWechatPayServiceFromSettings()
 }
 
 // CloseExpiredPendingTopUps scans for pending TopUps whose ExpireTime has

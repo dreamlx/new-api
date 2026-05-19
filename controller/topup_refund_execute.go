@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -186,7 +187,7 @@ func dispatchAlipayRefund(c *gin.Context, ctx context.Context, topUp *model.TopU
 	// if a network blip causes a resubmit, Alipay idempotently rejects the
 	// duplicate instead of treating it as a brand-new refund.
 	outRequestNo := "RFD" + topUp.TradeNo
-	refundAmount := common.CentsToMoneyStr(topUp.PayAmountCents)
+	refundAmount := service.CentsToMoneyStr(topUp.PayAmountCents)
 
 	rsp, err := svc.TradeRefund(ctx, topUp.TradeNo, refundAmount, outRequestNo, reason)
 	if err != nil {
