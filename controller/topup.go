@@ -491,6 +491,18 @@ func activeQueryAlipay(ctx context.Context, topUp *model.TopUp) bool {
 	}
 	rsp, err := svc.TradeQuery(ctx, topUp.TradeNo)
 	if err != nil || rsp == nil {
+		// ACQ.TRADE_NOT_EXIST is expected when the order is still being created
+		// on Alipay's side (race between user payment and our active query).
+		// The async notify will complete the order later; suppress noisy log.
+		if rsp != nil && rsp.SubCode == "ACQ.TRADE_NOT_EXIST" {
+			return false
+		}
+		if err != nil {
+			errStr := err.Error()
+			if errStr == "ACQ.TRADE_NOT_EXIST" || errStr == "交易不存在" {
+				return false
+			}
+		}
 		log.Printf("topup active query: alipay TradeQuery failed tradeNo=%s err=%v", topUp.TradeNo, err)
 		return false
 	}
@@ -528,6 +540,15 @@ func activeQueryWxpay(ctx context.Context, topUp *model.TopUp) bool {
 	}
 	tx, err := svc.QueryOrderByOutTradeNo(ctx, topUp.TradeNo)
 	if err != nil || tx == nil {
+		// ORDERNOTEXIST is expected when the order is still being created on
+		// WeChat's side (race between user payment and our active query). The
+		// async notify will complete the order later; suppress noisy log.
+		if err != nil {
+			errStr := err.Error()
+			if errStr == "ORDERNOTEXIST" || errStr == "订单不存在" {
+				return false
+			}
+		}
 		log.Printf("topup active query: wxpay QueryOrderByOutTradeNo failed tradeNo=%s err=%v", topUp.TradeNo, err)
 		return false
 	}
