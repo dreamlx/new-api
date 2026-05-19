@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	payment "github.com/QuantumNous/new-api/service/payment"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -38,10 +39,10 @@ const (
 // package-level variable so tests can inject a mock implementation without
 // touching the underlying SDK or setting state.
 //
-// The default delegates to service.NewAlipayServiceFromSettings so the HTTP
-// path and the background sweep (service/topup_expiry.go) construct the
+// The default delegates to payment.NewAlipayServiceFromSettings so the HTTP
+// path and the background sweep construct the
 // provider the same way.
-var alipayServiceProvider = service.NewAlipayServiceFromSettings
+var alipayServiceProvider = payment.NewAlipayServiceFromSettings
 
 // AlipayPayRequest is the JSON body for POST /api/user/alipay/pay.
 type AlipayPayRequest struct {
@@ -97,12 +98,12 @@ func RequestAlipay(c *gin.Context) {
 		return
 	}
 
-	payAmountCents := service.MoneyToCents(payMoney)
+	payAmountCents := payment.MoneyToCents(payMoney)
 	if payAmountCents <= 0 {
 		c.JSON(200, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
-	totalAmountStr := service.CentsToMoneyStr(payAmountCents)
+	totalAmountStr := payment.CentsToMoneyStr(payAmountCents)
 
 	svc, err := alipayServiceProvider()
 	if err != nil || svc == nil {
@@ -301,7 +302,7 @@ func AlipayNotify(c *gin.Context) {
 	}
 
 	// Amount equality (integer cents) — the canonical safety check.
-	notifyCents, err := service.AlipayAmountToCents(notification.TotalAmount)
+	notifyCents, err := payment.AlipayAmountToCents(notification.TotalAmount)
 	if err != nil {
 		reason := fmt.Sprintf("invalid total_amount=%q err=%v", notification.TotalAmount, err)
 		log.Printf("alipay notify: %s tradeNo=%s", reason, tradeNo)
@@ -325,6 +326,9 @@ func AlipayNotify(c *gin.Context) {
 		_ = model.SetTopUpAnomaly(model.DB, tradeNo, reason)
 		c.String(http.StatusOK, alipayNotifyErr)
 		return
+	}
+	if err := model.SetTopUpCallbackRaw(model.DB, tradeNo, c.Request.PostForm.Encode()); err != nil {
+		log.Printf("alipay notify: persist callback raw failed tradeNo=%s err=%v", tradeNo, err)
 	}
 
 	// Authoritative idempotent completion (multi-replica safe). The shared
@@ -418,4 +422,3 @@ func AlipayReturn(c *gin.Context) {
 	}
 	alipayReturnRedirect(c, "pending", tradeNo)
 }
-

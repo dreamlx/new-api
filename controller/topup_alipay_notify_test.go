@@ -99,6 +99,7 @@ func TestAlipayNotifyHappyPath(t *testing.T) {
 	require.NoError(t, db.Where("trade_no = ?", "alipay_notify_001").First(&loaded).Error)
 	require.Equal(t, common.TopUpStatusSuccess, loaded.Status)
 	require.Equal(t, "alipay_tx_alipay_notify_001", loaded.ProviderTxId)
+	require.Contains(t, loaded.CallbackRaw, "alipay_notify_001")
 
 	var user model.User
 	require.NoError(t, db.First(&user, topUp.UserId).Error)
@@ -132,6 +133,10 @@ func TestAlipayNotifyDuplicateCallback(t *testing.T) {
 	require.NoError(t, db.First(&user, topUp.UserId).Error)
 	expectedQuota := 100 + int(float64(topUp.Amount)*common.QuotaPerUnit)
 	require.Equal(t, expectedQuota, user.Quota, "quota must only be granted once")
+
+	var loaded model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", "alipay_notify_dup").First(&loaded).Error)
+	require.Contains(t, loaded.CallbackRaw, "alipay_notify_dup")
 }
 
 func TestAlipayNotifyAmountMismatch(t *testing.T) {

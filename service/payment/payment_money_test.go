@@ -1,4 +1,4 @@
-package service
+package payment
 
 import (
 	"testing"
@@ -9,8 +9,8 @@ import (
 func TestMoneyToCents(t *testing.T) {
 	require.Equal(t, int64(1450), MoneyToCents(14.50))
 	require.Equal(t, int64(1), MoneyToCents(0.01))
-	require.Equal(t, int64(0), MoneyToCents(0.001)) // rounds down
-	require.Equal(t, int64(1), MoneyToCents(0.009)) // rounds to nearest
+	require.Equal(t, int64(0), MoneyToCents(0.001))
+	require.Equal(t, int64(1), MoneyToCents(0.009))
 	require.Equal(t, int64(100), MoneyToCents(1.00))
 	require.Equal(t, int64(999999), MoneyToCents(9999.99))
 }

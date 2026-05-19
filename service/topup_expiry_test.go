@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	payment "github.com/QuantumNous/new-api/service/payment"
 	"github.com/glebarez/sqlite"
 	"github.com/smartwalle/alipay/v3"
 	"github.com/stretchr/testify/require"
@@ -19,8 +20,8 @@ import (
 // setupTopUpExpiryTest wires up an in-memory SQLite DB on model.DB, swaps
 // the provider hooks for in-memory mocks, and restores everything on cleanup.
 type expiryMocks struct {
-	alipay *MockAlipayService
-	wechat *MockWechatPayService
+	alipay *payment.MockAlipayService
+	wechat *payment.MockWechatPayService
 }
 
 func setupTopUpExpiryTest(t *testing.T) (*gorm.DB, *expiryMocks) {
@@ -37,19 +38,18 @@ func setupTopUpExpiryTest(t *testing.T) (*gorm.DB, *expiryMocks) {
 	origDB := model.DB
 	model.DB = db
 
-	origAli := expiryAlipayProvider
-	origWx := expiryWechatProvider
 	mocks := &expiryMocks{
-		alipay: &MockAlipayService{},
-		wechat: &MockWechatPayService{},
+		alipay: &payment.MockAlipayService{},
+		wechat: &payment.MockWechatPayService{},
 	}
-	expiryAlipayProvider = func() (AlipayService, error) { return mocks.alipay, nil }
-	expiryWechatProvider = func() (WechatPayService, error) { return mocks.wechat, nil }
+	restore := payment.SetExpiryProvidersForTest(
+		func() (payment.AlipayService, error) { return mocks.alipay, nil },
+		func() (payment.WechatPayService, error) { return mocks.wechat, nil },
+	)
 
 	t.Cleanup(func() {
 		model.DB = origDB
-		expiryAlipayProvider = origAli
-		expiryWechatProvider = origWx
+		restore()
 		sqlDB, _ := db.DB()
 		if sqlDB != nil {
 			_ = sqlDB.Close()
@@ -250,7 +250,7 @@ func TestReconcileStaleRefundsPending_NoRows(t *testing.T) {
 // only to ensure expiryMocks alipay field is wired through the interface
 // (compile-time guarantee, the function call is incidental).
 func TestExpiryMocksImplementInterfaces(t *testing.T) {
-	var _ AlipayService = (*MockAlipayService)(nil)
-	var _ WechatPayService = (*MockWechatPayService)(nil)
-	require.NoError(t, (&MockAlipayService{}).VerifySign(context.Background(), url.Values{}))
+	var _ payment.AlipayService = (*payment.MockAlipayService)(nil)
+	var _ payment.WechatPayService = (*payment.MockWechatPayService)(nil)
+	require.NoError(t, (&payment.MockAlipayService{}).VerifySign(context.Background(), url.Values{}))
 }

@@ -1,4 +1,4 @@
-package service
+package payment
 
 import (
 	"testing"
@@ -7,13 +7,12 @@ import (
 )
 
 func TestWechatPayServiceInterface(t *testing.T) {
-	// Compile-time check: RealWechatPayService implements WechatPayService
 	var _ WechatPayService = (*RealWechatPayService)(nil)
+	var _ WechatPayService = (*MockWechatPayService)(nil)
 	require.NotNil(t, NewRealWechatPayService)
 }
 
 func TestNotificationResultFields(t *testing.T) {
-	// Verify NotificationResult has the expected fields and they are accessible
 	r := NotificationResult{
 		OutTradeNo:    "order123",
 		TransactionId: "tx456",

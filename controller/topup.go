@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	payment "github.com/QuantumNous/new-api/service/payment"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -509,7 +510,7 @@ func activeQueryAlipay(ctx context.Context, topUp *model.TopUp) bool {
 	if rsp.TradeStatus != alipay.TradeStatusSuccess && rsp.TradeStatus != alipay.TradeStatusFinished {
 		return false
 	}
-	cents, err := service.AlipayAmountToCents(rsp.TotalAmount)
+	cents, err := payment.AlipayAmountToCents(rsp.TotalAmount)
 	if err != nil {
 		reason := fmt.Sprintf("active query: invalid total_amount=%q err=%v", rsp.TotalAmount, err)
 		log.Printf("topup active query: %s tradeNo=%s", reason, topUp.TradeNo)
@@ -729,4 +730,3 @@ func AdminCompleteTopUp(c *gin.Context) {
 	}
 	common.ApiSuccess(c, nil)
 }
-

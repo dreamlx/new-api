@@ -58,6 +58,7 @@ func TestWxpayNotifyHappyPath(t *testing.T) {
 				TradeState:    "SUCCESS",
 				AmountTotal:   10000,
 				PaidAt:        1700000000,
+				Raw:           `{"out_trade_no":"wxpay_notify_001"}`,
 			}, nil
 		},
 	}
@@ -71,6 +72,7 @@ func TestWxpayNotifyHappyPath(t *testing.T) {
 	require.NoError(t, db.Where("trade_no = ?", "wxpay_notify_001").First(&loaded).Error)
 	require.Equal(t, common.TopUpStatusSuccess, loaded.Status)
 	require.Equal(t, "wx_tx_001", loaded.ProviderTxId)
+	require.Contains(t, loaded.CallbackRaw, "wxpay_notify_001")
 
 	var user model.User
 	require.NoError(t, db.First(&user, topUp.UserId).Error)
@@ -91,6 +93,7 @@ func TestWxpayNotifyDuplicateCallback(t *testing.T) {
 				TradeState:    "SUCCESS",
 				AmountTotal:   10000,
 				PaidAt:        1700000000,
+				Raw:           `{"out_trade_no":"wxpay_notify_dup"}`,
 			}, nil
 		},
 	}
@@ -108,6 +111,10 @@ func TestWxpayNotifyDuplicateCallback(t *testing.T) {
 	require.NoError(t, db.First(&user, topUp.UserId).Error)
 	expectedQuota := 100 + int(float64(topUp.Amount)*common.QuotaPerUnit)
 	require.Equal(t, expectedQuota, user.Quota, "quota must only be granted once")
+
+	var loaded model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", "wxpay_notify_dup").First(&loaded).Error)
+	require.Contains(t, loaded.CallbackRaw, "wxpay_notify_dup")
 }
 
 func TestWxpayNotifyAmountMismatch(t *testing.T) {

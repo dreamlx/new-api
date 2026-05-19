@@ -32,10 +32,10 @@ type TopUp struct {
 	// 对账字段
 	ProviderTxId string `json:"provider_tx_id" gorm:"type:varchar(255);index"`
 	PaidAt       int64  `json:"paid_at"`
-	// CallbackRaw is the audit/reason sink used by SetTopUpAnomaly /
-	// MarkRefundFailed / MarkRefundAnomaly to record why a row was flipped
-	// to anomaly. Despite the column name, raw callback bodies are NOT
-	// persisted on the success path (audit lives in the logs table).
+	// CallbackRaw stores the raw provider callback payload on the success
+	// path, or the anomaly / failure reason on guard failures. This keeps the
+	// original webhook body available for later inspection without exposing it
+	// in JSON responses.
 	CallbackRaw string `json:"-" gorm:"type:text"`
 
 	// 退款状态机
@@ -490,6 +490,15 @@ func SetTopUpAnomaly(db *gorm.DB, tradeNo string, reason string) error {
 			"status":       common.TopUpStatusAnomaly,
 			"callback_raw": reason,
 		}).Error
+}
+
+// SetTopUpCallbackRaw records the raw provider callback payload for a paid
+// top-up order. It only updates rows that are still pending, so it stays safe
+// under duplicate webhook deliveries.
+func SetTopUpCallbackRaw(db *gorm.DB, tradeNo string, callbackRaw string) error {
+	return db.Model(&TopUp{}).
+		Where("trade_no = ? AND status = ?", tradeNo, common.TopUpStatusPending).
+		Update("callback_raw", callbackRaw).Error
 }
 
 // MarkRefundPending 标记退款为 pending（DB 条件更新，幂等）

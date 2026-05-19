@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	payment "github.com/QuantumNous/new-api/service/payment"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -35,13 +36,13 @@ const (
 // wechatPayServiceProvider returns a WechatPayService instance. Tests override
 // this var to inject a mock without touching the SDK or setting state.
 //
-// The default delegates to service.NewWechatPayServiceFromSettings so the HTTP
-// path and the background sweep (service/topup_expiry.go) construct the
+// The default delegates to payment.NewWechatPayServiceFromSettings so the HTTP
+// path and the background sweep construct the
 // provider the same way. HTTP paths still hard-require a non-nil verifier;
 // the wrapper below enforces that invariant which the notify handler relies
 // on (the sweep tolerates a nil verifier because Close doesn't decrypt).
-var wechatPayServiceProvider = func() (service.WechatPayService, error) {
-	svc, err := service.NewWechatPayServiceFromSettings()
+var wechatPayServiceProvider = func() (payment.WechatPayService, error) {
+	svc, err := payment.NewWechatPayServiceFromSettings()
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +96,7 @@ func RequestWxpay(c *gin.Context) {
 		return
 	}
 
-	payAmountCents := service.MoneyToCents(payMoney)
+	payAmountCents := payment.MoneyToCents(payMoney)
 	if payAmountCents <= 0 {
 		c.JSON(200, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -236,6 +237,11 @@ func WxpayNotify(c *gin.Context) {
 		_ = model.SetTopUpAnomaly(model.DB, tradeNo, reason)
 		wxpayFail(c, http.StatusBadRequest, "amount mismatch")
 		return
+	}
+	if result.Raw != "" {
+		if err := model.SetTopUpCallbackRaw(model.DB, tradeNo, result.Raw); err != nil {
+			log.Printf("wxpay notify: persist callback raw failed tradeNo=%s err=%v", tradeNo, err)
+		}
 	}
 
 	granted, err := finalizeTopUpSuccess(topUp, result.TransactionId, result.PaidAt, "使用微信")
