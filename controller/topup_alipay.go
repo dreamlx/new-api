@@ -54,14 +54,6 @@ type AlipayPayRequest struct {
 	Amount int64 `json:"amount"`
 }
 
-// computeAlipayPayMoney returns the CNY amount (yuan) to charge for the given
-// requested unit count and user group. It re-uses the shared getPayMoney
-// helper which already factors in QuotaDisplayType, group ratio and preset
-// discount.
-func computeAlipayPayMoney(amount int64, group string) float64 {
-	return getPayMoney(amount, group)
-}
-
 // RequestAlipay creates an Alipay order and returns the PC payment URL.
 //
 // POST /api/user/alipay/pay
@@ -104,7 +96,7 @@ func RequestAlipay(c *gin.Context) {
 		return
 	}
 
-	payMoney := computeAlipayPayMoney(req.Amount, group)
+	payMoney := getPayMoney(req.Amount, group)
 	if payMoney < 0.01 {
 		c.JSON(200, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -155,7 +147,6 @@ func RequestAlipay(c *gin.Context) {
 		CreateTime:     now,
 		Status:         common.TopUpStatusPending,
 		PayAmountCents: payAmountCents,
-		Currency:       "CNY",
 		ExpireTime:     now + alipayOrderExpireSeconds,
 	}
 	if err := topUp.Insert(); err != nil {
@@ -187,8 +178,9 @@ const (
 
 // alipayParseGmt converts an Alipay "gmt_payment" string like
 // "2026-05-14 12:00:01" (Asia/Shanghai) to a Unix timestamp. On parse failure
-// it falls back to the current time, since timestamp accuracy is not critical
-// to idempotency or accounting.
+// it logs and falls back to the current time, since timestamp accuracy is
+// not critical to idempotency or accounting — but a silent fallback would
+// mask format changes from Alipay or upstream config errors.
 func alipayParseGmt(gmt string) int64 {
 	if gmt == "" {
 		return time.Now().Unix()
@@ -196,10 +188,12 @@ func alipayParseGmt(gmt string) int64 {
 	// Alipay uses Asia/Shanghai for gmt_payment.
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
+		log.Printf("alipayParseGmt: LoadLocation(Asia/Shanghai) failed: %v (falling back to local)", err)
 		loc = time.Local
 	}
 	t, err := time.ParseInLocation("2006-01-02 15:04:05", gmt, loc)
 	if err != nil {
+		log.Printf("alipayParseGmt: ParseInLocation(%q) failed: %v (falling back to now)", gmt, err)
 		return time.Now().Unix()
 	}
 	return t.Unix()
@@ -320,7 +314,17 @@ func AlipayNotify(c *gin.Context) {
 		c.String(http.StatusOK, alipayNotifyErr)
 		return
 	}
-	if topUp.PayAmountCents > 0 && notifyCents != topUp.PayAmountCents {
+	if topUp.PayAmountCents <= 0 {
+		// Direct-integration orders ALWAYS set PayAmountCents > 0 at insert time
+		// (see RequestAlipay). A zero here means data corruption or a row from
+		// a different channel that should never have reached this notify path.
+		reason := fmt.Sprintf("pay_amount_cents=0 on alipay order tradeNo=%s — refusing to accept notify", tradeNo)
+		log.Printf("alipay notify: %s", reason)
+		_ = model.SetTopUpAnomaly(model.DB, tradeNo, reason)
+		c.String(http.StatusOK, alipayNotifyErr)
+		return
+	}
+	if notifyCents != topUp.PayAmountCents {
 		reason := fmt.Sprintf("amount mismatch: notify=%d expected=%d", notifyCents, topUp.PayAmountCents)
 		log.Printf("alipay notify: %s tradeNo=%s", reason, tradeNo)
 		_ = model.SetTopUpAnomaly(model.DB, tradeNo, reason)

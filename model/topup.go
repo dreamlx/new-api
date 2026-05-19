@@ -23,9 +23,8 @@ type TopUp struct {
 	Status           string  `json:"status"`
 
 	// 金额整数化 (v2 新增)
-	PayAmountCents int64  `json:"pay_amount_cents"`
-	Currency       string `json:"currency" gorm:"type:varchar(8)"`
-	QuotaGranted   int64  `json:"quota_granted"`
+	PayAmountCents int64 `json:"pay_amount_cents"`
+	QuotaGranted   int64 `json:"quota_granted"`
 
 	// 订单超时
 	ExpireTime int64 `json:"expire_time" gorm:"index"`
@@ -33,7 +32,11 @@ type TopUp struct {
 	// 对账字段
 	ProviderTxId string `json:"provider_tx_id" gorm:"type:varchar(255);index"`
 	PaidAt       int64  `json:"paid_at"`
-	CallbackRaw  string `json:"-" gorm:"type:text"`
+	// CallbackRaw is the audit/reason sink used by SetTopUpAnomaly /
+	// MarkRefundFailed / MarkRefundAnomaly to record why a row was flipped
+	// to anomaly. Despite the column name, raw callback bodies are NOT
+	// persisted on the success path (audit lives in the logs table).
+	CallbackRaw string `json:"-" gorm:"type:text"`
 
 	// 退款状态机
 	RefundStatus      string `json:"refund_status" gorm:"type:varchar(32);index;not null;default:''"`
@@ -460,7 +463,9 @@ func RechargeWaffo(tradeNo string) (err error) {
 
 // CompleteTopUpByCondition 用 DB 条件更新完成订单（多副本幂等）
 // 仅当 status='pending' 时更新为 success；返回影响行数。
-func CompleteTopUpByCondition(db *gorm.DB, tradeNo string, providerTxId string, paidAt int64) (int64, error) {
+// quotaGranted 是本次充值入账的额度，记录在 quota_granted 列以便退款时使用
+// 时间点准确的额度数字（避免日后 QuotaPerUnit 变动造成退款金额错算）。
+func CompleteTopUpByCondition(db *gorm.DB, tradeNo string, providerTxId string, paidAt int64, quotaGranted int64) (int64, error) {
 	if tradeNo == "" {
 		return 0, errors.New("trade_no is required")
 	}
@@ -471,6 +476,7 @@ func CompleteTopUpByCondition(db *gorm.DB, tradeNo string, providerTxId string, 
 			"provider_tx_id": providerTxId,
 			"paid_at":        paidAt,
 			"complete_time":  common.GetTimestamp(),
+			"quota_granted":  quotaGranted,
 		})
 	return result.RowsAffected, result.Error
 }

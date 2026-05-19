@@ -67,7 +67,6 @@ func seedTopUpRow(t *testing.T, db *gorm.DB, userId int, tradeNo, paymentMethod,
 		CreateTime:     createTime,
 		Status:         status,
 		PayAmountCents: 1450,
-		Currency:       "CNY",
 		ExpireTime:     createTime + 1800,
 	}
 	require.NoError(t, db.Create(topUp).Error)

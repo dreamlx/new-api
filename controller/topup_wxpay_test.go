@@ -131,7 +131,6 @@ func TestRequestWxpayHappyPath(t *testing.T) {
 	require.NoError(t, db.Where("trade_no = ?", captured.outTradeNo).First(&topUp).Error)
 	require.Equal(t, common.TopUpStatusPending, topUp.Status)
 	require.Equal(t, "wxpay", topUp.PaymentMethod)
-	require.Equal(t, "CNY", topUp.Currency)
 	require.Equal(t, captured.amountCents, topUp.PayAmountCents)
 	require.Greater(t, topUp.ExpireTime, topUp.CreateTime)
 }

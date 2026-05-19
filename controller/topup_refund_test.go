@@ -91,7 +91,6 @@ func seedRefundSuccessTopUp(t *testing.T, db *gorm.DB, tradeNo string, method st
 		CompleteTime:   time.Now().Unix() - 500,
 		Status:         common.TopUpStatusSuccess,
 		PayAmountCents: 10000,
-		Currency:       "CNY",
 		QuotaGranted:   50000,
 	}
 	require.NoError(t, db.Create(topUp).Error)

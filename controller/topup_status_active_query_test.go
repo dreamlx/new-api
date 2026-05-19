@@ -191,7 +191,7 @@ func TestGetTopUpStatusActiveQueryAlreadyCompletedByConcurrentNotify(t *testing.
 	topUp, user := withTopUpStatusUserAndOrder(t, PaymentMethodAlipay, staleCreateTime)
 
 	// Simulate a concurrent notify having already completed the order.
-	rows, err := model.CompleteTopUpByCondition(model.DB, topUp.TradeNo, "alipay_tx_already", time.Now().Unix())
+	rows, err := model.CompleteTopUpByCondition(model.DB, topUp.TradeNo, "alipay_tx_already", time.Now().Unix(), 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), rows)
 	// Mimic the notify path granting quota too:

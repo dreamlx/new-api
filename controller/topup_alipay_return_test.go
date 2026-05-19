@@ -54,7 +54,6 @@ func seedAlipayCompletedTopUp(t *testing.T, db *gorm.DB, tradeNo string) *model.
 		CreateTime:     1,
 		Status:         common.TopUpStatusSuccess,
 		PayAmountCents: 10000,
-		Currency:       "CNY",
 	}
 	require.NoError(t, db.Create(topUp).Error)
 	return topUp

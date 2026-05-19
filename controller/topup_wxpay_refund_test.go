@@ -40,7 +40,6 @@ func seedRefundPendingTopUp(t *testing.T, tradeNo string, userId int) *model.Top
 		CreateTime:     1,
 		Status:         common.TopUpStatusSuccess,
 		PayAmountCents: 10000,
-		Currency:       "CNY",
 		QuotaGranted:   50000,
 		RefundStatus:   common.RefundStatusPending,
 		RefundAdminId:  2,
@@ -238,7 +237,6 @@ func TestWxpayRefundNotifySuccessRejectsNonSuccessTopUp(t *testing.T) {
 		CreateTime:     1,
 		Status:         common.TopUpStatusAnomaly,
 		PayAmountCents: 10000,
-		Currency:       "CNY",
 		QuotaGranted:   50000,
 		RefundStatus:   common.RefundStatusPending,
 		RefundAdminId:  2,
@@ -304,7 +302,6 @@ func TestWxpayRefundNotifySuccessRejectsNonPendingRefundStatus(t *testing.T) {
 		CreateTime:     1,
 		Status:         common.TopUpStatusSuccess,
 		PayAmountCents: 10000,
-		Currency:       "CNY",
 		QuotaGranted:   50000,
 		RefundStatus:   common.RefundStatusFailed,
 	}

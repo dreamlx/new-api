@@ -31,7 +31,6 @@ func seedAlipayPendingTopUp(t *testing.T, db *gorm.DB, tradeNo string, payAmount
 		CreateTime:     1,
 		Status:         common.TopUpStatusPending,
 		PayAmountCents: payAmountCents,
-		Currency:       "CNY",
 	}
 	require.NoError(t, db.Create(topUp).Error)
 	return topUp

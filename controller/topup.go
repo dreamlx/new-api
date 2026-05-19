@@ -580,7 +580,11 @@ func activeQueryWxpay(ctx context.Context, topUp *model.TopUp) bool {
 // path where contention with other notify deliveries is expected; the DB
 // conditional update is the authoritative cross-replica boundary.
 func finalizeTopUpSuccess(topUp *model.TopUp, providerTxId string, paidAt int64, providerPrefix string) (granted bool, err error) {
-	rowsAffected, err := model.CompleteTopUpByCondition(model.DB, topUp.TradeNo, providerTxId, paidAt)
+	dAmount := decimal.NewFromInt(topUp.Amount)
+	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+	quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
+
+	rowsAffected, err := model.CompleteTopUpByCondition(model.DB, topUp.TradeNo, providerTxId, paidAt, int64(quotaToAdd))
 	if err != nil {
 		return false, err
 	}
@@ -589,9 +593,6 @@ func finalizeTopUpSuccess(topUp *model.TopUp, providerTxId string, paidAt int64,
 		return false, nil
 	}
 
-	dAmount := decimal.NewFromInt(topUp.Amount)
-	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-	quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
 	if quotaToAdd <= 0 {
 		return true, nil
 	}

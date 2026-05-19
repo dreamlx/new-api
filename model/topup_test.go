@@ -40,7 +40,6 @@ func TestTopUpNewFields(t *testing.T) {
 		Money:             2.0,
 		TradeNo:           "test_trade_no",
 		PayAmountCents:    1450,
-		Currency:          "CNY",
 		QuotaGranted:      100,
 		ExpireTime:        1234567890,
 		ProviderTxId:      "alipay_tx_123",
@@ -60,7 +59,6 @@ func TestTopUpNewFields(t *testing.T) {
 	var loaded TopUp
 	require.NoError(t, db.First(&loaded, topUp.Id).Error)
 	require.Equal(t, int64(1450), loaded.PayAmountCents)
-	require.Equal(t, "CNY", loaded.Currency)
 	require.Equal(t, int64(100), loaded.QuotaGranted)
 	require.Equal(t, int64(1234567890), loaded.ExpireTime)
 	require.Equal(t, "alipay_tx_123", loaded.ProviderTxId)
@@ -135,7 +133,7 @@ func TestCompleteTopUpByCondition(t *testing.T) {
 	require.NoError(t, db.Create(topUp).Error)
 
 	// 第一次调用应成功（影响 1 行）
-	affected, err := CompleteTopUpByCondition(db, "cond_test_001", "provider_tx_001", 1234567890)
+	affected, err := CompleteTopUpByCondition(db, "cond_test_001", "provider_tx_001", 1234567890, 100)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), affected)
 
@@ -147,7 +145,7 @@ func TestCompleteTopUpByCondition(t *testing.T) {
 	require.Greater(t, loaded.CompleteTime, int64(0))
 
 	// 第二次调用应幂等（影响 0 行）— 这是多副本场景的核心保证
-	affected, err = CompleteTopUpByCondition(db, "cond_test_001", "provider_tx_002", 9999999999)
+	affected, err = CompleteTopUpByCondition(db, "cond_test_001", "provider_tx_002", 9999999999, 100)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), affected)
 
@@ -170,7 +168,7 @@ func TestCompleteTopUpByConditionRejectsNonPending(t *testing.T) {
 	}
 	require.NoError(t, db.Create(topUp).Error)
 
-	affected, err := CompleteTopUpByCondition(db, "non_pending_001", "tx_x", 123)
+	affected, err := CompleteTopUpByCondition(db, "non_pending_001", "tx_x", 123, 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), affected, "must not update non-pending orders")
 }
@@ -178,7 +176,7 @@ func TestCompleteTopUpByConditionRejectsNonPending(t *testing.T) {
 func TestCompleteTopUpByConditionUnknownTradeNo(t *testing.T) {
 	db := setupTopUpTestDB(t)
 
-	affected, err := CompleteTopUpByCondition(db, "does_not_exist", "tx_y", 456)
+	affected, err := CompleteTopUpByCondition(db, "does_not_exist", "tx_y", 456, 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), affected)
 }
@@ -186,7 +184,7 @@ func TestCompleteTopUpByConditionUnknownTradeNo(t *testing.T) {
 func TestCompleteTopUpByConditionRejectsEmptyTradeNo(t *testing.T) {
 	db := setupTopUpTestDB(t)
 
-	affected, err := CompleteTopUpByCondition(db, "", "tx_z", 789)
+	affected, err := CompleteTopUpByCondition(db, "", "tx_z", 789, 0)
 	require.Error(t, err)
 	require.Equal(t, int64(0), affected)
 	require.Contains(t, err.Error(), "trade_no")

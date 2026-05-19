@@ -129,7 +129,6 @@ func TestRequestAlipayHappyPath(t *testing.T) {
 	require.NoError(t, db.Where("trade_no = ?", captured.outTradeNo).First(&topUp).Error)
 	require.Equal(t, common.TopUpStatusPending, topUp.Status)
 	require.Equal(t, "alipay", topUp.PaymentMethod)
-	require.Equal(t, "CNY", topUp.Currency)
 	require.Greater(t, topUp.PayAmountCents, int64(0))
 	require.Greater(t, topUp.ExpireTime, topUp.CreateTime)
 	require.NotEmpty(t, captured.notifyURL)

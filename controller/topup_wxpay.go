@@ -131,7 +131,6 @@ func RequestWxpay(c *gin.Context) {
 		CreateTime:     now,
 		Status:         common.TopUpStatusPending,
 		PayAmountCents: payAmountCents,
-		Currency:       "CNY",
 		ExpireTime:     now + wxpayOrderExpireSeconds,
 	}
 	if err := topUp.Insert(); err != nil {
@@ -216,7 +215,17 @@ func WxpayNotify(c *gin.Context) {
 		return
 	}
 
-	if topUp.PayAmountCents > 0 && result.AmountTotal != topUp.PayAmountCents {
+	if topUp.PayAmountCents <= 0 {
+		// Direct-integration orders ALWAYS set PayAmountCents > 0 at insert time
+		// (see RequestWxpay). A zero here means data corruption or a row from
+		// a different channel that should never have reached this notify path.
+		reason := fmt.Sprintf("pay_amount_cents=0 on wxpay order tradeNo=%s — refusing to accept notify", tradeNo)
+		log.Printf("wxpay notify: %s", reason)
+		_ = model.SetTopUpAnomaly(model.DB, tradeNo, reason)
+		wxpayFail(c, http.StatusBadRequest, "invalid order amount")
+		return
+	}
+	if result.AmountTotal != topUp.PayAmountCents {
 		reason := fmt.Sprintf("amount mismatch: notify=%d expected=%d", result.AmountTotal, topUp.PayAmountCents)
 		log.Printf("wxpay notify: %s tradeNo=%s", reason, tradeNo)
 		_ = model.SetTopUpAnomaly(model.DB, tradeNo, reason)
