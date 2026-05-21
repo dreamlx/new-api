@@ -113,13 +113,6 @@ func RequestWxpay(c *gin.Context) {
 	notifyURL := service.GetCallbackAddress() + wxpayNotifyPath
 	description := fmt.Sprintf(wxpayDescriptionFormat, tradeNo)
 
-	codeURL, err := svc.NativePrepay(c.Request.Context(), tradeNo, description, payAmountCents, notifyURL)
-	if err != nil {
-		log.Printf("wxpay NativePrepay failed: %v", err)
-		c.JSON(200, gin.H{"message": "error", "data": "拉起支付失败"})
-		return
-	}
-
 	amount := req.Amount
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		dAmount := decimal.NewFromInt(amount)
@@ -128,6 +121,7 @@ func RequestWxpay(c *gin.Context) {
 	}
 
 	now := time.Now().Unix()
+	expireAt := now + wxpayOrderExpireSeconds
 	topUp := &model.TopUp{
 		UserId:         userId,
 		Amount:         amount,
@@ -137,11 +131,26 @@ func RequestWxpay(c *gin.Context) {
 		CreateTime:     now,
 		Status:         common.TopUpStatusPending,
 		PayAmountCents: payAmountCents,
-		ExpireTime:     now + wxpayOrderExpireSeconds,
+		ExpireTime:     expireAt,
 	}
+	// Insert the local order BEFORE calling NativePrepay so a failed Insert
+	// does not leave an orphan order on WeChat's side. WeChat will not have
+	// any record of this trade_no until Prepay succeeds — and if Prepay then
+	// fails, the local pending row is harmless (the expiry sweep will close
+	// it without ever asking WeChat).
 	if err := topUp.Insert(); err != nil {
 		log.Printf("wxpay topup insert failed: %v (trade_no=%s)", err, tradeNo)
 		c.JSON(200, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
+
+	// Pass the same TTL upstream so a payment arriving after our local sweep
+	// is also rejected by WeChat, instead of WeChat keeping its default
+	// 2-hour acceptance window.
+	codeURL, err := svc.NativePrepay(c.Request.Context(), tradeNo, description, payAmountCents, notifyURL, time.Unix(expireAt, 0))
+	if err != nil {
+		log.Printf("wxpay NativePrepay failed: %v", err)
+		c.JSON(200, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}
 
@@ -245,18 +254,15 @@ func WxpayNotify(c *gin.Context) {
 	}
 
 	granted, err := finalizeTopUpSuccess(topUp, result.TransactionId, result.PaidAt, "使用微信")
-	if err != nil && !granted {
-		log.Printf("wxpay notify: CompleteTopUpByCondition failed tradeNo=%s err=%v", tradeNo, err)
+	if err != nil {
+		// Transaction rolled back: status NOT flipped, quota NOT changed.
+		// Let WeChat retry by responding FAIL. Safe because next delivery
+		// will re-enter the same conditional UPDATE.
+		log.Printf("wxpay notify: finalize transaction failed tradeNo=%s err=%v", tradeNo, err)
 		wxpayFail(c, http.StatusInternalServerError, "db error")
 		return
 	}
-	if err != nil {
-		// granted==true but IncreaseUserQuota failed after the status flip;
-		// ack SUCCESS so WeChat does not retry-storm; ops reconciles via logs.
-		log.Printf("wxpay notify: IncreaseUserQuota failed tradeNo=%s userId=%d err=%v",
-			tradeNo, topUp.UserId, err)
-	}
-	if !granted && err == nil {
+	if !granted {
 		log.Printf("wxpay notify: idempotent skip tradeNo=%s (already completed)", tradeNo)
 	}
 

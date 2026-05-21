@@ -22,7 +22,6 @@ var (
 	WxpayPublicKeyId = ""
 	WxpayPublicKey   = "" // PEM content
 	WxpayAppId       = ""
-	WxpayNotifyURL   = ""
 	WxpayMinTopUp    = 1
 )
 
@@ -34,7 +33,10 @@ var (
 )
 
 func missingWechatPayConfigFields() []string {
-	missing := make([]string, 0, 5)
+	missing := make([]string, 0, 6)
+	if WxpayAppId == "" {
+		missing = append(missing, "WxpayAppId")
+	}
 	if WxpayMchId == "" {
 		missing = append(missing, "WxpayMchId")
 	}

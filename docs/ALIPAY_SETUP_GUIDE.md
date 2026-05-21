@@ -117,27 +117,10 @@
 - 异步通知中的 `total_amount` 会与本地订单的 `amount` 进行严格比对，不一致会被标记为 `anomaly`；
 - 如出现 `anomaly` 状态，请检查 **充值价格** 配置是否在订单创建后被改动。
 
-## 7. 退款流程（摘要）
-
-支付宝直连支付的退款是 **同步** 的：调用支付宝 `alipay.trade.refund` 接口，返回 `code === 10000` 即代表退款成功。
-
-当前后端保留 root 专用退款执行接口，但前端充值历史页暂未接入退款按钮；常规用户售后建议按 `docs/REFUND_PRIVATE_DOMAIN_HANDLING.md` 引导到私域人工处理。
-
-如需进行测试或应急手动退款，可由 root 调用接口：
-
-1. `POST /api/topup/refund/prepare` 获取 5 分钟有效的 `confirm_token`；
-2. `POST /api/topup/refund` 提交 `trade_no`、`confirm_token` 和退款原因；
-3. 系统调用支付宝退款接口：
-   - 成功：订单 `refund_status` 立即变为 `refund_success`，用户额度同步扣除；
-   - 失败：订单 `refund_status` 标记为 `refund_failed`，记录失败原因，可重试。
-
-> 注意：退款会从用户当前余额中扣减相应额度。现阶段不开放用户自助退款，人工售后应先核验订单和额度使用情况。
-
-## 8. 进阶参考
+## 7. 进阶参考
 
 如果你需要深入了解或排查实现细节，相关源码位置（仅供参考，**请勿在生产环境直接修改**）：
 
 - 后端订单创建 / 异步回调：`controller/topup_alipay.go`
-- 退款执行流程：`controller/topup_refund_execute.go`
 - 配置项注册及默认值：`setting/payment_alipay.go`
 - 支付宝 SDK 封装：`service/alipay.go`

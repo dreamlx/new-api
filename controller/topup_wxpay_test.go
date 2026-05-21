@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -98,7 +99,7 @@ func TestRequestWxpayHappyPath(t *testing.T) {
 		notifyURL   string
 	}
 	mock := &service.MockWechatPayService{
-		NativePrepayFunc: func(_ context.Context, outTradeNo, description string, amountCents int64, notifyURL string) (string, error) {
+		NativePrepayFunc: func(_ context.Context, outTradeNo, description string, amountCents int64, notifyURL string, _ time.Time) (string, error) {
 			captured.outTradeNo = outTradeNo
 			captured.description = description
 			captured.amountCents = amountCents
@@ -186,7 +187,7 @@ func TestRequestWxpayServiceError(t *testing.T) {
 	withWxpayEnabled(t, true)
 
 	mock := &service.MockWechatPayService{
-		NativePrepayFunc: func(_ context.Context, _, _ string, _ int64, _ string) (string, error) {
+		NativePrepayFunc: func(_ context.Context, _, _ string, _ int64, _ string, _ time.Time) (string, error) {
 			return "", errWxpayMockFailure
 		},
 	}
@@ -206,7 +207,13 @@ func TestRequestWxpayServiceError(t *testing.T) {
 	require.Contains(t, body, "error")
 	require.Contains(t, body, "拉起支付失败")
 
-	var count int64
-	require.NoError(t, db.Model(&model.TopUp{}).Count(&count).Error)
-	require.Equal(t, int64(0), count, "no TopUp should be inserted when prepay fails")
+	// Insert happens BEFORE NativePrepay (see RequestWxpay), so a failed
+	// prepay leaves a pending row behind. This is intentional: the row is
+	// harmless (WeChat has no record of this trade_no) and the expiry sweep
+	// will close it without an upstream call. We assert exactly one pending
+	// row to lock in the order of operations.
+	var rows []model.TopUp
+	require.NoError(t, db.Model(&model.TopUp{}).Find(&rows).Error)
+	require.Len(t, rows, 1)
+	require.Equal(t, common.TopUpStatusPending, rows[0].Status)
 }

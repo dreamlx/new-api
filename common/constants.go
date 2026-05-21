@@ -217,11 +217,3 @@ const (
 	TopUpStatusExpired = "expired"
 	TopUpStatusAnomaly = "anomaly"
 )
-
-const (
-	RefundStatusNone    = ""
-	RefundStatusPending = "refund_pending"
-	RefundStatusSuccess = "refund_success"
-	RefundStatusFailed  = "refund_failed"
-	RefundStatusAnomaly = "refund_anomaly"
-)

@@ -75,11 +75,6 @@ func TestCloseExpiredPendingTopUps_HappyMixedRows(t *testing.T) {
 			ExpireTime: now + 600,
 		},
 		{
-			UserId: 1, Amount: 10, Money: 1, TradeNo: "expired_but_refunding",
-			PaymentMethod: "alipay", Status: common.TopUpStatusPending,
-			ExpireTime: now - 60, RefundStatus: common.RefundStatusPending,
-		},
-		{
 			UserId: 1, Amount: 10, Money: 1, TradeNo: "expired_wx",
 			PaymentMethod: "wxpay", Status: common.TopUpStatusPending,
 			ExpireTime: now - 30,
@@ -116,7 +111,6 @@ func TestCloseExpiredPendingTopUps_HappyMixedRows(t *testing.T) {
 	require.Equal(t, common.TopUpStatusExpired, statusOf("expired_ali"))
 	require.Equal(t, common.TopUpStatusExpired, statusOf("expired_wx"))
 	require.Equal(t, common.TopUpStatusPending, statusOf("not_yet_expired"))
-	require.Equal(t, common.TopUpStatusPending, statusOf("expired_but_refunding"))
 }
 
 func TestCloseExpiredPendingTopUps_SDKErrorStillClosesLocally(t *testing.T) {
@@ -193,57 +187,6 @@ func TestCloseExpiredPendingTopUps_UnknownProviderSkipped(t *testing.T) {
 	var loaded model.TopUp
 	require.NoError(t, db.Where("trade_no = ?", "epay_legacy").First(&loaded).Error)
 	require.Equal(t, common.TopUpStatusExpired, loaded.Status)
-}
-
-func TestReconcileStaleRefundsPending(t *testing.T) {
-	db, _ := setupTopUpExpiryTest(t)
-	now := time.Now()
-
-	rows := []model.TopUp{
-		{
-			UserId: 1, Amount: 10, Money: 1, TradeNo: "stale_refund",
-			Status: common.TopUpStatusSuccess, RefundStatus: common.RefundStatusPending,
-			RefundRequestTime: now.Add(-30 * time.Hour).Unix(),
-		},
-		{
-			UserId: 1, Amount: 10, Money: 1, TradeNo: "fresh_refund",
-			Status: common.TopUpStatusSuccess, RefundStatus: common.RefundStatusPending,
-			RefundRequestTime: now.Add(-1 * time.Hour).Unix(),
-		},
-		{
-			UserId: 1, Amount: 10, Money: 1, TradeNo: "successful_refund_ignored",
-			Status: common.TopUpStatusSuccess, RefundStatus: common.RefundStatusSuccess,
-			RefundRequestTime: now.Add(-48 * time.Hour).Unix(),
-		},
-	}
-	for i := range rows {
-		require.NoError(t, db.Create(&rows[i]).Error)
-	}
-
-	n, err := ReconcileStaleRefundsPending(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
-
-	statusOf := func(tradeNo string) string {
-		var got model.TopUp
-		require.NoError(t, db.Where("trade_no = ?", tradeNo).First(&got).Error)
-		return got.RefundStatus
-	}
-	require.Equal(t, common.RefundStatusAnomaly, statusOf("stale_refund"))
-	require.Equal(t, common.RefundStatusPending, statusOf("fresh_refund"))
-	require.Equal(t, common.RefundStatusSuccess, statusOf("successful_refund_ignored"))
-
-	var stale model.TopUp
-	require.NoError(t, db.Where("trade_no = ?", "stale_refund").First(&stale).Error)
-	require.Contains(t, stale.CallbackRaw, "manual reconciliation")
-}
-
-func TestReconcileStaleRefundsPending_NoRows(t *testing.T) {
-	setupTopUpExpiryTest(t)
-
-	n, err := ReconcileStaleRefundsPending(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, 0, n)
 }
 
 // Smoke-test that exercising VerifySign through the mock works — present

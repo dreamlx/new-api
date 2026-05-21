@@ -55,7 +55,6 @@
 | **微信支付公钥** | `pub_key.pem` 的完整 PEM 内容，需带 BEGIN/END 标记 |
 | **API v3 密钥** | 32 位字符串，前面手动设置的那个 |
 | **商户私钥** | `apiclient_key.pem` 的完整 PEM 内容，需带 BEGIN/END 标记 |
-| **异步通知地址（可选）** | 留空时自动使用 `<服务器地址>/api/user/wxpay/notify` |
 | **最低充值数量** | 触发微信支付按钮的最低充值数量，例如 1 |
 | **启用微信支付** | 总开关，关闭后用户充值页不显示微信扫码按钮 |
 
@@ -74,7 +73,7 @@
 - 微信支付公钥 `WxpayPublicKey`
 - APIv3 密钥 `WxpayApiV3Key`
 
-并通过 `WithWechatPayPublicKeyAuthCipher` 创建 SDK 客户端。支付通知和退款通知验签由 `WxpayPublicKeyId + WxpayPublicKey` 完成，通知内容解密仍使用 APIv3 密钥。
+并通过 `WithWechatPayPublicKeyAuthCipher` 创建 SDK 客户端。支付通知验签由 `WxpayPublicKeyId + WxpayPublicKey` 完成，通知内容解密仍使用 APIv3 密钥。
 
 > 当前版本不再使用 `WithWechatPayAutoAuthCipher`，也不会从 `/v3/certificates` 自动拉取平台证书。请不要按旧文档排查“平台证书下载失败”，应优先检查公钥 ID、公钥内容、商户私钥和 APIv3 密钥是否匹配当前商户号。
 
@@ -93,16 +92,15 @@
 
 ## 6. 回调地址
 
-微信支付直连通道涉及 **两个** 异步通知 URL，**两者都需在商户平台 → 产品中心 → 开发配置中登记**：
+微信支付直连通道需要登记 **支付异步通知 URL**（**商户平台 → 产品中心 → 开发配置**）：
 
 | 用途 | URL 模板 |
 | --- | --- |
 | 支付异步通知 | `<服务器地址>/api/user/wxpay/notify` |
-| 退款异步通知 | `<服务器地址>/api/user/wxpay/refund/notify` |
 
 其中 `<服务器地址>` = **系统设置 → 通用设置 → 服务器地址**（自动去除末尾斜杠）。
 
-支付通知是订单成功的权威来源；退款通知是退款最终状态的权威来源。两者都必须能从公网到达。
+支付通知是订单成功的权威来源，必须能从公网到达。
 
 ## 7. 常见问题
 
@@ -124,46 +122,21 @@
 - 检查 `WxpayMchId`、`WxpayMchSerialNo`、`WxpayPrivateKey`、`WxpayPublicKeyId`、`WxpayPublicKey` 是否都已配置；
 - 检查服务器到 `api.mch.weixin.qq.com` 的网络连通性（443 端口出站）。
 
-### 7.4 退款通知未到达
-
-退款是异步流程，提交退款请求后 `refund_status` 进入 `refund_pending`，必须等微信回调才能标记 `refund_success`。如果通知长时间未到：
-
-- 检查 **退款异步通知 URL** 是否已在商户平台登记并可公网访问；
-- 系统内置 cron 每小时扫描，若退款超过 **24 小时仍处于 `refund_pending`** 状态，会自动标记为 `refund_anomaly`，提示运维介入；
-- 出现 `refund_anomaly` 时，可在商户平台手动查询退款状态后，决定是否在 nеw-аρi 后台手动调整（具体操作流程请遵循内部 SOP）。
-
-### 7.5 扫码后提示 "商户号与 AppId 未关联"
+### 7.4 扫码后提示 "商户号与 AppId 未关联"
 
 - 在商户平台 **产品中心 → AppId 账号管理** 中，将当前 AppId 绑定到商户号；
 - 等待几分钟生效后重试。
 
-## 8. 退款流程
-
-当前后端保留 root 专用退款执行接口，但前端充值历史页暂未接入退款按钮；常规用户售后建议按 `docs/REFUND_PRIVATE_DOMAIN_HANDLING.md` 引导到私域人工处理。
-
-如需进行测试或应急手动退款，可由 root 调用接口：
-
-1. `POST /api/topup/refund/prepare` 获取 5 分钟有效的 `confirm_token`；
-2. `POST /api/topup/refund` 提交 `trade_no`、`confirm_token` 和退款原因；
-3. 系统调用微信支付 `v3/refund/domestic/refunds` 接口：
-   - 微信返回受理成功（HTTP 200 / 202）后，订单 `refund_status` 变为 `refund_pending`，**额度先不扣减**；
-   - 微信侧实际退款完成后，向 **退款异步通知 URL** 发起回调；
-   - nеw-аρi 验签通过后，将 `refund_status` 更新为 `refund_success` 并扣减用户额度。
-
-> 与支付宝的同步退款不同，**微信退款的成功状态必须由异步通知确认**。请在 SOP 中明确告知运营人员：提交退款后看到 `refund_pending` 是正常状态，需等待回调；如超过 24 小时仍未确认，再按 7.4 的流程介入。
-
-## 9. 进阶参考
+## 8. 进阶参考
 
 如果你需要深入了解或排查实现细节，相关源码位置（仅供参考，**请勿在生产环境直接修改**）：
 
-- 后端订单创建 / 异步回调 / 退款回调：`controller/topup_wxpay.go`
-- 退款执行流程：`controller/topup_refund_execute.go`
+- 后端订单创建 / 异步回调：`controller/topup_wxpay.go`
 - 配置项注册及默认值：`setting/payment_wxpay.go`
 - 微信支付 SDK 封装：`service/wechat_pay.go`
-- 退款超时巡检 cron：`service/topup_expiry.go`（`ReconcileStaleRefundsPending`）
+- 过期订单关闭巡检 cron：`service/topup_expiry.go`（`CloseExpiredPendingTopUps`）
 
-## 10. 多副本部署注意事项
+## 9. 多副本部署注意事项
 
-- **必须显式设置 `CRYPTO_SECRET` 环境变量**，并在所有副本之间保持一致。该秘钥用于签发退款流程中的 `confirm_token`（HMAC-SHA256）。若未显式配置，每个副本启动时会生成各自的随机值，导致在副本 A 上申请的退款 token 在副本 B 上验签失败，退款操作随机性失败。
 - 微信支付 SDK 客户端在每个副本进程内独立缓存（`sync.Once` + 互斥锁）。当通过 admin 后台更新任一微信支付配置项时，仅触发当前副本的 `ResetWechatPayClient`；其他副本会在下一次 admin sync 周期（默认 60 秒）感知到配置变化后自动重置。请避免在配置切换的过渡窗口内立即发起大额支付。
-- 异步退款通知（`/api/user/wxpay/refund/notify`）天然支持多副本：`CompleteRefund` 在 DB 层做条件更新（`WHERE refund_status='refund_pending'`），只有第一个写入成功的副本会扣减用户额度，其他副本走幂等跳过分支。
+- 异步支付通知（`/api/user/wxpay/notify`）天然支持多副本：`CompleteTopUpByCondition` 在 DB 层做条件更新（`WHERE status='pending'`），只有第一个写入成功的副本会发放用户额度，其他副本走幂等跳过分支。

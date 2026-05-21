@@ -74,7 +74,6 @@ const PaymentSetting = () => {
     WxpayPrivateKey: '',
     WxpayPublicKeyId: '',
     WxpayPublicKey: '',
-    WxpayNotifyURL: '',
     WxpayMinTopUp: 1,
   });
 

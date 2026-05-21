@@ -54,7 +54,6 @@ export default function SettingsPaymentGatewayWxpay(props) {
     WxpayPrivateKey: '',
     WxpayPublicKeyId: '',
     WxpayPublicKey: '',
-    WxpayNotifyURL: '',
     WxpayMinTopUp: 1,
   });
   const [originInputs, setOriginInputs] = useState({});
@@ -72,7 +71,6 @@ export default function SettingsPaymentGatewayWxpay(props) {
         WxpayPrivateKey: props.options.WxpayPrivateKey || '',
         WxpayPublicKeyId: props.options.WxpayPublicKeyId || '',
         WxpayPublicKey: props.options.WxpayPublicKey || '',
-        WxpayNotifyURL: props.options.WxpayNotifyURL || '',
         WxpayMinTopUp:
           props.options.WxpayMinTopUp !== undefined
             ? parseFloat(props.options.WxpayMinTopUp)
@@ -104,7 +102,6 @@ export default function SettingsPaymentGatewayWxpay(props) {
         'WxpayMchId',
         'WxpayMchSerialNo',
         'WxpayPublicKeyId',
-        'WxpayNotifyURL',
       ];
       plainFields.forEach((key) => {
         if (inputs[key] !== originInputs[key]) {
@@ -317,13 +314,6 @@ export default function SettingsPaymentGatewayWxpay(props) {
             style={{ marginTop: 16 }}
           >
             <Col xs={24} sm={24} md={12} lg={12} xl={12}>
-              <Form.Input
-                field='WxpayNotifyURL'
-                label={t('异步通知地址（可选）')}
-                placeholder={defaultNotifyURL}
-              />
-            </Col>
-            <Col xs={24} sm={24} md={6} lg={6} xl={6}>
               <Form.InputNumber
                 field='WxpayMinTopUp'
                 label={t('最低充值数量')}
@@ -332,7 +322,7 @@ export default function SettingsPaymentGatewayWxpay(props) {
                 style={{ width: '100%' }}
               />
             </Col>
-            <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+            <Col xs={24} sm={24} md={12} lg={12} xl={12}>
               <Form.Switch
                 field='WxpayEnabled'
                 label={t('启用微信支付')}

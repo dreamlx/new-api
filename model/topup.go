@@ -37,15 +37,6 @@ type TopUp struct {
 	// original webhook body available for later inspection without exposing it
 	// in JSON responses.
 	CallbackRaw string `json:"-" gorm:"type:text"`
-
-	// 退款状态机
-	RefundStatus      string `json:"refund_status" gorm:"type:varchar(32);index;not null;default:''"`
-	RefundRequestTime int64  `json:"refund_request_time"`
-	RefundTime        int64  `json:"refund_time"`
-	RefundReason      string `json:"refund_reason" gorm:"type:text"`
-	RefundTradeNo     string `json:"refund_trade_no" gorm:"type:varchar(255);index"`
-	RefundAdminId     int    `json:"refund_admin_id"`
-	RefundedQuota     int64  `json:"refunded_quota"`
 }
 
 func (topUp *TopUp) Insert() error {
@@ -463,8 +454,8 @@ func RechargeWaffo(tradeNo string) (err error) {
 
 // CompleteTopUpByCondition 用 DB 条件更新完成订单（多副本幂等）
 // 仅当 status='pending' 时更新为 success；返回影响行数。
-// quotaGranted 是本次充值入账的额度，记录在 quota_granted 列以便退款时使用
-// 时间点准确的额度数字（避免日后 QuotaPerUnit 变动造成退款金额错算）。
+// quotaGranted 是本次充值入账的额度，记录在 quota_granted 列，作为人工核验
+// 时点准确的额度数字（避免日后 QuotaPerUnit 变动造成数额误判）。
 func CompleteTopUpByCondition(db *gorm.DB, tradeNo string, providerTxId string, paidAt int64, quotaGranted int64) (int64, error) {
 	if tradeNo == "" {
 		return 0, errors.New("trade_no is required")
@@ -479,6 +470,45 @@ func CompleteTopUpByCondition(db *gorm.DB, tradeNo string, providerTxId string, 
 			"quota_granted":  quotaGranted,
 		})
 	return result.RowsAffected, result.Error
+}
+
+// CompleteTopUpAndGrantQuotaAtomic 在一个事务内完成"状态翻转 + 加额度"，
+// 消除"订单成功但额度未到账"的失败模式（进程崩溃 / DB 错误介于两步之间）。
+//
+// 条件更新保留 WHERE status='pending' 提供跨副本幂等：多副本同时投递的回调
+// 中只有一个副本会得到 RowsAffected==1，其余看到 0 行并安全退出（granted=false）。
+//
+// 返回值：
+//   - granted=true: 本次调用真正翻转了状态并加了额度。调用方应记录入账日志。
+//   - granted=false, err=nil: 并发竞争中本调用未抢到（已被另一个 caller 完成），
+//     幂等跳过。
+//   - err!=nil: 事务回滚（状态未翻转、额度未变化）。调用方应让 webhook 重试。
+func CompleteTopUpAndGrantQuotaAtomic(tradeNo string, providerTxId string, paidAt int64, userId int, quotaToAdd int64) (granted bool, err error) {
+	if tradeNo == "" {
+		return false, errors.New("trade_no is required")
+	}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		rows, txErr := CompleteTopUpByCondition(tx, tradeNo, providerTxId, paidAt, quotaToAdd)
+		if txErr != nil {
+			return txErr
+		}
+		if rows == 0 {
+			// Concurrent winner已完成；幂等跳过，granted 保持 false。
+			return nil
+		}
+		granted = true
+		if quotaToAdd <= 0 {
+			return nil
+		}
+		return tx.Model(&User{}).
+			Where("id = ?", userId).
+			Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error
+	})
+	if err != nil {
+		// 事务失败：granted 必须回归 false，调用方据此让上游重试。
+		return false, err
+	}
+	return granted, nil
 }
 
 // SetTopUpAnomaly 标记订单为异常状态（验签失败/金额不一致等）。
@@ -499,57 +529,4 @@ func SetTopUpCallbackRaw(db *gorm.DB, tradeNo string, callbackRaw string) error 
 	return db.Model(&TopUp{}).
 		Where("trade_no = ? AND status = ?", tradeNo, common.TopUpStatusPending).
 		Update("callback_raw", callbackRaw).Error
-}
-
-// MarkRefundPending 标记退款为 pending（DB 条件更新，幂等）
-// 仅当 status=success 且 refund_status 为空或 failed 时更新
-func MarkRefundPending(db *gorm.DB, tradeNo string, adminId int, reason string) (int64, error) {
-	result := db.Model(&TopUp{}).
-		Where("trade_no = ? AND status = ? AND (refund_status = ? OR refund_status = ?)",
-			tradeNo, common.TopUpStatusSuccess, common.RefundStatusNone, common.RefundStatusFailed).
-		Updates(map[string]interface{}{
-			"refund_status":       common.RefundStatusPending,
-			"refund_request_time": common.GetTimestamp(),
-			"refund_admin_id":     adminId,
-			"refund_reason":       reason,
-		})
-	return result.RowsAffected, result.Error
-}
-
-// CompleteRefund 完成退款（success）。条件更新：仅当 refund_status='refund_pending'
-// 时执行，跨副本/重复回调时只有一行被更新，返回 RowsAffected 让调用方决定是否
-// 扣除额度。这是退款流程的跨副本幂等关键点（对应 CompleteTopUpByCondition 在
-// 充值路径的角色）。
-func CompleteRefund(db *gorm.DB, tradeNo string, refundTradeNo string, refundedQuota int64) (int64, error) {
-	result := db.Model(&TopUp{}).
-		Where("trade_no = ? AND refund_status = ?", tradeNo, common.RefundStatusPending).
-		Updates(map[string]interface{}{
-			"refund_status":   common.RefundStatusSuccess,
-			"refund_time":     common.GetTimestamp(),
-			"refund_trade_no": refundTradeNo,
-			"refunded_quota":  refundedQuota,
-		})
-	return result.RowsAffected, result.Error
-}
-
-// MarkRefundFailed 标记退款失败。仅当 refund_status='refund_pending' 时更新，
-// 避免赛跑覆盖一个已经走到 refund_success 的行。
-func MarkRefundFailed(db *gorm.DB, tradeNo string, reason string) error {
-	return db.Model(&TopUp{}).
-		Where("trade_no = ? AND refund_status = ?", tradeNo, common.RefundStatusPending).
-		Updates(map[string]interface{}{
-			"refund_status": common.RefundStatusFailed,
-			"callback_raw":  reason,
-		}).Error
-}
-
-// MarkRefundAnomaly 标记退款异常（超时/对账不一致）。仅当 refund_status='refund_pending'
-// 时更新，避免赛跑覆盖。
-func MarkRefundAnomaly(db *gorm.DB, tradeNo string, reason string) error {
-	return db.Model(&TopUp{}).
-		Where("trade_no = ? AND refund_status = ?", tradeNo, common.RefundStatusPending).
-		Updates(map[string]interface{}{
-			"refund_status": common.RefundStatusAnomaly,
-			"callback_raw":  reason,
-		}).Error
 }

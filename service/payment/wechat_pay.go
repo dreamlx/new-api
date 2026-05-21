@@ -12,16 +12,13 @@ import (
 	"github.com/wechatpay-apiv3/wechatpay-go/core/notify"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments"
 	nativeSvc "github.com/wechatpay-apiv3/wechatpay-go/services/payments/native"
-	"github.com/wechatpay-apiv3/wechatpay-go/services/refunddomestic"
 )
 
 type WechatPayService interface {
-	NativePrepay(ctx context.Context, outTradeNo string, description string, amountCents int64, notifyURL string) (codeURL string, err error)
+	NativePrepay(ctx context.Context, outTradeNo string, description string, amountCents int64, notifyURL string, timeExpire time.Time) (codeURL string, err error)
 	QueryOrderByOutTradeNo(ctx context.Context, outTradeNo string) (*payments.Transaction, error)
 	CloseOrder(ctx context.Context, outTradeNo string) error
 	DecryptNotification(ctx context.Context, request *http.Request) (*NotificationResult, error)
-	DecryptRefundNotification(ctx context.Context, request *http.Request) (*RefundNotificationResult, error)
-	Refund(ctx context.Context, outTradeNo string, outRefundNo string, totalCents int64, refundCents int64, reason string) error
 }
 
 type NotificationResult struct {
@@ -31,16 +28,6 @@ type NotificationResult struct {
 	AmountTotal   int64
 	PaidAt        int64
 	Raw           string
-}
-
-type RefundNotificationResult struct {
-	OutTradeNo   string
-	OutRefundNo  string
-	RefundId     string
-	RefundStatus string
-	RefundAmount int64
-	SuccessTime  int64
-	Raw          string
 }
 
 type RealWechatPayService struct {
@@ -55,7 +42,7 @@ func NewRealWechatPayService(client *core.Client, mchId string, appId string, ap
 	return &RealWechatPayService{client: client, mchId: mchId, appId: appId, apiV3Key: apiV3Key, verifier: verifier}
 }
 
-func (s *RealWechatPayService) NativePrepay(ctx context.Context, outTradeNo string, description string, amountCents int64, notifyURL string) (string, error) {
+func (s *RealWechatPayService) NativePrepay(ctx context.Context, outTradeNo string, description string, amountCents int64, notifyURL string, timeExpire time.Time) (string, error) {
 	svc := nativeSvc.NativeApiService{Client: s.client}
 	total := amountCents
 	req := nativeSvc.PrepayRequest{
@@ -68,6 +55,14 @@ func (s *RealWechatPayService) NativePrepay(ctx context.Context, outTradeNo stri
 			Total:    &total,
 			Currency: core.String("CNY"),
 		},
+	}
+	// Align WeChat-side TTL with our local ExpireTime when caller provides it,
+	// so a payment arriving after our local order has been swept closed is
+	// also rejected upstream — instead of letting WeChat keep accepting it for
+	// its default 2-hour window.
+	if !timeExpire.IsZero() {
+		t := timeExpire
+		req.TimeExpire = &t
 	}
 	resp, _, err := svc.Prepay(ctx, req)
 	if err != nil {
@@ -132,58 +127,4 @@ func (s *RealWechatPayService) DecryptNotification(ctx context.Context, request 
 		result.Raw = string(raw)
 	}
 	return result, nil
-}
-
-func (s *RealWechatPayService) DecryptRefundNotification(ctx context.Context, request *http.Request) (*RefundNotificationResult, error) {
-	handler, err := notify.NewRSANotifyHandler(s.apiV3Key, s.verifier)
-	if err != nil {
-		return nil, fmt.Errorf("wechat refund notify handler init failed: %w", err)
-	}
-	var rfd refunddomestic.Refund
-	_, err = handler.ParseNotifyRequest(ctx, request, &rfd)
-	if err != nil {
-		return nil, fmt.Errorf("wechat decrypt refund notification failed: %w", err)
-	}
-	result := &RefundNotificationResult{}
-	if rfd.OutTradeNo != nil {
-		result.OutTradeNo = *rfd.OutTradeNo
-	}
-	if rfd.OutRefundNo != nil {
-		result.OutRefundNo = *rfd.OutRefundNo
-	}
-	if rfd.RefundId != nil {
-		result.RefundId = *rfd.RefundId
-	}
-	if rfd.Status != nil {
-		result.RefundStatus = string(*rfd.Status)
-	}
-	if rfd.Amount != nil && rfd.Amount.Refund != nil {
-		result.RefundAmount = *rfd.Amount.Refund
-	}
-	if rfd.SuccessTime != nil {
-		result.SuccessTime = rfd.SuccessTime.Unix()
-	}
-	if raw, err := common.Marshal(rfd); err == nil {
-		result.Raw = string(raw)
-	}
-	return result, nil
-}
-
-func (s *RealWechatPayService) Refund(ctx context.Context, outTradeNo string, outRefundNo string, totalCents int64, refundCents int64, reason string) error {
-	svc := refunddomestic.RefundsApiService{Client: s.client}
-	req := refunddomestic.CreateRequest{
-		OutTradeNo:  core.String(outTradeNo),
-		OutRefundNo: core.String(outRefundNo),
-		Reason:      core.String(reason),
-		Amount: &refunddomestic.AmountReq{
-			Refund:   core.Int64(refundCents),
-			Total:    core.Int64(totalCents),
-			Currency: core.String("CNY"),
-		},
-	}
-	_, _, err := svc.Create(ctx, req)
-	if err != nil {
-		return fmt.Errorf("wechat refund failed: %w", err)
-	}
-	return nil
 }

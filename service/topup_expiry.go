@@ -9,7 +9,3 @@ import (
 func CloseExpiredPendingTopUps(ctx context.Context) (int, int, error) {
 	return payment.CloseExpiredPendingTopUps(ctx)
 }
-
-func ReconcileStaleRefundsPending(ctx context.Context) (int, error) {
-	return payment.ReconcileStaleRefundsPending(ctx)
-}

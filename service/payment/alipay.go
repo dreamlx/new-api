@@ -15,7 +15,6 @@ type AlipayService interface {
 	TradePagePay(outTradeNo string, subject string, totalAmount string, notifyURL string, returnURL string) (payURL string, err error)
 	TradeQuery(ctx context.Context, outTradeNo string) (*alipay.TradeQueryRsp, error)
 	TradeClose(ctx context.Context, outTradeNo string) (*alipay.TradeCloseRsp, error)
-	TradeRefund(ctx context.Context, outTradeNo string, refundAmount string, outRequestNo string, refundReason string) (*alipay.TradeRefundRsp, error)
 	VerifySign(ctx context.Context, values url.Values) error
 	DecodeNotification(ctx context.Context, values url.Values) (*alipay.Notification, error)
 }
@@ -69,24 +68,6 @@ func (s *RealAlipayService) TradeClose(ctx context.Context, outTradeNo string) (
 	}
 	if rsp.IsSuccess() == false {
 		return rsp, fmt.Errorf("alipay TradeClose returned error: code=%s msg=%s sub_code=%s sub_msg=%s",
-			rsp.Code, rsp.Msg, rsp.SubCode, rsp.SubMsg)
-	}
-	return rsp, nil
-}
-
-func (s *RealAlipayService) TradeRefund(ctx context.Context, outTradeNo string, refundAmount string, outRequestNo string, refundReason string) (*alipay.TradeRefundRsp, error) {
-	p := alipay.TradeRefund{
-		OutTradeNo:   outTradeNo,
-		RefundAmount: refundAmount,
-		OutRequestNo: outRequestNo,
-		RefundReason: refundReason,
-	}
-	rsp, err := s.client.TradeRefund(ctx, p)
-	if err != nil {
-		return nil, fmt.Errorf("alipay TradeRefund failed: %w", err)
-	}
-	if rsp.IsSuccess() == false {
-		return rsp, fmt.Errorf("alipay TradeRefund returned error: code=%s msg=%s sub_code=%s sub_msg=%s",
 			rsp.Code, rsp.Msg, rsp.SubCode, rsp.SubMsg)
 	}
 	return rsp, nil

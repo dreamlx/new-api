@@ -332,23 +332,19 @@ func AlipayNotify(c *gin.Context) {
 	}
 
 	// Authoritative idempotent completion (multi-replica safe). The shared
-	// helper performs CompleteTopUpByCondition + IncreaseUserQuota + RecordLog.
+	// helper performs CompleteTopUpByCondition + quota credit inside one
+	// DB transaction, then RecordLog post-commit.
 	paidAt := alipayParseGmt(notification.GmtPayment)
 	granted, err := finalizeTopUpSuccess(topUp, notification.TradeNo, paidAt, "使用支付宝")
-	if err != nil && !granted {
-		// DB conditional update itself failed; let Alipay retry.
-		log.Printf("alipay notify: CompleteTopUpByCondition failed tradeNo=%s err=%v", tradeNo, err)
+	if err != nil {
+		// Transaction rolled back: status NOT flipped, quota NOT changed.
+		// Let Alipay retry by responding "failure"; the next delivery will
+		// re-enter the same conditional UPDATE.
+		log.Printf("alipay notify: finalize transaction failed tradeNo=%s err=%v", tradeNo, err)
 		c.String(http.StatusOK, alipayNotifyErr)
 		return
 	}
-	if err != nil {
-		// granted==true but IncreaseUserQuota failed after the status flip;
-		// status is already success, so we ack success and surface the
-		// inconsistency via logs for ops to reconcile.
-		log.Printf("alipay notify: IncreaseUserQuota failed tradeNo=%s userId=%d err=%v",
-			tradeNo, topUp.UserId, err)
-	}
-	if !granted && err == nil {
+	if !granted {
 		log.Printf("alipay notify: idempotent skip tradeNo=%s (already completed)", tradeNo)
 	}
 

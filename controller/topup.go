@@ -517,7 +517,16 @@ func activeQueryAlipay(ctx context.Context, topUp *model.TopUp) bool {
 		_ = model.SetTopUpAnomaly(model.DB, topUp.TradeNo, reason)
 		return false
 	}
-	if topUp.PayAmountCents > 0 && cents != topUp.PayAmountCents {
+	if topUp.PayAmountCents <= 0 {
+		// Direct-integration orders ALWAYS set PayAmountCents > 0 at insert
+		// (see RequestAlipay). A zero here means data corruption — refuse to
+		// finalize so we never grant quota without a verified amount.
+		reason := fmt.Sprintf("active query: pay_amount_cents=0 on alipay order tradeNo=%s — refusing", topUp.TradeNo)
+		log.Printf("topup active query: %s", reason)
+		_ = model.SetTopUpAnomaly(model.DB, topUp.TradeNo, reason)
+		return false
+	}
+	if cents != topUp.PayAmountCents {
 		reason := fmt.Sprintf("active query amount mismatch: provider=%d expected=%d", cents, topUp.PayAmountCents)
 		log.Printf("topup active query: %s tradeNo=%s", reason, topUp.TradeNo)
 		_ = model.SetTopUpAnomaly(model.DB, topUp.TradeNo, reason)
@@ -564,7 +573,13 @@ func activeQueryWxpay(ctx context.Context, topUp *model.TopUp) bool {
 	if tx.Amount != nil && tx.Amount.Total != nil {
 		amountTotal = *tx.Amount.Total
 	}
-	if topUp.PayAmountCents > 0 && amountTotal != topUp.PayAmountCents {
+	if topUp.PayAmountCents <= 0 {
+		reason := fmt.Sprintf("active query: pay_amount_cents=0 on wxpay order tradeNo=%s — refusing", topUp.TradeNo)
+		log.Printf("topup active query: %s", reason)
+		_ = model.SetTopUpAnomaly(model.DB, topUp.TradeNo, reason)
+		return false
+	}
+	if amountTotal != topUp.PayAmountCents {
 		reason := fmt.Sprintf("active query amount mismatch: provider=%d expected=%d", amountTotal, topUp.PayAmountCents)
 		log.Printf("topup active query: %s tradeNo=%s", reason, topUp.TradeNo)
 		_ = model.SetTopUpAnomaly(model.DB, topUp.TradeNo, reason)
@@ -585,18 +600,27 @@ func activeQueryWxpay(ctx context.Context, topUp *model.TopUp) bool {
 
 // finalizeTopUpSuccess is the shared idempotent completion path used by the
 // alipay/wxpay async notify handlers and by the active-query fallback in
-// GetTopUpStatus. It performs:
+// GetTopUpStatus. It performs (in one DB transaction):
 //  1. CompleteTopUpByCondition (multi-replica safe; only flips pending->success)
-//  2. IncreaseUserQuota
+//  2. user quota increment (gorm.Expr("quota + ?"))
+// then, post-commit:
 //  3. RecordLog
+//
+// Atomicity matters: if step 1 committed but step 2 failed (process crash, DB
+// error between two independent statements), the order would be permanently
+// "success without quota" with no self-healing path. Wrapping both in one
+// transaction means either both happen or neither does — a retried webhook
+// can then safely complete the order.
 //
 // providerPrefix is the human-readable Chinese provider name used in the log
 // message ("使用支付宝" / "使用微信"), preserving the legacy log format that
 // operators may be parsing.
 //
 // Returns granted=true only when this call actually flipped the order to
-// success (RowsAffected==1). granted=false means a concurrent completion
-// won the race; the caller should treat it as a successful idempotent skip.
+// success (the transaction's conditional UPDATE matched 1 row). granted=false
+// means a concurrent completion won the race; the caller should treat it as
+// a successful idempotent skip. err!=nil means the transaction rolled back
+// (state unchanged); the caller should let the upstream provider retry.
 //
 // The caller MUST hold LockOrder(topUp.TradeNo) when invoking this from a
 // path where contention with other notify deliveries is expected; the DB
@@ -604,31 +628,23 @@ func activeQueryWxpay(ctx context.Context, topUp *model.TopUp) bool {
 func finalizeTopUpSuccess(topUp *model.TopUp, providerTxId string, paidAt int64, providerPrefix string) (granted bool, err error) {
 	dAmount := decimal.NewFromInt(topUp.Amount)
 	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-	quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
+	quotaToAdd := dAmount.Mul(dQuotaPerUnit).IntPart()
 
-	rowsAffected, err := model.CompleteTopUpByCondition(model.DB, topUp.TradeNo, providerTxId, paidAt, int64(quotaToAdd))
+	granted, err = model.CompleteTopUpAndGrantQuotaAtomic(
+		topUp.TradeNo, providerTxId, paidAt, topUp.UserId, quotaToAdd,
+	)
 	if err != nil {
 		return false, err
 	}
-	if rowsAffected == 0 {
+	if !granted {
 		// Already completed by a concurrent caller; idempotent no-op.
 		return false, nil
 	}
-
-	if quotaToAdd <= 0 {
-		return true, nil
+	if quotaToAdd > 0 {
+		model.RecordLog(topUp.UserId, model.LogTypeTopup,
+			fmt.Sprintf("%s在线充值成功，充值金额：%s，订单号：%s",
+				providerPrefix, logger.LogQuota(int(quotaToAdd)), topUp.TradeNo))
 	}
-	if err := model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true); err != nil {
-		// Status already flipped to success; surface the error to the caller
-		// but treat the order as granted so the caller does not retry the
-		// completion (which would be a no-op anyway).
-		log.Printf("finalizeTopUpSuccess: IncreaseUserQuota failed tradeNo=%s userId=%d err=%v",
-			topUp.TradeNo, topUp.UserId, err)
-		return true, err
-	}
-	model.RecordLog(topUp.UserId, model.LogTypeTopup,
-		fmt.Sprintf("%s在线充值成功，充值金额：%s，订单号：%s",
-			providerPrefix, logger.LogQuota(quotaToAdd), topUp.TradeNo))
 	return true, nil
 }
 

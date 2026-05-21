@@ -105,7 +105,6 @@ func InitOptionMap() {
 	common.OptionMap["WxpayPublicKeyId"] = setting.WxpayPublicKeyId
 	common.OptionMap["WxpayPublicKey"] = setting.WxpayPublicKey
 	common.OptionMap["WxpayAppId"] = setting.WxpayAppId
-	common.OptionMap["WxpayNotifyURL"] = setting.WxpayNotifyURL
 	common.OptionMap["WxpayMinTopUp"] = strconv.Itoa(setting.WxpayMinTopUp)
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
@@ -416,8 +415,6 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.ResetWechatPayClient()
 	case "WxpayAppId":
 		setting.WxpayAppId = value
-	case "WxpayNotifyURL":
-		setting.WxpayNotifyURL = value
 	case "WxpayMinTopUp":
 		setting.WxpayMinTopUp, _ = strconv.Atoi(value)
 	case "WaffoEnabled":

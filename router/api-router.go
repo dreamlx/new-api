@@ -76,7 +76,6 @@ func SetApiRouter(router *gin.Engine) {
 			userRoute.POST("/alipay/notify", middleware.WebhookRateLimit(), controller.AlipayNotify)
 			userRoute.GET("/alipay/return", middleware.WebhookRateLimit(), controller.AlipayReturn)
 			userRoute.POST("/wxpay/notify", middleware.WebhookRateLimit(), controller.WxpayNotify)
-			userRoute.POST("/wxpay/refund/notify", middleware.WebhookRateLimit(), controller.WxpayRefundNotify)
 			userRoute.GET("/groups", controller.GetUserGroups)
 
 			selfRoute := userRoute.Group("/")
@@ -215,17 +214,6 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.DELETE("/channel_affinity_cache", controller.ClearChannelAffinityCache)
 			optionRoute.POST("/rest_model_ratio", controller.ResetModelRatio)
 			optionRoute.POST("/migrate_console_setting", controller.MigrateConsoleSetting) // 用于迁移检测的旧键，下个版本会删除
-		}
-
-		// Refund administration (root-only). Two-step prepare -> execute
-		// flow: prepare issues an HMAC-signed confirm_token bound to the
-		// {trade_no, admin_id, expires} triple; execute verifies it and
-		// dispatches the SDK call. See controller/topup_refund.go.
-		topupRefundRoute := apiRouter.Group("/topup/refund")
-		topupRefundRoute.Use(middleware.RootAuth(), middleware.CriticalRateLimit())
-		{
-			topupRefundRoute.POST("/prepare", controller.RefundPrepare)
-			topupRefundRoute.POST("", controller.RefundExecute)
 		}
 
 		// Custom OAuth provider management (root only)

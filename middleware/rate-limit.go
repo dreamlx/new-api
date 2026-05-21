@@ -113,7 +113,7 @@ func DownloadRateLimit() func(c *gin.Context) {
 }
 
 // WebhookRateLimit is the IP-based throttle applied to public payment-webhook
-// routes (/api/user/{alipay,wxpay}/notify and /api/user/wxpay/refund/notify).
+// routes (/api/user/{alipay,wxpay}/notify).
 //
 // Why we need it: each webhook hit triggers an RSA verify + AES-GCM decrypt
 // on the payment SDK, which is CPU-bound. A malicious client could DoS the

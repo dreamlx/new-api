@@ -12,7 +12,6 @@ type MockAlipayService struct {
 	TradePagePayFunc       func(outTradeNo string, subject string, totalAmount string, notifyURL string, returnURL string) (string, error)
 	TradeQueryFunc         func(ctx context.Context, outTradeNo string) (*alipay.TradeQueryRsp, error)
 	TradeCloseFunc         func(ctx context.Context, outTradeNo string) (*alipay.TradeCloseRsp, error)
-	TradeRefundFunc        func(ctx context.Context, outTradeNo string, refundAmount string, outRequestNo string, refundReason string) (*alipay.TradeRefundRsp, error)
 	VerifySignFunc         func(ctx context.Context, values url.Values) error
 	DecodeNotificationFunc func(ctx context.Context, values url.Values) (*alipay.Notification, error)
 }
@@ -36,13 +35,6 @@ func (m *MockAlipayService) TradeClose(ctx context.Context, outTradeNo string) (
 		return m.TradeCloseFunc(ctx, outTradeNo)
 	}
 	return &alipay.TradeCloseRsp{}, nil
-}
-
-func (m *MockAlipayService) TradeRefund(ctx context.Context, outTradeNo string, refundAmount string, outRequestNo string, refundReason string) (*alipay.TradeRefundRsp, error) {
-	if m.TradeRefundFunc != nil {
-		return m.TradeRefundFunc(ctx, outTradeNo, refundAmount, outRequestNo, refundReason)
-	}
-	return &alipay.TradeRefundRsp{}, nil
 }
 
 func (m *MockAlipayService) VerifySign(ctx context.Context, values url.Values) error {

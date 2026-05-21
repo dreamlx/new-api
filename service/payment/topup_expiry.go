@@ -10,8 +10,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 )
 
-const staleRefundPendingTTL = 24 * time.Hour
-
 var expiryAlipayProvider = func() (AlipayService, error) {
 	return NewAlipayServiceFromSettings()
 }
@@ -21,8 +19,8 @@ var expiryWechatProvider = func() (WechatPayService, error) {
 }
 
 // SetExpiryProvidersForTest temporarily overrides the provider factories used
-// by the expiry / refund reconciliation sweeps. It returns a restore function
-// that must be deferred by the caller.
+// by the expiry sweep. It returns a restore function that must be deferred by
+// the caller.
 func SetExpiryProvidersForTest(alipay func() (AlipayService, error), wechat func() (WechatPayService, error)) func() {
 	prevAlipay := expiryAlipayProvider
 	prevWechat := expiryWechatProvider
@@ -46,8 +44,8 @@ func CloseExpiredPendingTopUps(ctx context.Context) (closedOk, closeFailed int, 
 
 	now := time.Now().Unix()
 	var rows []model.TopUp
-	err = db.Where("status = ? AND expire_time > 0 AND expire_time < ? AND refund_status = ?",
-		common.TopUpStatusPending, now, common.RefundStatusNone).
+	err = db.Where("status = ? AND expire_time > 0 AND expire_time < ?",
+		common.TopUpStatusPending, now).
 		Find(&rows).Error
 	if err != nil {
 		return 0, 0, fmt.Errorf("scan expired pending topups: %w", err)
@@ -105,36 +103,4 @@ func callProviderClose(ctx context.Context, paymentMethod string, tradeNo string
 	default:
 		return nil
 	}
-}
-
-func ReconcileStaleRefundsPending(ctx context.Context) (markedAnomaly int, err error) {
-	db := model.DB
-	if db == nil {
-		return 0, errors.New("model.DB is not initialised")
-	}
-
-	cutoff := time.Now().Add(-staleRefundPendingTTL).Unix()
-	var rows []model.TopUp
-	err = db.Where("refund_status = ? AND refund_request_time > 0 AND refund_request_time < ?",
-		common.RefundStatusPending, cutoff).
-		Find(&rows).Error
-	if err != nil {
-		return 0, fmt.Errorf("scan stale refund_pending: %w", err)
-	}
-
-	for _, row := range rows {
-		if ctx.Err() != nil {
-			return markedAnomaly, ctx.Err()
-		}
-		reason := "refund stuck in pending > 24h, manual reconciliation required"
-		if markErr := model.MarkRefundAnomaly(db, row.TradeNo, reason); markErr != nil {
-			common.SysError(fmt.Sprintf("refund reconcile: mark anomaly failed tradeNo=%s err=%v",
-				row.TradeNo, markErr))
-			continue
-		}
-		markedAnomaly++
-		common.SysLog(fmt.Sprintf("refund reconcile: tradeNo=%s flipped to refund_anomaly (stale > 24h)", row.TradeNo))
-	}
-
-	return markedAnomaly, nil
 }

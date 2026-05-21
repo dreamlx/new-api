@@ -305,10 +305,10 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "WxpayEnabled":
-		if option.Value == "true" && (setting.WxpayMchId == "" || setting.WxpayMchSerialNo == "" || setting.WxpayApiV3Key == "" || setting.WxpayPrivateKey == "" || setting.WxpayPublicKeyId == "" || setting.WxpayPublicKey == "") {
+		if option.Value == "true" && (setting.WxpayMchId == "" || setting.WxpayMchSerialNo == "" || setting.WxpayApiV3Key == "" || setting.WxpayPrivateKey == "" || setting.WxpayPublicKeyId == "" || setting.WxpayPublicKey == "" || setting.WxpayAppId == "") {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
-				"message": "无法启用微信支付，请先填入商户号、商户证书序列号、APIv3 密钥、商户私钥、微信支付公钥 ID 以及微信支付公钥！",
+				"message": "无法启用微信支付，请先填入 AppId、商户号、商户证书序列号、APIv3 密钥、商户私钥、微信支付公钥 ID 以及微信支付公钥！",
 			})
 			return
 		}
