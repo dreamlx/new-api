@@ -35,7 +35,7 @@ import {
   Tabs,
   TabPane,
 } from '@douyinfe/semi-ui';
-import { SiAlipay, SiWechat, SiStripe, SiPaypal } from 'react-icons/si';
+import { SiAlipay, SiStripe, SiPaypal } from 'react-icons/si';
 import {
   CreditCard,
   Coins,
@@ -49,6 +49,7 @@ import { IconGift } from '@douyinfe/semi-icons';
 import { useMinimumLoadingTime } from '../../hooks/common/useMinimumLoadingTime';
 import { getCurrencyConfig } from '../../helpers/render';
 import SubscriptionPlansCard from './SubscriptionPlansCard';
+import WeChatPayIcon from '../common/logo/WeChatPayIcon';
 
 const { Text } = Typography;
 
@@ -91,6 +92,12 @@ const RechargeCard = ({
   waffoTopUp,
   waffoPayMethods,
   enablePayPalTopUp,
+  enableAlipayTopUp,
+  enableWxpayTopUp,
+  alipayMinTopUp,
+  wxpayMinTopUp,
+  directAlipayTopUp,
+  directWxpayTopUp,
   subscriptionLoading = false,
   subscriptionPlans = [],
   billingPreference,
@@ -104,6 +111,23 @@ const RechargeCard = ({
   const initialTabSetRef = useRef(false);
   const showAmountSkeleton = useMinimumLoadingTime(amountLoading);
   const [activeTab, setActiveTab] = useState('topup');
+  const visiblePayMethods = (payMethods || []).filter((method) => {
+    if (!method || method.type === 'waffo') {
+      return false;
+    }
+    const isStandaloneGateway =
+      method.type === 'stripe' || method.type === 'paypal';
+    if (!enableOnlineTopUp && !isStandaloneGateway) {
+      return false;
+    }
+    if (method.type === 'alipay' && enableAlipayTopUp) {
+      return false;
+    }
+    if (method.type === 'wxpay' && enableWxpayTopUp) {
+      return false;
+    }
+    return true;
+  });
   const shouldShowSubscription =
     !subscriptionLoading && subscriptionPlans.length > 0;
 
@@ -228,19 +252,19 @@ const RechargeCard = ({
           <div className='py-8 flex justify-center'>
             <Spin size='large' />
           </div>
-        ) : enableOnlineTopUp || enableStripeTopUp || enableCreemTopUp || enableWaffoTopUp || enablePayPalTopUp ? (
+        ) : enableOnlineTopUp || enableStripeTopUp || enableCreemTopUp || enableWaffoTopUp || enablePayPalTopUp || enableAlipayTopUp || enableWxpayTopUp ? (
           <Form
             getFormApi={(api) => (onlineFormApiRef.current = api)}
             initValues={{ topUpCount: topUpCount }}
           >
             <div className='space-y-6'>
-              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp || enablePayPalTopUp) && (
+              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp || enablePayPalTopUp || enableAlipayTopUp || enableWxpayTopUp) && (
                 <Row gutter={12}>
                   <Col xs={24} sm={24} md={24} lg={10} xl={10}>
                     <Form.InputNumber
                       field='topUpCount'
                       label={t('充值数量')}
-                      disabled={!enableOnlineTopUp && !enableStripeTopUp && !enableWaffoTopUp && !enablePayPalTopUp}
+                      disabled={!enableOnlineTopUp && !enableStripeTopUp && !enableWaffoTopUp && !enablePayPalTopUp && !enableAlipayTopUp && !enableWxpayTopUp}
                       placeholder={
                         t('充值数量，最低 ') + renderQuotaWithAmount(minTopUp)
                       }
@@ -292,11 +316,11 @@ const RechargeCard = ({
                       style={{ width: '100%' }}
                     />
                   </Col>
-                  {payMethods && payMethods.filter(m => m.type !== 'waffo').length > 0 && (
+                  {visiblePayMethods.length > 0 || enableAlipayTopUp || enableWxpayTopUp ? (
                   <Col xs={24} sm={24} md={24} lg={14} xl={14}>
                     <Form.Slot label={t('选择支付方式')}>
                         <Space wrap>
-                          {payMethods.filter(m => m.type !== 'waffo').map((payMethod) => {
+                          {visiblePayMethods.map((payMethod) => {
                             const minTopupVal = Number(payMethod.min_topup) || 0;
                             const isStripe = payMethod.type === 'stripe';
                             const isPayPal = payMethod.type === 'paypal';
@@ -320,7 +344,7 @@ const RechargeCard = ({
                                   payMethod.type === 'alipay' ? (
                                     <SiAlipay size={18} color='#1677FF' />
                                   ) : payMethod.type === 'wxpay' ? (
-                                    <SiWechat size={18} color='#07C160' />
+                                    <WeChatPayIcon size={18} />
                                   ) : payMethod.type === 'stripe' ? (
                                     <SiStripe size={18} color='#635BFF' />
                                   ) : payMethod.type === 'paypal' ? (
@@ -359,14 +383,72 @@ const RechargeCard = ({
                               </React.Fragment>
                             );
                           })}
+                          {/* 直连支付宝 — 区别于 epay 通道 alipay，调用新接口 /api/user/alipay/pay */}
+                          {enableAlipayTopUp && (() => {
+                            const minVal = Number(alipayMinTopUp) || 0;
+                            const tooLow = minVal > Number(topUpCount || 0);
+                            const btn = (
+                              <Button
+                                key='direct-alipay'
+                                theme='outline'
+                                type='tertiary'
+                                onClick={() => directAlipayTopUp?.()}
+                                disabled={tooLow}
+                                loading={paymentLoading && payWay === 'direct-alipay'}
+                                icon={<SiAlipay size={18} color='#1677FF' />}
+                                className='!rounded-lg !px-4 !py-2'
+                              >
+                                {t('支付宝')}
+                              </Button>
+                            );
+                            return tooLow ? (
+                              <Tooltip
+                                content={t('此支付方式最低充值金额为') + ' ' + minVal}
+                                key='direct-alipay'
+                              >
+                                {btn}
+                              </Tooltip>
+                            ) : (
+                              <React.Fragment key='direct-alipay'>{btn}</React.Fragment>
+                            );
+                          })()}
+                          {/* 直连微信支付 — 弹出二维码 Modal */}
+                          {enableWxpayTopUp && (() => {
+                            const minVal = Number(wxpayMinTopUp) || 0;
+                            const tooLow = minVal > Number(topUpCount || 0);
+                            const btn = (
+                              <Button
+                                key='direct-wxpay'
+                                theme='outline'
+                                type='tertiary'
+                                onClick={() => directWxpayTopUp?.()}
+                                disabled={tooLow}
+                                loading={paymentLoading && payWay === 'direct-wxpay'}
+                                icon={<WeChatPayIcon size={18} />}
+                                className='!rounded-lg !px-4 !py-2'
+                              >
+                                {t('微信')}
+                              </Button>
+                            );
+                            return tooLow ? (
+                              <Tooltip
+                                content={t('此支付方式最低充值金额为') + ' ' + minVal}
+                                key='direct-wxpay'
+                              >
+                                {btn}
+                              </Tooltip>
+                            ) : (
+                              <React.Fragment key='direct-wxpay'>{btn}</React.Fragment>
+                            );
+                          })()}
                         </Space>
                     </Form.Slot>
                   </Col>
-                  )}
+                  ) : null}
                 </Row>
               )}
 
-              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp || enablePayPalTopUp) && (
+              {(enableOnlineTopUp || enableStripeTopUp || enableWaffoTopUp || enablePayPalTopUp || enableAlipayTopUp || enableWxpayTopUp) && (
                 <Form.Slot
                   label={
                     <div className='flex items-center gap-2'>

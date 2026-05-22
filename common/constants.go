@@ -215,4 +215,5 @@ const (
 	TopUpStatusSuccess = "success"
 	TopUpStatusFailed  = "failed"
 	TopUpStatusExpired = "expired"
+	TopUpStatusAnomaly = "anomaly"
 )

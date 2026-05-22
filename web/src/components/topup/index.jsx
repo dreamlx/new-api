@@ -38,6 +38,7 @@ import RechargeCard from './RechargeCard';
 import InvitationCard from './InvitationCard';
 import TransferModal from './modals/TransferModal';
 import PaymentConfirmModal from './modals/PaymentConfirmModal';
+import WxpayQRModal from './PaymentConfirmModal';
 import TopupHistoryModal from './modals/TopupHistoryModal';
 
 const TopUp = () => {
@@ -78,6 +79,17 @@ const TopUp = () => {
 
   // PayPal 相关状态
   const [enablePayPalTopUp, setEnablePayPalTopUp] = useState(false);
+
+  // 直连支付宝 / 微信支付状态
+  const [enableAlipayTopUp, setEnableAlipayTopUp] = useState(false);
+  const [enableWxpayTopUp, setEnableWxpayTopUp] = useState(false);
+  const [alipayMinTopUp, setAlipayMinTopUp] = useState(1);
+  const [wxpayMinTopUp, setWxpayMinTopUp] = useState(1);
+  const [wxpayQR, setWxpayQR] = useState({
+    visible: false,
+    codeUrl: '',
+    tradeNo: '',
+  });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [open, setOpen] = useState(false);
@@ -369,6 +381,132 @@ const TopUp = () => {
     window.open(data.checkout_url, '_blank');
   };
 
+  // pollTopUpStatus polls /api/user/topup/status every 3 seconds until the
+  // order reaches a terminal state. Returns a cleanup function so the caller
+  // can cancel polling (e.g. on unmount or modal close).
+  const pollTopUpStatus = (tradeNo, onTerminal) => {
+    if (!tradeNo) return () => {};
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const res = await API.get('/api/user/topup/status', {
+          params: { trade_no: tradeNo },
+        });
+        const { message, data } = res.data || {};
+        if (message === 'success' && data) {
+          const status = data.status;
+          if (
+            status === 'success' ||
+            status === 'failed' ||
+            status === 'expired' ||
+            status === 'anomaly'
+          ) {
+            if (!cancelled) {
+              onTerminal?.(status, data);
+            }
+            return; // stop polling
+          }
+        }
+      } catch (e) {
+        // network errors are non-fatal; continue polling
+      }
+      if (!cancelled) {
+        setTimeout(tick, 3000);
+      }
+    };
+    setTimeout(tick, 3000);
+    return () => {
+      cancelled = true;
+    };
+  };
+
+  // Direct Alipay top-up: POST /api/user/alipay/pay, open returned pay_link
+  // in a new tab, then poll topup/status so the user's quota refreshes once
+  // the async notify confirms the payment.
+  const directAlipayTopUp = async () => {
+    if (!enableAlipayTopUp) {
+      showError(t('管理员未开启支付宝充值！'));
+      return;
+    }
+    if (topUpCount < alipayMinTopUp) {
+      showError(t('充值数量不能小于') + ' ' + alipayMinTopUp);
+      return;
+    }
+    setPayWay('direct-alipay');
+    setPaymentLoading(true);
+    try {
+      const res = await API.post('/api/user/alipay/pay', {
+        amount: parseInt(topUpCount),
+      });
+      const { message, data } = res.data || {};
+      if (message === 'success' && data?.pay_link) {
+        window.open(data.pay_link, '_blank');
+        pollTopUpStatus(data.trade_no, (status) => {
+          if (status === 'success') {
+            showSuccess(t('支付成功'));
+            getUserQuota();
+          } else {
+            showError(t('支付未完成：') + status);
+          }
+        });
+      } else {
+        showError(
+          typeof data === 'string' ? data : message || t('支付失败'),
+        );
+      }
+    } catch (e) {
+      showError(t('支付请求失败'));
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  // Direct WeChat Pay top-up: POST /api/user/wxpay/pay, open the QR modal
+  // with code_url + trade_no. The modal owns the status polling and shows
+  // success / failure state in-place.
+  const directWxpayTopUp = async () => {
+    if (!enableWxpayTopUp) {
+      showError(t('管理员未开启微信支付！'));
+      return;
+    }
+    if (topUpCount < wxpayMinTopUp) {
+      showError(t('充值数量不能小于') + ' ' + wxpayMinTopUp);
+      return;
+    }
+    setPayWay('direct-wxpay');
+    setPaymentLoading(true);
+    try {
+      const res = await API.post('/api/user/wxpay/pay', {
+        amount: parseInt(topUpCount),
+      });
+      const { message, data } = res.data || {};
+      if (message === 'success' && data?.code_url) {
+        setWxpayQR({
+          visible: true,
+          codeUrl: data.code_url,
+          tradeNo: data.trade_no || '',
+        });
+      } else {
+        showError(
+          typeof data === 'string' ? data : message || t('支付失败'),
+        );
+      }
+    } catch (e) {
+      showError(t('支付请求失败'));
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  const handleWxpayQRClose = () => {
+    setWxpayQR({ visible: false, codeUrl: '', tradeNo: '' });
+    // Refresh quota when the user dismisses the modal — covers the case
+    // where the modal already saw a success and just needs to update the
+    // header balance.
+    getUserQuota();
+  };
+
   const getUserQuota = async () => {
     let res = await API.get(`/api/user/self`);
     const { success, message, data } = res.data;
@@ -515,6 +653,12 @@ const TopUp = () => {
           setWaffoMinTopUp(data.waffo_min_topup || 1);
           const enablePayPalTopUp = data.enable_paypal_topup || false;
           setEnablePayPalTopUp(enablePayPalTopUp);
+          const enableAlipayTopUpVal = data.enable_alipay_topup || false;
+          const enableWxpayTopUpVal = data.enable_wxpay_topup || false;
+          setEnableAlipayTopUp(enableAlipayTopUpVal);
+          setEnableWxpayTopUp(enableWxpayTopUpVal);
+          setAlipayMinTopUp(data.alipay_min_topup || 1);
+          setWxpayMinTopUp(data.wxpay_min_topup || 1);
           setMinTopUp(minTopUpValue);
           setTopUpCount(minTopUpValue);
 
@@ -785,6 +929,14 @@ const TopUp = () => {
         t={t}
       />
 
+      {/* 微信扫码支付模态框 */}
+      <WxpayQRModal
+        visible={wxpayQR.visible}
+        codeUrl={wxpayQR.codeUrl}
+        tradeNo={wxpayQR.tradeNo}
+        onClose={handleWxpayQRClose}
+      />
+
       {/* Creem 充值确认模态框 */}
       <Modal
         title={t('确定要充值 $')}
@@ -824,6 +976,12 @@ const TopUp = () => {
           creemPreTopUp={creemPreTopUp}
           enableWaffoTopUp={enableWaffoTopUp}
           enablePayPalTopUp={enablePayPalTopUp}
+          enableAlipayTopUp={enableAlipayTopUp}
+          enableWxpayTopUp={enableWxpayTopUp}
+          alipayMinTopUp={alipayMinTopUp}
+          wxpayMinTopUp={wxpayMinTopUp}
+          directAlipayTopUp={directAlipayTopUp}
+          directWxpayTopUp={directWxpayTopUp}
           waffoTopUp={waffoTopUp}
           waffoPayMethods={waffoPayMethods}
           presetAmounts={presetAmounts}

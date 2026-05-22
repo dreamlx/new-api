@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"fmt"
 	"log"
@@ -22,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	_ "github.com/QuantumNous/new-api/setting/performance_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
@@ -116,6 +118,32 @@ func main() {
 			}
 		}
 	}()
+
+	// Alipay / WeChat Pay expiry sweep cron.
+	// Gated on IsMasterNode so multi-replica deployments only run the
+	// sweep on a single instance (matches the existing convention used
+	// by UpdateMidjourneyTaskBulk etc. below). Inside the goroutine,
+	// each tick re-checks AlipayEnabled / WxpayEnabled so admins flipping
+	// either flag via the dashboard don't have to restart the process.
+	if common.IsMasterNode {
+		go func() {
+			closeTicker := time.NewTicker(5 * time.Minute)
+			defer closeTicker.Stop()
+			for range closeTicker.C {
+				if !setting.AlipayEnabled && !setting.WxpayEnabled {
+					continue
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				ok, fail, err := service.CloseExpiredPendingTopUps(ctx)
+				cancel()
+				if err != nil {
+					common.SysError(fmt.Sprintf("CloseExpiredPendingTopUps error: %v", err))
+				} else if ok > 0 || fail > 0 {
+					common.SysLog(fmt.Sprintf("CloseExpiredPendingTopUps: ok=%d fail=%d", ok, fail))
+				}
+			}
+		}()
+	}
 
 	// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
 	service.StartCodexCredentialAutoRefreshTask()
