@@ -85,9 +85,16 @@ func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *rela
 		return 0
 	}
 
+	// Resolution: prefer usage.SR, fall back to submitted resolution ratio
 	resolution := DefaultResolution
 	if resp.Usage.SR == 1080 {
 		resolution = Resolution1080P
+	} else if resp.Usage.SR == 720 {
+		resolution = Resolution720P
+	} else if bc.OtherRatios != nil {
+		if r, ok := bc.OtherRatios["resolution"]; ok && r > 1.0 {
+			resolution = Resolution1080P
+		}
 	}
 
 	quota := int(bc.ModelPrice * common.QuotaPerUnit * bc.GroupRatio * duration * ResolutionRatio(resolution))
@@ -149,6 +156,11 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	var dResp StatusResponse
 	if err := common.Unmarshal(responseBody, &dResp); err != nil {
 		return "", nil, service.TaskErrorWrapper(fmt.Errorf("unmarshal response: %w", err), "unmarshal_response_body_failed", http.StatusInternalServerError)
+	}
+
+	// Check for upstream error before checking task_id
+	if errMsg, ok := upstreamErrorMessage(dResp); ok {
+		return "", nil, service.TaskErrorWrapper(fmt.Errorf("happyhorse upstream error: %s", errMsg), "upstream_error", http.StatusBadRequest)
 	}
 
 	upstreamID := dResp.Output.TaskID
@@ -250,4 +262,16 @@ func firstNonEmpty(s ...string) string {
 
 func isHappyHorseNativeRequest(c *gin.Context) bool {
 	return c != nil && c.Request != nil && strings.HasPrefix(c.Request.URL.Path, "/happyhorse/api/")
+}
+
+func upstreamErrorMessage(resp StatusResponse) (string, bool) {
+	code := resp.Output.Code
+	msg := resp.Output.Message
+	if code == "" && msg == "" {
+		return "", false
+	}
+	if code != "" && msg != "" {
+		return code + ": " + msg, true
+	}
+	return firstNonEmpty(code, msg), true
 }

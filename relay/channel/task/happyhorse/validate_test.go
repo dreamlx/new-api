@@ -1,8 +1,15 @@
 package happyhorse
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -146,4 +153,152 @@ func TestHasMediaType(t *testing.T) {
 	assert.True(t, hasMediaType(media, MediaTypeReferenceImage))
 	assert.False(t, hasMediaType(media, MediaTypeFirstFrame))
 	assert.False(t, hasMediaType(nil, MediaTypeVideo))
+}
+
+// --- Duration validation tests ---
+
+func setupGinContext(body []byte, path string) *gin.Context {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	// Prime the body storage so common.GetBodyStorage works
+	_, _ = common.GetRequestBody(c)
+	return c
+}
+
+// Native path: GenerateRequest with duration:0 → 400
+func TestValidateNativeDurationZero(t *testing.T) {
+	d0 := 0
+	req := GenerateRequest{
+		Model:      ModelT2V,
+		Input:      Input{Prompt: "test"},
+		Parameters: &Parameters{Duration: &d0},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/happyhorse/api/generate")
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+	assert.Contains(t, taskErr.Message, "duration must be at least")
+}
+
+// Native path: GenerateRequest with duration:2 → 400
+func TestValidateNativeDurationTooSmall(t *testing.T) {
+	d2 := 2
+	req := GenerateRequest{
+		Model:      ModelT2V,
+		Input:      Input{Prompt: "test"},
+		Parameters: &Parameters{Duration: &d2},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/happyhorse/api/generate")
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+	assert.Contains(t, taskErr.Message, "duration must be at least")
+}
+
+// Native path: GenerateRequest with duration:3 → passes
+func TestValidateNativeDurationMinAllowed(t *testing.T) {
+	d3 := 3
+	req := GenerateRequest{
+		Model:      ModelT2V,
+		Input:      Input{Prompt: "test"},
+		Parameters: &Parameters{Duration: &d3},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/happyhorse/api/generate")
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:    &relaycommon.ChannelMeta{},
+		TaskRelayInfo:  &relaycommon.TaskRelayInfo{},
+	}
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
+	assert.Nil(t, taskErr)
+}
+
+// Native path: missing duration → passes (defaults to 5 later)
+func TestValidateNativeDurationMissing(t *testing.T) {
+	req := GenerateRequest{
+		Model: ModelT2V,
+		Input: Input{Prompt: "test"},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/happyhorse/api/generate")
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:    &relaycommon.ChannelMeta{},
+		TaskRelayInfo:  &relaycommon.TaskRelayInfo{},
+	}
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
+	assert.Nil(t, taskErr)
+}
+
+// V1 path: TaskSubmitReq with duration:2 → 400
+func TestValidateV1DurationTooSmall(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:    ModelT2V,
+		Prompt:   "test",
+		Duration: 2,
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	// Simulate ValidateBasicTaskRequest: parse body and store task_request
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+	assert.Contains(t, taskErr.Message, "duration must be at least")
+}
+
+// V1 path: TaskSubmitReq with duration:3 → passes
+func TestValidateV1DurationMinAllowed(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:    ModelT2V,
+		Prompt:   "test",
+		Duration: 3,
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	assert.Nil(t, taskErr)
+}
+
+// V1 path: TaskSubmitReq with no duration field → passes (not explicit)
+func TestValidateV1DurationMissing(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelT2V,
+		Prompt: "test",
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	assert.Nil(t, taskErr)
 }

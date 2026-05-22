@@ -26,18 +26,6 @@ type Parameters struct {
 	Quality    string `json:"quality,omitempty"`
 }
 
-type GenerateResponse struct {
-	Output    GenerateOutput `json:"output"`
-	RequestID string         `json:"request_id,omitempty"`
-}
-
-type GenerateOutput struct {
-	TaskID     string `json:"task_id,omitempty"`
-	TaskStatus string `json:"task_status,omitempty"`
-	Code       string `json:"code,omitempty"`
-	Message    string `json:"message,omitempty"`
-}
-
 type StatusResponse struct {
 	Output    StatusOutput `json:"output"`
 	Usage     *Usage       `json:"usage,omitempty"`
@@ -63,12 +51,6 @@ type Usage struct {
 	VideoCount          int     `json:"video_count,omitempty"`
 	SR                  int     `json:"SR,omitempty"`
 	Ratio               string  `json:"ratio,omitempty"`
-}
-
-type ErrorResponse struct {
-	Code      string `json:"code,omitempty"`
-	Message   string `json:"message,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
 }
 
 // Native response DTOs for /happyhorse/api/generate and /happyhorse/api/status
