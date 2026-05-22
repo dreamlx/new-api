@@ -302,6 +302,10 @@ var defaultModelPrice = map[string]float64{
 	"veo-3.0-fast-generate-001":      0.15,
 	"veo-3.1-generate-preview":       0.4,
 	"veo-3.1-fast-generate-preview":  0.15,
+	"happyhorse-1.0-t2v":             0.9,
+	"happyhorse-1.0-i2v":             0.9,
+	"happyhorse-1.0-r2v":             0.9,
+	"happyhorse-1.0-video-edit":      0.9,
 }
 
 var defaultAudioRatio = map[string]float64{

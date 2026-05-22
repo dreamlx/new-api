@@ -102,6 +102,37 @@ import {
   SiX,
 } from 'react-icons/si';
 
+function HappyHorseIcon({ size = 14 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox='0 0 24 24'
+      fill='none'
+      xmlns='http://www.w3.org/2000/svg'
+      aria-hidden='true'
+    >
+      <circle cx='12' cy='12' r='11' fill='#FFF7ED' />
+      <path
+        d='M7.4 19.5c.32-2.44 1.15-4.38 2.48-5.82L8.04 9.04c-.23-.58.12-1.24.74-1.36l2.44-.46 1.02-2.7c.24-.62 1.06-.76 1.5-.26l2.16 2.5 2.68.5c.62.12.98.78.72 1.36l-.8 1.8c.72.98 1.1 2.18 1.1 3.56 0 2.94-1.96 5.12-4.62 5.12h-1.04c.62-1.06.82-2.28.62-3.66-.18-1.2-.72-2.12-1.62-2.78l-1.78-1.3-.52.58c-1.34 1.5-2.06 3.52-2.16 6.06l-.02.5H7.4Z'
+        fill='#F59E0B'
+      />
+      <path
+        d='M10.72 7.48 9.2 4.92'
+        stroke='#92400E'
+        strokeWidth='1.5'
+        strokeLinecap='round'
+      />
+      <path
+        d='M15.78 8.34h.01'
+        stroke='white'
+        strokeWidth='2'
+        strokeLinecap='round'
+      />
+    </svg>
+  );
+}
+
 // 获取侧边栏Lucide图标组件
 export function getLucideIcon(key, selected = false) {
   const size = 16;
@@ -400,6 +431,8 @@ export function getChannelIcon(channelType) {
       return <Doubao.Color size={iconSize} />;
     case 56: // Replicate
       return <Replicate size={iconSize} />;
+    case 59: // HappyHorse
+      return <HappyHorseIcon size={iconSize} />;
     case 8: // 自定义渠道
     case 22: // 知识库：FastGPT
       return <FastGPT.Color size={iconSize} />;
