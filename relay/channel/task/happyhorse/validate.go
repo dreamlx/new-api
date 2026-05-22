@@ -26,9 +26,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	return validateHappyHorseTaskRequest(c)
 }
 
-// validateHappyHorseTaskRequest validates resolution/ratio and model-specific media
-// requirements that ConvertTaskSubmitReq would otherwise check at BuildRequestBody time.
-// Doing this in ValidateRequestAndSetAction ensures 400 (not 500) and LocalError=true.
+// validateHappyHorseTaskRequest validates V1-path requests after ValidateBasicTaskRequest.
 func validateHappyHorseTaskRequest(c *gin.Context) *dto.TaskError {
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
@@ -38,14 +36,22 @@ func validateHappyHorseTaskRequest(c *gin.Context) *dto.TaskError {
 		return service.TaskErrorWrapperLocal(
 			fmt.Errorf("unsupported model: %s", req.Model), "invalid_request", http.StatusBadRequest)
 	}
-	// duration: reject explicit values < 3, allow missing (defaults to 5 later)
+
+	// duration: reject explicit values outside [3,15], allow missing (defaults later)
+	// Video Edit does not accept duration at all
 	if isDurationExplicit(c) {
-		if req.Duration < minDuration {
+		if req.Model == ModelVideoEdit {
 			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("duration must be at least %d seconds", minDuration),
+				fmt.Errorf("video-edit does not support duration parameter"),
+				"invalid_request", http.StatusBadRequest)
+		}
+		if req.Duration < MinDuration || req.Duration > MaxDuration {
+			return service.TaskErrorWrapperLocal(
+				fmt.Errorf("duration must be between %d and %d seconds", MinDuration, MaxDuration),
 				"invalid_request", http.StatusBadRequest)
 		}
 	}
+
 	// resolution
 	if v := getStringFromMetadata(req.Metadata, "resolution"); v != "" {
 		if !ValidResolutions[v] {
@@ -59,62 +65,121 @@ func validateHappyHorseTaskRequest(c *gin.Context) *dto.TaskError {
 			fmt.Errorf("unsupported resolution: %s, only 720P and 1080P are supported", req.Size),
 			"invalid_request", http.StatusBadRequest)
 	}
-	// ratio
+
+	// ratio: only T2V and R2V support ratio
 	if v := getStringFromMetadata(req.Metadata, "ratio"); v != "" {
 		if !ValidRatios[v] {
 			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("unsupported ratio: %s, only 16:9, 9:16 and 1:1 are supported", v),
+				fmt.Errorf("unsupported ratio: %s", v),
+				"invalid_request", http.StatusBadRequest)
+		}
+		if !RatioAllowedForModel(req.Model) {
+			return service.TaskErrorWrapperLocal(
+				fmt.Errorf("%s does not support ratio parameter", req.Model),
 				"invalid_request", http.StatusBadRequest)
 		}
 	}
-	// model-specific media requirements
+
+	// Convert V1 fields to []MediaItem and validate using shared logic
+	media, mediaErr := v1ToMediaItems(req)
+	if mediaErr != nil {
+		return service.TaskErrorWrapperLocal(mediaErr, "invalid_request", http.StatusBadRequest)
+	}
+
+	// Validate media URLs
+	for _, m := range media {
+		if m.URL == "" {
+			return service.TaskErrorWrapperLocal(
+				fmt.Errorf("media item url is required"), "invalid_request", http.StatusBadRequest)
+		}
+		if !isValidMediaURL(m.URL) {
+			return service.TaskErrorWrapperLocal(
+				fmt.Errorf("media url must use http or https scheme"), "invalid_request", http.StatusBadRequest)
+		}
+	}
+
+	// Model-specific media validation
 	switch req.Model {
 	case ModelI2V:
-		if resolveFirstFrameImage(req) == "" {
-			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("i2v requires a first frame image (image, images[0], or input_reference)"),
-				"invalid_request", http.StatusBadRequest)
+		if err := validateI2VMedia(media); err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 		}
 	case ModelR2V:
-		if len(req.Images) == 0 && req.Image == "" && req.InputReference == "" {
-			if raw, ok := req.Metadata["media"]; !ok {
-				return service.TaskErrorWrapperLocal(
-					fmt.Errorf("r2v requires at least one reference image"),
-					"invalid_request", http.StatusBadRequest)
-			} else {
-				media, err := parseMediaFromMetadata(raw)
-				if err != nil {
-					return service.TaskErrorWrapperLocal(
-						fmt.Errorf("invalid metadata.media: %v", err),
-						"invalid_request", http.StatusBadRequest)
-				}
-				hasRef := false
-				for _, m := range media {
-					if m.Type == MediaTypeReferenceImage && m.URL != "" {
-						hasRef = true
-						break
-					}
-				}
-				if !hasRef {
-					return service.TaskErrorWrapperLocal(
-						fmt.Errorf("r2v metadata.media must contain at least one reference_image with a url"),
-						"invalid_request", http.StatusBadRequest)
-				}
-			}
+		if err := validateR2VMedia(media); err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 		}
 	case ModelVideoEdit:
-		if getStringFromMetadata(req.Metadata, "video_url") == "" {
-			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("video-edit requires metadata.video_url"),
-				"invalid_request", http.StatusBadRequest)
+		if err := validateVideoEditMedia(media); err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 		}
 	}
 	return nil
 }
 
-// validateNativeRequest parses the structured HappyHorse GenerateRequest format
-// and normalizes it into a TaskSubmitReq for downstream billing/relay.
-const minDuration = 3
+// v1ToMediaItems converts V1 TaskSubmitReq fields into []MediaItem
+// so that native validation helpers can be reused.
+func v1ToMediaItems(req relaycommon.TaskSubmitReq) ([]MediaItem, error) {
+	switch req.Model {
+	case ModelT2V:
+		return nil, nil
+
+	case ModelI2V:
+		var items []MediaItem
+		if req.Image != "" {
+			items = append(items, MediaItem{Type: MediaTypeFirstFrame, URL: req.Image})
+		}
+		for _, url := range req.Images {
+			if url == "" {
+				return nil, fmt.Errorf("images contains empty url")
+			}
+			items = append(items, MediaItem{Type: MediaTypeFirstFrame, URL: url})
+		}
+		if req.InputReference != "" {
+			items = append(items, MediaItem{Type: MediaTypeFirstFrame, URL: req.InputReference})
+		}
+		return items, nil
+
+	case ModelR2V:
+		// metadata.media takes priority
+		if raw, ok := req.Metadata["media"]; ok {
+			return parseMediaFromMetadata(raw)
+		}
+		var items []MediaItem
+		for _, url := range req.Images {
+			if url == "" {
+				return nil, fmt.Errorf("images contains empty url")
+			}
+			items = append(items, MediaItem{Type: MediaTypeReferenceImage, URL: url})
+		}
+		if req.Image != "" {
+			items = append(items, MediaItem{Type: MediaTypeReferenceImage, URL: req.Image})
+		}
+		if req.InputReference != "" {
+			items = append(items, MediaItem{Type: MediaTypeReferenceImage, URL: req.InputReference})
+		}
+		return items, nil
+
+	case ModelVideoEdit:
+		videoURL := getStringFromMetadata(req.Metadata, "video_url")
+		var items []MediaItem
+		if videoURL != "" {
+			items = append(items, MediaItem{Type: MediaTypeVideo, URL: videoURL})
+		}
+		if raw, ok := req.Metadata["reference_images"]; ok {
+			urls := toStringSlice(raw)
+			for _, url := range urls {
+				if url == "" {
+					return nil, fmt.Errorf("reference_images contains empty url")
+				}
+				items = append(items, MediaItem{Type: MediaTypeReferenceImage, URL: url})
+			}
+		}
+		return items, nil
+
+	default:
+		return nil, nil
+	}
+}
 
 func validateNativeRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
 	var req GenerateRequest
@@ -139,37 +204,58 @@ func validateNativeRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.Tas
 				fmt.Errorf("unsupported resolution: %s, only 720P and 1080P are supported", req.Parameters.Resolution),
 				"invalid_request", http.StatusBadRequest)
 		}
-		if req.Parameters.Ratio != "" && !ValidRatios[req.Parameters.Ratio] {
-			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("unsupported ratio: %s, only 16:9, 9:16 and 1:1 are supported", req.Parameters.Ratio),
-				"invalid_request", http.StatusBadRequest)
+		if req.Parameters.Ratio != "" {
+			if !ValidRatios[req.Parameters.Ratio] {
+				return service.TaskErrorWrapperLocal(
+					fmt.Errorf("unsupported ratio: %s", req.Parameters.Ratio),
+					"invalid_request", http.StatusBadRequest)
+			}
+			if !RatioAllowedForModel(req.Model) {
+				return service.TaskErrorWrapperLocal(
+					fmt.Errorf("%s does not support ratio parameter", req.Model),
+					"invalid_request", http.StatusBadRequest)
+			}
 		}
-		if req.Parameters.Duration != nil && *req.Parameters.Duration < minDuration {
+		// Video Edit does not accept duration
+		if req.Parameters.Duration != nil {
+			if req.Model == ModelVideoEdit {
+				return service.TaskErrorWrapperLocal(
+					fmt.Errorf("video-edit does not support duration parameter"),
+					"invalid_request", http.StatusBadRequest)
+			}
+			if *req.Parameters.Duration < MinDuration || *req.Parameters.Duration > MaxDuration {
+				return service.TaskErrorWrapperLocal(
+					fmt.Errorf("duration must be between %d and %d seconds", MinDuration, MaxDuration),
+					"invalid_request", http.StatusBadRequest)
+			}
+		}
+	}
+
+	// Validate media: URL non-empty and http/https scheme
+	for _, m := range req.Input.Media {
+		if m.URL == "" {
 			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("duration must be at least %d seconds", minDuration),
-				"invalid_request", http.StatusBadRequest)
+				fmt.Errorf("media item url is required"), "invalid_request", http.StatusBadRequest)
+		}
+		if !isValidMediaURL(m.URL) {
+			return service.TaskErrorWrapperLocal(
+				fmt.Errorf("media url must use http or https scheme"), "invalid_request", http.StatusBadRequest)
 		}
 	}
 
 	// Model-specific media validation
 	switch req.Model {
 	case ModelI2V:
-		if !hasMediaType(req.Input.Media, MediaTypeFirstFrame) {
-			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("i2v requires a first_frame media item"),
-				"invalid_request", http.StatusBadRequest)
+		if err := validateI2VMedia(req.Input.Media); err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 		}
 	case ModelR2V:
-		if !hasMediaType(req.Input.Media, MediaTypeReferenceImage) {
-			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("r2v requires at least one reference_image media item"),
-				"invalid_request", http.StatusBadRequest)
+		if err := validateR2VMedia(req.Input.Media); err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 		}
 	case ModelVideoEdit:
-		if !hasMediaType(req.Input.Media, MediaTypeVideo) {
-			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("video-edit requires a video media item"),
-				"invalid_request", http.StatusBadRequest)
+		if err := validateVideoEditMedia(req.Input.Media); err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 		}
 	}
 
@@ -182,13 +268,72 @@ func validateNativeRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.Tas
 	return nil
 }
 
-func hasMediaType(media []MediaItem, typ string) bool {
+// --- Media validation helpers ---
+
+func validateI2VMedia(media []MediaItem) error {
+	count := countMediaType(media, MediaTypeFirstFrame)
+	if count == 0 {
+		return fmt.Errorf("i2v requires exactly 1 first_frame media item")
+	}
+	if count > 1 {
+		return fmt.Errorf("i2v supports exactly 1 first_frame media item, got %d", count)
+	}
 	for _, m := range media {
-		if m.Type == typ {
-			return true
+		if m.Type != MediaTypeFirstFrame {
+			return fmt.Errorf("i2v only allows first_frame media, got %s", m.Type)
 		}
 	}
-	return false
+	return nil
+}
+
+func validateR2VMedia(media []MediaItem) error {
+	refCount := countMediaType(media, MediaTypeReferenceImage)
+	if refCount == 0 {
+		return fmt.Errorf("r2v requires at least 1 reference_image media item")
+	}
+	if refCount > MaxR2VRefImages {
+		return fmt.Errorf("r2v supports at most %d reference images, got %d", MaxR2VRefImages, refCount)
+	}
+	for _, m := range media {
+		if m.Type != MediaTypeReferenceImage {
+			return fmt.Errorf("r2v only allows reference_image media, got %s", m.Type)
+		}
+	}
+	return nil
+}
+
+func validateVideoEditMedia(media []MediaItem) error {
+	videoCount := countMediaType(media, MediaTypeVideo)
+	if videoCount == 0 {
+		return fmt.Errorf("video-edit requires exactly 1 video media item")
+	}
+	if videoCount > 1 {
+		return fmt.Errorf("video-edit supports exactly 1 video media item, got %d", videoCount)
+	}
+	refCount := countMediaType(media, MediaTypeReferenceImage)
+	if refCount > MaxVideoEditRefs {
+		return fmt.Errorf("video-edit supports at most %d reference images, got %d", MaxVideoEditRefs, refCount)
+	}
+	for _, m := range media {
+		if m.Type != MediaTypeVideo && m.Type != MediaTypeReferenceImage {
+			return fmt.Errorf("video-edit only allows video and reference_image media, got %s", m.Type)
+		}
+	}
+	return nil
+}
+
+func countMediaType(media []MediaItem, typ string) int {
+	n := 0
+	for _, m := range media {
+		if m.Type == typ {
+			n++
+		}
+	}
+	return n
+}
+
+func isValidMediaURL(url string) bool {
+	return strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")
 }
 
 // isDurationExplicit checks whether the original request JSON contained a "duration" key.
@@ -245,14 +390,9 @@ func generateRequestToTaskSubmitReq(req GenerateRequest) relaycommon.TaskSubmitR
 		}
 	}
 
-	// For r2v, also set Images if not already set from reference_image items
-	if req.Model == ModelR2V && len(taskReq.Images) > 0 {
-		// Already populated from media items above
-	}
-
 	// Map parameters
 	if req.Parameters != nil {
-		if req.Parameters.Duration != nil {
+		if req.Parameters.Duration != nil && req.Model != ModelVideoEdit {
 			taskReq.Duration = *req.Parameters.Duration
 		}
 		if req.Parameters.Resolution != "" {
@@ -267,18 +407,6 @@ func generateRequestToTaskSubmitReq(req GenerateRequest) relaycommon.TaskSubmitR
 				taskReq.Metadata = make(map[string]interface{})
 			}
 			taskReq.Metadata["ratio"] = req.Parameters.Ratio
-		}
-		if req.Parameters.Quality != "" {
-			if taskReq.Metadata == nil {
-				taskReq.Metadata = make(map[string]interface{})
-			}
-			taskReq.Metadata["quality"] = req.Parameters.Quality
-		}
-		if req.Parameters.Sound != nil {
-			if taskReq.Metadata == nil {
-				taskReq.Metadata = make(map[string]interface{})
-			}
-			taskReq.Metadata["sound"] = *req.Parameters.Sound
 		}
 		if req.Parameters.Watermark != nil {
 			if taskReq.Metadata == nil {

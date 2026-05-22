@@ -172,7 +172,7 @@ func TestConvertRejectsUnsupportedRatio(t *testing.T) {
 		Model:  ModelT2V,
 		Prompt: "test",
 		Metadata: map[string]interface{}{
-			"ratio": "4:3",
+			"ratio": "21:9",
 		},
 	})
 	assert.Error(t, err)
@@ -222,32 +222,6 @@ func TestConvertWatermarkAndSeed(t *testing.T) {
 	assert.True(t, *got.Parameters.Watermark)
 	require.NotNil(t, got.Parameters.Seed)
 	assert.Equal(t, seed, *got.Parameters.Seed)
-}
-
-func TestConvertSoundPassThrough(t *testing.T) {
-	sound := false
-	got, err := ConvertTaskSubmitReq(relaycommon.TaskSubmitReq{
-		Model:  ModelT2V,
-		Prompt: "test",
-		Metadata: map[string]interface{}{
-			"sound": sound,
-		},
-	})
-	require.NoError(t, err)
-	require.NotNil(t, got.Parameters.Sound)
-	assert.False(t, *got.Parameters.Sound)
-}
-
-func TestConvertQualityPassThrough(t *testing.T) {
-	got, err := ConvertTaskSubmitReq(relaycommon.TaskSubmitReq{
-		Model:  ModelT2V,
-		Prompt: "test",
-		Metadata: map[string]interface{}{
-			"quality": "high",
-		},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "high", got.Parameters.Quality)
 }
 
 func TestGenerateRequestToTaskSubmitReqT2V(t *testing.T) {

@@ -118,7 +118,6 @@ func TestWireBodyV1VideoEdit(t *testing.T) {
 
 func TestWireBodyNativeStructured(t *testing.T) {
 	d5 := 5
-	sound := false
 	hhReq := GenerateRequest{
 		Model: ModelT2V,
 		Input: Input{
@@ -131,8 +130,6 @@ func TestWireBodyNativeStructured(t *testing.T) {
 			Resolution: "1080P",
 			Ratio:      "9:16",
 			Duration:   &d5,
-			Quality:    "pro",
-			Sound:      &sound,
 		},
 	}
 
@@ -151,11 +148,13 @@ func TestWireBodyNativeStructured(t *testing.T) {
 	params := m["parameters"].(map[string]interface{})
 	assert.Equal(t, "1080P", params["resolution"])
 	assert.Equal(t, "9:16", params["ratio"])
-	assert.Equal(t, "pro", params["quality"])
 
+	// Non-HappyHorse fields must not appear
 	assert.Nil(t, m["img_url"])
 	assert.Nil(t, params["size"])
 	assert.Nil(t, params["prompt_extend"])
+	assert.Nil(t, params["quality"])
+	assert.Nil(t, params["sound"])
 }
 
 func TestUpstreamErrorMessageBoth(t *testing.T) {

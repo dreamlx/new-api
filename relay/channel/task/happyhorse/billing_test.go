@@ -58,6 +58,49 @@ func TestBillableDurationIgnoresInputVideoDuration(t *testing.T) {
 	assert.Equal(t, 3.0, BillableDuration(usage))
 }
 
+// Video Edit bills input + output duration
+func TestBillableDurationVideoEditSumsDurations(t *testing.T) {
+	usage := &Usage{
+		InputVideoDuration:  5.0,
+		OutputVideoDuration: 3.0,
+	}
+	assert.Equal(t, 8.0, BillableDurationForModel(usage, ModelVideoEdit))
+}
+
+func TestBillableDurationVideoEditFallsBackToDuration(t *testing.T) {
+	usage := &Usage{
+		Duration: 6.0,
+	}
+	assert.Equal(t, 6.0, BillableDurationForModel(usage, ModelVideoEdit))
+}
+
+func TestBillableDurationVideoEditZeroFields(t *testing.T) {
+	usage := &Usage{}
+	assert.Equal(t, 0.0, BillableDurationForModel(usage, ModelVideoEdit))
+}
+
+// SR value parsing: int and string
+func TestSRValueInt(t *testing.T) {
+	usage := &Usage{}
+	err := common.Unmarshal([]byte(`{"SR":1080}`), usage)
+	require.NoError(t, err)
+	assert.Equal(t, 1080, usage.SR.Int())
+}
+
+func TestSRValueString(t *testing.T) {
+	usage := &Usage{}
+	err := common.Unmarshal([]byte(`{"SR":"720"}`), usage)
+	require.NoError(t, err)
+	assert.Equal(t, 720, usage.SR.Int())
+}
+
+func TestSRValueMissing(t *testing.T) {
+	usage := &Usage{}
+	err := common.Unmarshal([]byte(`{}`), usage)
+	require.NoError(t, err)
+	assert.Equal(t, 0, usage.SR.Int())
+}
+
 func TestAdjustBillingOnCompleteUsesOutputSecondsAndQuotaPerUnit(t *testing.T) {
 	adaptor := &TaskAdaptor{}
 	task := &model.Task{

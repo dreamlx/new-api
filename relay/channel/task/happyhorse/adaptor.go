@@ -87,7 +87,7 @@ func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *rela
 		return 0
 	}
 
-	duration := BillableDuration(resp.Usage)
+	duration := BillableDurationForModel(resp.Usage, task.Properties.UpstreamModelName)
 	if duration <= 0 {
 		return 0
 	}
@@ -99,9 +99,10 @@ func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, taskResult *rela
 
 	// Resolution: prefer usage.SR, fall back to submitted resolution ratio
 	resolution := DefaultResolution
-	if resp.Usage.SR == 1080 {
+	sr := resp.Usage.SR.Int()
+	if sr == 1080 {
 		resolution = Resolution1080P
-	} else if resp.Usage.SR == 720 {
+	} else if sr == 720 {
 		resolution = Resolution720P
 	} else if bc.OtherRatios != nil {
 		if r, ok := bc.OtherRatios["resolution"]; ok && r > 1.0 {

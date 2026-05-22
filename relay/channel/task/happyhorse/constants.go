@@ -9,7 +9,7 @@ const (
 	ModelVideoEdit = "happyhorse-1.0-video-edit"
 
 	DefaultDuration   = 5
-	DefaultResolution = "720P"
+	DefaultResolution = "1080P"
 
 	StatusPending   = "PENDING"
 	StatusRunning   = "RUNNING"
@@ -29,6 +29,8 @@ const (
 	Ratio16x9 = "16:9"
 	Ratio9x16 = "9:16"
 	Ratio1x1  = "1:1"
+	Ratio4x3  = "4:3"
+	Ratio3x4  = "3:4"
 
 	MediaTypeVideo          = "video"
 	MediaTypeFirstFrame     = "first_frame"
@@ -38,6 +40,11 @@ const (
 	ModeI2V       = "image-to-video"
 	ModeR2V       = "reference-to-video"
 	ModeVideoEdit = "video-edit"
+
+	MaxDuration      = 15
+	MinDuration      = 3
+	MaxR2VRefImages  = 9
+	MaxVideoEditRefs = 5
 )
 
 var ModelList = []string{
@@ -72,4 +79,12 @@ var ValidRatios = map[string]bool{
 	Ratio16x9: true,
 	Ratio9x16: true,
 	Ratio1x1:  true,
+	Ratio4x3:  true,
+	Ratio3x4:  true,
+}
+
+// RatioAllowedForModel returns whether ratio is allowed for the given model.
+// Only T2V and R2V support ratio; I2V follows first frame, Video Edit follows input video.
+func RatioAllowedForModel(model string) bool {
+	return model == ModelT2V || model == ModelR2V
 }

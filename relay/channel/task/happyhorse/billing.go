@@ -20,6 +20,30 @@ func BillableDuration(usage *Usage) float64 {
 	if usage == nil {
 		return 0
 	}
+	return billableDurationForModel(usage, "")
+}
+
+// BillableDurationForModel computes the billable seconds for a given model.
+// Video Edit bills input + output duration; other models bill output duration only.
+func BillableDurationForModel(usage *Usage, model string) float64 {
+	if usage == nil {
+		return 0
+	}
+	return billableDurationForModel(usage, model)
+}
+
+func billableDurationForModel(usage *Usage, model string) float64 {
+	if model == ModelVideoEdit {
+		total := usage.InputVideoDuration + usage.OutputVideoDuration
+		if total > 0 {
+			return total
+		}
+		// Fallback: if upstream only returns duration, use it conservatively
+		if usage.Duration > 0 {
+			return usage.Duration
+		}
+		return 0
+	}
 	if usage.OutputVideoDuration > 0 {
 		return usage.OutputVideoDuration
 	}

@@ -9,29 +9,16 @@ import (
 )
 
 func ConvertTaskSubmitReq(req relaycommon.TaskSubmitReq) (*GenerateRequest, error) {
-	return ConvertTaskSubmitReqWithModel(req, req.Model)
-}
-
-// ConvertTaskSubmitReqWithModel converts using a specified internal model name,
-// allowing the native path to override the model from the mode field.
-func ConvertTaskSubmitReqWithModel(req relaycommon.TaskSubmitReq, model string) (*GenerateRequest, error) {
-	if !IsHappyHorseModel(model) {
-		return nil, fmt.Errorf("unsupported model: %s", model)
+	if !IsHappyHorseModel(req.Model) {
+		return nil, fmt.Errorf("unsupported model: %s", req.Model)
 	}
 	if strings.TrimSpace(req.Prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}
-
-	req.Model = model
 	return convertTaskSubmitReqInner(req)
 }
 
 func convertTaskSubmitReqInner(req relaycommon.TaskSubmitReq) (*GenerateRequest, error) {
-	duration := req.Duration
-	if duration <= 0 {
-		duration = DefaultDuration
-	}
-
 	resolution := DefaultResolution
 	if v := getStringFromMetadata(req.Metadata, "resolution"); v != "" {
 		if !ValidResolutions[v] {
@@ -46,16 +33,23 @@ func convertTaskSubmitReqInner(req relaycommon.TaskSubmitReq) (*GenerateRequest,
 	var ratio string
 	if v := getStringFromMetadata(req.Metadata, "ratio"); v != "" {
 		if !ValidRatios[v] {
-			return nil, fmt.Errorf("unsupported ratio: %s, only 16:9, 9:16 and 1:1 are supported", v)
+			return nil, fmt.Errorf("unsupported ratio: %s", v)
 		}
 		ratio = v
 	}
 
 	params := &Parameters{
 		Resolution: resolution,
-		Duration:   &duration,
 	}
-	if ratio != "" {
+	// Video Edit does not accept duration
+	if req.Model != ModelVideoEdit {
+		duration := req.Duration
+		if duration <= 0 {
+			duration = DefaultDuration
+		}
+		params.Duration = &duration
+	}
+	if ratio != "" && RatioAllowedForModel(req.Model) {
 		params.Ratio = ratio
 	}
 
@@ -64,12 +58,6 @@ func convertTaskSubmitReqInner(req relaycommon.TaskSubmitReq) (*GenerateRequest,
 	}
 	if v, ok := getIntFromMetadata(req.Metadata, "seed"); ok {
 		params.Seed = &v
-	}
-	if v, ok := getBoolFromMetadata(req.Metadata, "sound"); ok {
-		params.Sound = &v
-	}
-	if v := getStringFromMetadata(req.Metadata, "quality"); v != "" {
-		params.Quality = v
 	}
 
 	input := Input{Prompt: req.Prompt}
@@ -139,9 +127,10 @@ func buildR2VMedia(req relaycommon.TaskSubmitReq) ([]MediaItem, error) {
 	if len(req.Images) > 0 {
 		media := make([]MediaItem, 0, len(req.Images))
 		for _, url := range req.Images {
-			if url != "" {
-				media = append(media, MediaItem{Type: MediaTypeReferenceImage, URL: url})
+			if url == "" {
+				return nil, fmt.Errorf("images contains empty url")
 			}
+			media = append(media, MediaItem{Type: MediaTypeReferenceImage, URL: url})
 		}
 		if len(media) > 0 {
 			return media, nil
@@ -167,9 +156,10 @@ func buildVideoEditMedia(req relaycommon.TaskSubmitReq) ([]MediaItem, error) {
 	if raw, ok := req.Metadata["reference_images"]; ok {
 		urls := toStringSlice(raw)
 		for _, url := range urls {
-			if url != "" {
-				media = append(media, MediaItem{Type: MediaTypeReferenceImage, URL: url})
+			if url == "" {
+				return nil, fmt.Errorf("reference_images contains empty url")
 			}
+			media = append(media, MediaItem{Type: MediaTypeReferenceImage, URL: url})
 		}
 	}
 

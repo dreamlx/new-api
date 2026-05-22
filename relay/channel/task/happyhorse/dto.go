@@ -1,5 +1,12 @@
 package happyhorse
 
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/QuantumNous/new-api/common"
+)
+
 type GenerateRequest struct {
 	Model      string      `json:"model"`
 	Input      Input       `json:"input"`
@@ -22,8 +29,6 @@ type Parameters struct {
 	Duration   *int   `json:"duration,omitempty"`
 	Watermark  *bool  `json:"watermark,omitempty"`
 	Seed       *int   `json:"seed,omitempty"`
-	Sound      *bool  `json:"sound,omitempty"`
-	Quality    string `json:"quality,omitempty"`
 }
 
 type StatusResponse struct {
@@ -49,7 +54,7 @@ type Usage struct {
 	InputVideoDuration  float64 `json:"input_video_duration,omitempty"`
 	OutputVideoDuration float64 `json:"output_video_duration,omitempty"`
 	VideoCount          int     `json:"video_count,omitempty"`
-	SR                  int     `json:"SR,omitempty"`
+	SR                  SRValue `json:"SR,omitempty"`
 	Ratio               string  `json:"ratio,omitempty"`
 }
 
@@ -75,4 +80,31 @@ type NativeStatusData struct {
 	AspectRatio string   `json:"aspect_ratio,omitempty"`
 	VideoURL    string   `json:"video_url,omitempty"`
 	ResultUrls  []string `json:"resultUrls,omitempty"`
+}
+
+// SRValue handles both int ("720") and string ("720") forms of the SR field.
+type SRValue int
+
+func (s *SRValue) UnmarshalJSON(data []byte) error {
+	// Try int first
+	var n int
+	if err := common.Unmarshal(data, &n); err == nil {
+		*s = SRValue(n)
+		return nil
+	}
+	// Try string
+	var str string
+	if err := common.Unmarshal(data, &str); err == nil {
+		v, err := strconv.Atoi(str)
+		if err != nil {
+			return fmt.Errorf("invalid SR value: %s", str)
+		}
+		*s = SRValue(v)
+		return nil
+	}
+	return fmt.Errorf("SR must be int or string")
+}
+
+func (s SRValue) Int() int {
+	return int(s)
 }

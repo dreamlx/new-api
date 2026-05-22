@@ -1,117 +1,34 @@
-# HappyHorse 视频兼容影响分析报告
+# HappyHorse 影响分析报告
 
-日期：2026-05-21
+更新时间：2026-05-22
 
-## 1. 结论
+## 1. 范围
 
-本次 HappyHorse 视频兼容改动整体影响面可控，主要收敛在 HappyHorse 新增渠道、HappyHorse 模型前缀、HappyHorse 原生接口路径，以及既有视频任务通用入口。
-
-未发现会明显破坏既有渠道或既有接口的高风险问题。需要重点关注的既有影响点是：Claude 文件 MIME 处理增强、任务计费完成后补差链路、视频任务查询响应格式分流。
-
-## 2. 改动范围
-
-### 2.1 新增 HappyHorse 渠道
-
-新增渠道类型：
-
-```text
-ChannelTypeHappyHorse = 59
-APITypeHappyHorse = 59
-```
-
-涉及文件：
-
-- `constant/channel.go`
-- `constant/api_type.go`
-- `common/api_type.go`
-- `relay/relay_adaptor.go`
-- `middleware/distributor.go`
-- `web/src/constants/channel.constants.js`
-- `web/src/helpers/render.jsx`
-
-影响说明：
-
-- 新增渠道编号 59，未复用历史渠道编号。
-- 前端渠道下拉新增 HappyHorse 名称和图标。
-- 默认上游地址为 `https://dashscope.aliyuncs.com`。
-- 既有渠道编号、名称、默认地址不变。
-
-### 2.2 新增 HappyHorse 任务适配器
-
-新增目录：
-
-```text
-relay/channel/happyhorse/
-relay/channel/task/happyhorse/
-```
-
-核心职责：
-
-- 支持 HappyHorse 视频任务提交。
-- 支持 HappyHorse 任务状态查询。
-- 支持 `/happyhorse/api/generate` 原生接口。
-- 支持 `/happyhorse/api/status/:task_id` 原生查询接口。
-- 支持 `/v1/video/generations` 通用视频任务入口转换到 HappyHorse 上游格式。
-- 支持 `/v1/video/generations/{task_id}` 查询 HappyHorse 任务并返回 new-api 通用格式。
-
-影响说明：
-
-- HappyHorse 非任务类 relay 请求会返回不支持。
-- 通用聊天、图片、音频、Embedding、Rerank 等旧接口不会被 HappyHorse 适配器接管。
-
-## 3. 接口影响
-
-### 3.1 新增接口
-
-新增用户可见接口：
+本报告分析 HappyHorse 视频兼容分支对 new-api 的影响。当前功能新增独立渠道类型 `59`，并支持：
 
 ```http
 POST /happyhorse/api/generate
-GET /happyhorse/api/status/:task_id
-```
-
-影响说明：
-
-- 两个接口均走 new-api Token 鉴权和渠道分发。
-- 查询接口使用 new-api 自己生成的公开 `task_id`。
-- 查询返回 HappyHorse 原生风格 JSON。
-
-### 3.2 复用既有接口
-
-继续支持既有通用视频接口：
-
-```http
+GET  /happyhorse/api/status/{task_id}
 POST /v1/video/generations
-GET /v1/video/generations/{task_id}
+GET  /v1/video/generations/{task_id}
 ```
 
-影响说明：
+## 2. 主要代码影响
 
-- 请求模型为 `happyhorse-*` 时，走 HappyHorse 渠道。
-- 返回仍保持 new-api/OpenAI 风格视频任务格式。
-- 非 HappyHorse 模型仍按原有渠道分发，不受 HappyHorse 原生响应格式影响。
+| 区域 | 文件 | 影响 |
+| --- | --- | --- |
+| 渠道类型 | `constant/channel.go`、`constant/api_type.go`、`common/api_type.go` | 新增 HappyHorse 类型和默认地址 |
+| 分发 | `middleware/distributor.go` | `/happyhorse/api/*` 进入任务 relay 分发 |
+| 路由 | `router/video-router.go` | 新增原生提交和查询路由 |
+| 适配器注册 | `relay/relay_adaptor.go` | 注册 HappyHorse 普通 adaptor 和 task adaptor |
+| 任务链路 | `relay/channel/task/happyhorse/*` | 新增请求转换、校验、状态解析、计费补差和测试 |
+| 计费入口 | `controller/relay.go`、`relay/channel/adapter.go`、`relay/channel/task/taskcommon/helpers.go`、`relay/relay_task.go` | 通过 `DisablePerCallBilling()` 声明完成后补差，不再硬编码模型名前缀 |
+| 前端 | `web/src/constants/channel.constants.js`、`web/src/helpers/render.jsx` | 新增 HappyHorse 渠道名称和图标 |
+| 文档 | `docs/happyhorse/*` | 新增接口、管理、计费、测试和影响说明 |
 
-### 3.3 查询格式分流
+## 3. 功能影响
 
-状态查询响应分流逻辑：
-
-- `/happyhorse/api/status/:task_id` 返回 HappyHorse 原生格式。
-- `/v1/video/generations/{task_id}` 返回 new-api 通用视频任务格式。
-
-影响文件：
-
-```text
-relay/relay_task.go
-```
-
-影响说明：
-
-- HappyHorse 原生状态格式只在路径以 `/happyhorse/api/status` 开头时生效。
-- 旧的 `/v1/video/generations/{task_id}` 查询不受该分支影响。
-
-## 4. 模型影响
-
-支持模型：
+HappyHorse 模型：
 
 ```text
 happyhorse-1.0-t2v
@@ -120,284 +37,133 @@ happyhorse-1.0-r2v
 happyhorse-1.0-video-edit
 ```
 
-已清除的历史模型：
+已清除历史模型：
 
 ```text
 happyhorse-1.0/video
 ```
 
-影响说明：
+当前请求契约：
 
-- Go 源码中不再支持 `happyhorse-1.0/video`。
-- 如果数据库渠道配置里仍保留该模型，需要在管理后台手动删除。
-- 使用该旧模型名请求会返回 `unsupported model`。
+- 默认分辨率为 `1080P`。
+- T2V/R2V 支持比例 `16:9`、`9:16`、`1:1`、`4:3`、`3:4`。
+- I2V 和 Video Edit 不支持 ratio。
+- T2V/I2V/R2V 显式 duration 必须为 `3-15`。
+- Video Edit 不支持 duration。
+- I2V 正好 1 张首帧图。
+- R2V 参考图数量为 1-9。
+- Video Edit 正好 1 个输入视频，参考图数量为 0-5。
+- media URL 必须非空且使用 `http/https`。
+- `quality`、`sound` 不再透传。
 
-## 5. 计费影响
+## 4. 计费影响
 
-### 5.1 预扣逻辑
-
-HappyHorse 沿用 new-api 统一预扣逻辑：
-
-```text
-预扣额度 = 模型价格 * 分组倍率 * 时长 * 分辨率倍率 * QuotaPerUnit
-```
-
-默认模型价格：
-
-```text
-happyhorse-1.0-t2v        0.9
-happyhorse-1.0-i2v        0.9
-happyhorse-1.0-r2v        0.9
-happyhorse-1.0-video-edit 0.9
-```
-
-分辨率倍率：
+HappyHorse 仍使用 new-api 统一任务计费链路：
 
 ```text
-720P  = 1.0
-1080P = 1.6 / 0.9
+EstimateBilling -> PreConsumeBilling -> SettleBilling -> AdjustBillingOnComplete
 ```
 
-### 5.2 完成后补差
-
-HappyHorse 模型通过 task adaptor 显式声明排除 `PerCallBilling`：
+预扣公式：
 
 ```text
-TaskAdaptor.DisablePerCallBilling() == true
+model_price * QuotaPerUnit * group_ratio * estimated_seconds * resolution_ratio
 ```
 
-目的：
-
-- 让 HappyHorse 在任务完成轮询时走 `AdjustBillingOnComplete`。
-- 按上游返回的 `usage.output_video_duration` 重新计算实际额度。
-- 视频编辑只按输出秒数计费，不按输入视频秒数计费。
-
-影响说明：
-
-- 该例外仅对显式返回 `DisablePerCallBilling() == true` 的任务适配器生效。
-- 通用 controller 不再硬编码 HappyHorse 模型名前缀。
-- Sora、Gemini、Ali、Doubao、Midjourney 等既有任务模型不会命中该例外。
-
-### 5.3 任务表 quota 字段
-
-现有框架行为：
-
-- 任务提交时 `tasks.quota` 记录预扣额度。
-- 完成后补差会调整用户额度、渠道额度、日志流水。
-- `tasks.quota` 不一定回写为最终实际消耗。
-
-影响说明：
-
-- 这是任务框架既有行为，不是 HappyHorse 单独引入。
-- HappyHorse 的实际资金调整以用户额度、渠道额度和日志流水为准。
-
-## 6. 共享代码影响
-
-### 6.1 `middleware/distributor.go`
-
-新增 `/happyhorse/api/` 分支。
-
-影响说明：
-
-- POST 请求从 body 中读取 model 并选择渠道。
-- GET 查询不重新选择渠道，符合任务查询既有模式。
-- 不影响 `/mj/`、`/suno/`、`/v1/videos`、`/v1/video/generations` 旧路径判断。
-
-### 6.2 `relay/relay_adaptor.go`
-
-新增 HappyHorse 普通 adaptor 和 task adaptor 注册。
-
-影响说明：
-
-- 普通 adaptor 仅用于渠道名称、模型列表和不支持提示。
-- 真实视频任务由 task adaptor 处理。
-
-### 6.3 `relay/relay_task.go`
-
-新增 HappyHorse 原生状态响应转换。
-
-影响说明：
-
-- 只对 `/happyhorse/api/status` 路径生效。
-- 其他任务查询响应格式不变。
-
-### 6.4 `common/redis.go`
-
-`RedisDel` 和 `RedisDelKey` 增加 `RDB == nil` 守卫。
-
-影响说明：
-
-- Redis 正常启用时行为不变。
-- Redis 未初始化的测试或特殊环境中避免 panic。
-
-### 6.5 `controller/wisemodel_package.go`
-
-资源包 Redis 初始化增加 `common.RDB != nil` 守卫。
-
-影响说明：
-
-- 正常 Redis 环境行为不变。
-- 无 Redis 环境避免 nil pointer panic。
-
-### 6.6 `relay/helper/stream_scanner.go`
-
-`StreamStatus` 改为仅在 nil 时初始化。
-
-影响说明：
-
-- 保留调用方已记录的 stream 错误状态。
-- 旧逻辑会无条件覆盖已有 `StreamStatus`，该改动属于修复型。
-
-### 6.7 `relay/channel/claude/relay-claude.go`
-
-增强 Claude 文件 MIME 处理：
-
-- 根据文件名扩展名推导 MIME。
-- `text/*` 转为 Claude text。
-- `application/pdf` 转为 Claude document。
-- `image/*` 转为 Claude image。
-- 其他不支持类型跳过。
-
-影响说明：
-
-- 这是对既有 Claude 文件输入行为的真实改变。
-- 预期改善文本文件、PDF、图片文件的 Claude 转换一致性。
-- 不支持的二进制文件会跳过，而不是误当图片发送。
-
-## 7. 数据库影响
-
-本次改动未新增数据库表、字段或迁移。
-
-需要管理员配置的内容：
-
-- 新增 HappyHorse 渠道。
-- 渠道类型选择 `HappyHorse`。
-- API 地址使用 `https://dashscope.aliyuncs.com`。
-- 模型列表只保留四个内部模型：
-  - `happyhorse-1.0-t2v`
-  - `happyhorse-1.0-i2v`
-  - `happyhorse-1.0-r2v`
-  - `happyhorse-1.0-video-edit`
-- 删除历史模型 `happyhorse-1.0/video`。
-
-## 8. 前端影响
-
-前端新增：
-
-- HappyHorse 渠道选项。
-- HappyHorse 渠道图标。
-
-影响说明：
-
-- 只影响渠道管理页面的展示和选择。
-- 不改变既有渠道的配置表单结构。
-
-## 9. 风险点
-
-### 9.1 已关闭风险点：R2V metadata.media 提前校验
-
-`/v1/video/generations` 的 R2V 请求允许通过 `metadata.media` 传递 HappyHorse media 结构。
-
-当前实现已在 `validateHappyHorseTaskRequest` 阶段提前解析并校验 `metadata.media`，不再等到请求体构建阶段才发现结构问题。
-
-当前校验：
-
-- `metadata.media` 必须能解析为 HappyHorse `media[]` 结构。
-- R2V 请求必须至少包含一个 `type=reference_image` 的媒体项。
-- `reference_image` 的 `url` 必须非空。
-- 校验失败时返回本地 400。
-
-影响：
-
-- 格式错误的 `metadata.media` 会在校验阶段被拦截。
-- 常规推荐用法是使用 `images[]`，不依赖 `metadata.media`。
-
-### 9.2 管理后台残留旧模型
-
-如果数据库已有渠道配置中仍存在 `happyhorse-1.0/video`，前端可能还能显示该历史模型。
-
-影响：
-
-- 请求该模型会被后端拒绝。
-
-建议：
-
-- 管理员手动清理渠道模型列表。
-- 只配置四个当前支持模型。
-
-### 9.3 Claude MIME 行为变更
-
-Claude 文件输入的处理逻辑被增强，属于共享代码改动。
-
-影响：
-
-- 文本文件会作为 text 内容发送。
-- PDF 会作为 document 内容发送。
-- 图片作为 image 内容发送。
-- 未知二进制类型跳过。
-
-建议：
-
-- 合并前保留 Claude 文件转换相关回归测试。
-
-## 10. 验证结果
-
-本轮影响面验证命令：
-
-```bash
-go test ./relay/channel/task/happyhorse ./relay/channel/happyhorse ./service ./model -count=1
-```
-
-结果：
+完成结算公式：
 
 ```text
-ok github.com/QuantumNous/new-api/relay/channel/task/happyhorse
-ok github.com/QuantumNous/new-api/service
-ok github.com/QuantumNous/new-api/model
+model_price * QuotaPerUnit * group_ratio * actual_seconds * resolution_ratio
 ```
 
-```bash
-go test ./relay/helper ./common -count=1
-```
+秒数规则：
 
-结果：
+- T2V/I2V/R2V：优先 `usage.output_video_duration`，其次 `usage.duration`。
+- Video Edit：使用 `usage.input_video_duration + usage.output_video_duration`；缺字段时回退 `usage.duration`。
 
-```text
-ok github.com/QuantumNous/new-api/relay/helper
-ok github.com/QuantumNous/new-api/common
-```
+分辨率规则：
 
-```bash
+- `720P` 倍率为 `1.0`。
+- `1080P` 倍率为 `1.6 / 0.9`。
+- `usage.SR` 兼容数字和字符串。
+- `usage.SR` 缺失时回退提交时保存的分辨率倍率。
+
+影响说明：
+
+- 缺省请求从旧版本的 720P 预估变为 1080P 预估，默认预扣会上升。
+- Video Edit 从只按输出秒数计费修正为输入秒数加输出秒数计费，实际扣费会上升并符合官方价格规则。
+- HappyHorse 通过 adaptor 声明禁用 `PerCallBilling`，避免完成轮询时跳过补差。
+
+## 5. 查询和轮询影响
+
+查询接口读本地 DB，不实时拉上游。任务推进、成功补差、失败退款依赖后台轮询。
+
+部署要求：
+
+- 至少一个 master 节点运行。
+- master 节点开启 `UPDATE_TASK=true`。
+- 纯 slave 部署可能导致任务长期停留在 pending/queued，且无法完成补差或退款。
+
+## 6. 兼容影响
+
+### 对 HappyHorse 用户
+
+- `/happyhorse/api/status?task_id=xxx` 不兼容，只支持 `/happyhorse/api/status/{task_id}`。
+- `happyhorse-1.0/video` 不再支持。
+- I2V 传 ratio 会返回 400。
+- Video Edit 传 ratio 或 duration 会返回 400。
+- `quality`、`sound` 不再作为 HappyHorse 参数透传。
+- 空 URL、非 http/https URL 会在本地返回 400。
+
+### 对其他任务渠道
+
+- `TaskAdaptor` 接口新增 `DisablePerCallBilling()`，`BaseBilling` 默认返回 `false`，其他 task adaptor 通过嵌入 `BaseBilling` 保持原行为。
+- `videoFetchByIDRespBodyBuilder` 移除了 query `task_id` fallback，当前已知视频查询路由均使用 path 参数或 context 参数。
+
+### 对非 HappyHorse relay
+
+分支中另有共享修复：
+
+- Redis 删除操作增加 nil guard。
+- Claude 文件 MIME 推断增强。
+- StreamScanner 保留预初始化 `StreamStatus`。
+
+这些改动不是 HappyHorse 核心功能，但已拆成独立提交，方便单独评审。
+
+## 7. 风险与缓解
+
+| 风险 | 影响 | 缓解 |
+| --- | --- | --- |
+| 默认 1080P 导致预扣升高 | 用户余额要求提高 | 文档和管理配置中明确默认值 |
+| Video Edit 实际扣费升高 | 从旧测试结果看会出现更大补扣 | 按官方输入+输出计费，测试覆盖补扣方向 |
+| 上游 `usage.SR` 返回字符串 | 旧实现解析失败 | 已增加 `SRValue` 兼容数字/字符串 |
+| 本地校验更严格 | 旧的非官方参数请求会 400 | 文档列出新规则 |
+| 任务轮询关闭 | 任务不推进、不补差、不退款 | 运维文档要求 master `UPDATE_TASK=true` |
+
+## 8. 验证建议
+
+本地验证：
+
+```powershell
+go test ./relay/channel/task/happyhorse ./relay/channel/happyhorse -count=1
 go vet ./relay/channel/task/happyhorse/... ./relay/channel/happyhorse/...
+go build ./...
 ```
 
-结果：
+接口验证：
 
-```text
-无输出，检查通过
-```
+- `/happyhorse/api/generate` 4 个模型提交成功。
+- `/happyhorse/api/status/{task_id}` 查询完成结果。
+- `/v1/video/generations` 4 个模型提交成功。
+- `/v1/video/generations/{task_id}` 查询完成结果。
+- 负向测试覆盖 duration、ratio、media 数量、空 URL、非 http/https URL。
+- 计费日志覆盖普通模型输出秒数结算和 Video Edit 输入+输出秒数结算。
 
-## 11. 提交建议
+## 9. 当前结论
 
-建议提交范围：
+HappyHorse 核心提交、查询、转换和计费链路已经具备上线条件。上线前需要确认：
 
-1. HappyHorse 功能代码与测试：
-   - `relay/channel/happyhorse/`
-   - `relay/channel/task/happyhorse/`
-   - 路由、分发、渠道常量、API 类型、计费注册、前端渠道展示
-
-2. 配套修复：
-   - Redis nil 守卫
-   - Wisermodel RDB nil 守卫
-   - StreamStatus 保留
-   - Claude 文件 MIME 处理增强
-
-3. HappyHorse 文档：
-   - `docs/happyhorse/`
-
-不建议提交：
-
-- 临时接口测试 JSON
-- `tmp-happyhorse-*`
-- `tmp-new-api-bin`
-- 与 HappyHorse 主题无关的文档或实验文件
+- 渠道模型列表不包含 `happyhorse-1.0/video`。
+- 用户余额能覆盖默认 1080P 预扣。
+- master 节点开启任务轮询。
+- 文档和测试报告使用当前契约，不再引用旧的 `quality/sound`、Video Edit duration 或“只按输出秒数计费”口径。
