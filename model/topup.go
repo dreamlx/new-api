@@ -21,6 +21,22 @@ type TopUp struct {
 	CreateTime       int64   `json:"create_time"`
 	CompleteTime     int64   `json:"complete_time"`
 	Status           string  `json:"status"`
+
+	// 金额整数化 (v2 新增)
+	PayAmountCents int64 `json:"pay_amount_cents"`
+	QuotaGranted   int64 `json:"quota_granted"`
+
+	// 订单超时
+	ExpireTime int64 `json:"expire_time" gorm:"index"`
+
+	// 对账字段
+	ProviderTxId string `json:"provider_tx_id" gorm:"type:varchar(255);index"`
+	PaidAt       int64  `json:"paid_at"`
+	// CallbackRaw stores the raw provider callback payload on the success
+	// path, or the anomaly / failure reason on guard failures. This keeps the
+	// original webhook body available for later inspection without exposing it
+	// in JSON responses.
+	CallbackRaw string `json:"-" gorm:"type:text"`
 }
 
 func (topUp *TopUp) Insert() error {
@@ -434,4 +450,83 @@ func RechargeWaffo(tradeNo string) (err error) {
 	}
 
 	return nil
+}
+
+// CompleteTopUpByCondition 用 DB 条件更新完成订单（多副本幂等）
+// 仅当 status='pending' 时更新为 success；返回影响行数。
+// quotaGranted 是本次充值入账的额度，记录在 quota_granted 列，作为人工核验
+// 时点准确的额度数字（避免日后 QuotaPerUnit 变动造成数额误判）。
+func CompleteTopUpByCondition(db *gorm.DB, tradeNo string, providerTxId string, paidAt int64, quotaGranted int64) (int64, error) {
+	if tradeNo == "" {
+		return 0, errors.New("trade_no is required")
+	}
+	result := db.Model(&TopUp{}).
+		Where("trade_no = ? AND status = ?", tradeNo, common.TopUpStatusPending).
+		Updates(map[string]interface{}{
+			"status":         common.TopUpStatusSuccess,
+			"provider_tx_id": providerTxId,
+			"paid_at":        paidAt,
+			"complete_time":  common.GetTimestamp(),
+			"quota_granted":  quotaGranted,
+		})
+	return result.RowsAffected, result.Error
+}
+
+// CompleteTopUpAndGrantQuotaAtomic 在一个事务内完成"状态翻转 + 加额度"，
+// 消除"订单成功但额度未到账"的失败模式（进程崩溃 / DB 错误介于两步之间）。
+//
+// 条件更新保留 WHERE status='pending' 提供跨副本幂等：多副本同时投递的回调
+// 中只有一个副本会得到 RowsAffected==1，其余看到 0 行并安全退出（granted=false）。
+//
+// 返回值：
+//   - granted=true: 本次调用真正翻转了状态并加了额度。调用方应记录入账日志。
+//   - granted=false, err=nil: 并发竞争中本调用未抢到（已被另一个 caller 完成），
+//     幂等跳过。
+//   - err!=nil: 事务回滚（状态未翻转、额度未变化）。调用方应让 webhook 重试。
+func CompleteTopUpAndGrantQuotaAtomic(tradeNo string, providerTxId string, paidAt int64, userId int, quotaToAdd int64) (granted bool, err error) {
+	if tradeNo == "" {
+		return false, errors.New("trade_no is required")
+	}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		rows, txErr := CompleteTopUpByCondition(tx, tradeNo, providerTxId, paidAt, quotaToAdd)
+		if txErr != nil {
+			return txErr
+		}
+		if rows == 0 {
+			// Concurrent winner已完成；幂等跳过，granted 保持 false。
+			return nil
+		}
+		granted = true
+		if quotaToAdd <= 0 {
+			return nil
+		}
+		return tx.Model(&User{}).
+			Where("id = ?", userId).
+			Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error
+	})
+	if err != nil {
+		// 事务失败：granted 必须回归 false，调用方据此让上游重试。
+		return false, err
+	}
+	return granted, nil
+}
+
+// SetTopUpAnomaly 标记订单为异常状态（验签失败/金额不一致等）。
+// 仅当 status='pending' 时更新，避免赛跑覆盖已完成订单。
+func SetTopUpAnomaly(db *gorm.DB, tradeNo string, reason string) error {
+	return db.Model(&TopUp{}).
+		Where("trade_no = ? AND status = ?", tradeNo, common.TopUpStatusPending).
+		Updates(map[string]interface{}{
+			"status":       common.TopUpStatusAnomaly,
+			"callback_raw": reason,
+		}).Error
+}
+
+// SetTopUpCallbackRaw records the raw provider callback payload for a paid
+// top-up order. It only updates rows that are still pending, so it stays safe
+// under duplicate webhook deliveries.
+func SetTopUpCallbackRaw(db *gorm.DB, tradeNo string, callbackRaw string) error {
+	return db.Model(&TopUp{}).
+		Where("trade_no = ? AND status = ?", tradeNo, common.TopUpStatusPending).
+		Update("callback_raw", callbackRaw).Error
 }

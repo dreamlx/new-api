@@ -21,6 +21,7 @@ tiktoken_cache
 .cache
 web/bun.lock
 plans
+!docs/superpowers/plans/
 .claude
 .worktrees/
 
