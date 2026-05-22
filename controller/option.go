@@ -296,6 +296,22 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "AlipayEnabled":
+		if option.Value == "true" && (setting.AlipayAppId == "" || setting.AlipayPrivateKey == "") {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法启用支付宝支付，请先填入支付宝 AppId 以及应用私钥！",
+			})
+			return
+		}
+	case "WxpayEnabled":
+		if option.Value == "true" && (setting.WxpayMchId == "" || setting.WxpayMchSerialNo == "" || setting.WxpayApiV3Key == "" || setting.WxpayPrivateKey == "" || setting.WxpayPublicKeyId == "" || setting.WxpayPublicKey == "" || setting.WxpayAppId == "") {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法启用微信支付，请先填入 AppId、商户号、商户证书序列号、APIv3 密钥、商户私钥、微信支付公钥 ID 以及微信支付公钥！",
+			})
+			return
+		}
 	}
 	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {
