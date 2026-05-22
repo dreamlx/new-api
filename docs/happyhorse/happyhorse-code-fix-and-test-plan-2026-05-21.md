@@ -353,11 +353,10 @@ go vet ./relay/channel/task/happyhorse/...
 
 ## 13. 后续不在本轮处理的事项
 
-以下事项属于架构优化或后续专项，不建议混入当前修复：
+以下事项属于架构优化或后续专项，其中部分已经在后续优化提交中关闭：
 
-- 将 `PerCallBilling` 改为 TaskAdaptor 显式声明。
+- 将 `PerCallBilling` 改为 TaskAdaptor 显式声明：已完成，HappyHorse 通过 `DisablePerCallBilling()` 返回 `true`。
 - 复用 Ali adapter。
 - 重构 native 计费链路，减少 `GenerateRequest -> TaskSubmitReq -> GenerateRequest`。
-- 统一 `duration` / `seconds` key。
+- 统一 `duration` / `seconds` key：已完成，内部 `OtherRatios` 使用 `seconds`，上游请求体仍使用 `parameters.duration`。
 - Wisemodel Redis nil 完整修复。
-

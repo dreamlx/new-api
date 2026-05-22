@@ -160,10 +160,10 @@ happyhorse-1.0-video-edit 0.9
 
 ### 5.2 完成后补差
 
-HappyHorse 模型在 `controller/relay.go` 中排除 `PerCallBilling`：
+HappyHorse 模型通过 task adaptor 显式声明排除 `PerCallBilling`：
 
 ```text
-!strings.HasPrefix(relayInfo.OriginModelName, "happyhorse-")
+TaskAdaptor.DisablePerCallBilling() == true
 ```
 
 目的：
@@ -174,7 +174,8 @@ HappyHorse 模型在 `controller/relay.go` 中排除 `PerCallBilling`：
 
 影响说明：
 
-- 该例外仅对 `happyhorse-` 模型前缀生效。
+- 该例外仅对显式返回 `DisablePerCallBilling() == true` 的任务适配器生效。
+- 通用 controller 不再硬编码 HappyHorse 模型名前缀。
 - Sora、Gemini、Ali、Doubao、Midjourney 等既有任务模型不会命中该例外。
 
 ### 5.3 任务表 quota 字段
@@ -293,20 +294,23 @@ HappyHorse 模型在 `controller/relay.go` 中排除 `PerCallBilling`：
 
 ## 9. 风险点
 
-### 9.1 已识别低风险点：R2V metadata.media 校验较轻
+### 9.1 已关闭风险点：R2V metadata.media 提前校验
 
 `/v1/video/generations` 的 R2V 请求允许通过 `metadata.media` 传递 HappyHorse media 结构。
 
-当前校验只检查是否存在 `metadata.media`，更深层的结构解析在请求体构建阶段完成。
+当前实现已在 `validateHappyHorseTaskRequest` 阶段提前解析并校验 `metadata.media`，不再等到请求体构建阶段才发现结构问题。
+
+当前校验：
+
+- `metadata.media` 必须能解析为 HappyHorse `media[]` 结构。
+- R2V 请求必须至少包含一个 `type=reference_image` 的媒体项。
+- `reference_image` 的 `url` 必须非空。
+- 校验失败时返回本地 400。
 
 影响：
 
-- 如果用户传入格式错误的 `metadata.media`，错误可能发生在 BuildRequestBody 阶段。
+- 格式错误的 `metadata.media` 会在校验阶段被拦截。
 - 常规推荐用法是使用 `images[]`，不依赖 `metadata.media`。
-
-建议：
-
-- 若后续希望错误更早返回 400，可在 `validateHappyHorseTaskRequest` 中提前解析并校验 `metadata.media`。
 
 ### 9.2 管理后台残留旧模型
 
@@ -397,4 +401,3 @@ go vet ./relay/channel/task/happyhorse/... ./relay/channel/happyhorse/...
 - `tmp-happyhorse-*`
 - `tmp-new-api-bin`
 - 与 HappyHorse 主题无关的文档或实验文件
-

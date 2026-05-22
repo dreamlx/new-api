@@ -137,10 +137,10 @@ func TestValidateNativeEstimateBillingWorks(t *testing.T) {
 	assert.Equal(t, Resolution1080P, converted.Parameters.Resolution)
 
 	ratios := map[string]float64{
-		"duration":   float64(*converted.Parameters.Duration),
+		"seconds":    float64(*converted.Parameters.Duration),
 		"resolution": ResolutionRatio(converted.Parameters.Resolution),
 	}
-	assert.Equal(t, 8.0, ratios["duration"])
+	assert.Equal(t, 8.0, ratios["seconds"])
 	assert.InDelta(t, 1.6/0.9, ratios["resolution"], 1e-6)
 }
 
@@ -219,8 +219,8 @@ func TestValidateNativeDurationMinAllowed(t *testing.T) {
 
 	c := setupGinContext(body, "/happyhorse/api/generate")
 	info := &relaycommon.RelayInfo{
-		ChannelMeta:    &relaycommon.ChannelMeta{},
-		TaskRelayInfo:  &relaycommon.TaskRelayInfo{},
+		ChannelMeta:   &relaycommon.ChannelMeta{},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
 	}
 	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
 	assert.Nil(t, taskErr)
@@ -237,8 +237,8 @@ func TestValidateNativeDurationMissing(t *testing.T) {
 
 	c := setupGinContext(body, "/happyhorse/api/generate")
 	info := &relaycommon.RelayInfo{
-		ChannelMeta:    &relaycommon.ChannelMeta{},
-		TaskRelayInfo:  &relaycommon.TaskRelayInfo{},
+		ChannelMeta:   &relaycommon.ChannelMeta{},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
 	}
 	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
 	assert.Nil(t, taskErr)

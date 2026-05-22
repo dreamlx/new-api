@@ -75,7 +75,7 @@ Content-Type: application/json
 | `input.media[].url` | string | 按模型 | 上游可直接下载的公网 URL |
 | `parameters.resolution` | string | 否 | `720P` 或 `1080P`，默认 `720P` |
 | `parameters.ratio` | string | 否 | `16:9`、`9:16`、`1:1` |
-| `parameters.duration` | int | 否 | 默认 `5`；显式 `0` 会被保留到请求解析，但计费预估会回退默认 5 秒 |
+| `parameters.duration` | int | 否 | 默认 `5`；显式传入小于 `3` 的值会返回本地 400 |
 | `parameters.quality` | string | 否 | 透传上游，例如 `std`、`pro` |
 | `parameters.sound` | bool | 否 | 透传上游；显式 `false` 不会丢失 |
 | `parameters.watermark` | bool | 否 | 透传上游 |
