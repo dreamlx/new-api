@@ -29,15 +29,6 @@ func BillableDuration(usage *Usage) float64 {
 	return 0
 }
 
-// commonMarshal/commonUnmarshal wrap common.Marshal/common.Unmarshal for use in convert.go
-func commonMarshal(v interface{}) ([]byte, error) {
-	return common.Marshal(v)
-}
-
-func commonUnmarshal(data []byte, v interface{}) error {
-	return common.Unmarshal(data, v)
-}
-
 func ConvertTaskToStatusResponseBody(task *model.Task) ([]byte, error) {
 	resp := NativeStatusResponse{
 		TaskID: task.TaskID,
@@ -101,17 +92,3 @@ func toNativeStatus(status model.TaskStatus) string {
 	}
 }
 
-func toHappyHorseStatus(status model.TaskStatus) string {
-	switch status {
-	case model.TaskStatusQueued, model.TaskStatusSubmitted, model.TaskStatusNotStart:
-		return StatusPending
-	case model.TaskStatusInProgress:
-		return StatusRunning
-	case model.TaskStatusSuccess:
-		return StatusSucceeded
-	case model.TaskStatusFailure:
-		return StatusFailed
-	default:
-		return StatusUnknown
-	}
-}

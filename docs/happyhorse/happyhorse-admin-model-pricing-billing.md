@@ -67,7 +67,23 @@ happyhorse-1.0-t2v,happyhorse-1.0-i2v,happyhorse-1.0-r2v,happyhorse-1.0-video-ed
 | `parameters.watermark` | `true`、`false` | 空 |
 | `parameters.seed` | 整数 | 空 |
 
-## 4. 设置模型价格
+## 4. 部署与任务轮询要求
+
+HappyHorse 复用 new-api 统一任务框架。任务提交和任务查询可以由 master 或 slave 节点处理，但任务状态推进、完成结算、补差和退费依赖后台任务轮询。
+
+部署要求：
+
+- 至少保留一个 master 节点运行任务轮询。
+- master 节点需要开启 `UPDATE_TASK`。
+- 纯 slave 部署可以提交任务，但任务不会自动推进到最终状态，也无法完成按输出秒数补差或退费。
+
+运维判断：
+
+- 如果 HappyHorse 任务长期停留在 `pending` / `queued`，优先检查 master 节点是否运行，以及 `UPDATE_TASK` 是否开启。
+- 如果任务完成后没有发生补差或退费，优先检查任务轮询日志和 master 节点状态。
+- 该行为与 Suno、Kling、Ali 等任务类渠道一致，不是 HappyHorse 专属限制。
+
+## 5. 设置模型价格
 
 HappyHorse 使用 new-api 的 `model_price` 按量计费，不建议设置为按次固定价格。
 
@@ -99,7 +115,7 @@ HappyHorse 使用 new-api 的 `model_price` 按量计费，不建议设置为按
 }
 ```
 
-## 5. 分辨率价格倍率
+## 6. 分辨率价格倍率
 
 HappyHorse 分辨率倍率在代码中固定：
 
@@ -114,7 +130,7 @@ HappyHorse 分辨率倍率在代码中固定：
 - 1080P 按 `model_price * 1.777777...` 计费。
 - 如果未来上游价格变化，需要同步修改分辨率倍率或模型价格策略。
 
-## 6. 扣费计算
+## 7. 扣费计算
 
 全局常量：
 
@@ -175,7 +191,7 @@ quota = 0.9 * 500000 * 1 * 5 * 1.777777... = 4000000
 补扣 quota = 6255000 - 2250000 = 4005000
 ```
 
-## 7. 结算行为
+## 8. 结算行为
 
 HappyHorse 借用 new-api 任务计费链路：
 
@@ -191,7 +207,7 @@ HappyHorse 借用 new-api 任务计费链路：
 - `controller/relay.go` 中对 `happyhorse-` 模型保留完成后补差路径。
 - Video Edit 只按输出视频秒数计费，不按输入视频秒数计费。
 
-## 8. 管理检查清单
+## 9. 管理检查清单
 
 上线前检查：
 
@@ -207,7 +223,7 @@ HappyHorse 借用 new-api 任务计费链路：
 - `/happyhorse/api/status/{task_id}` 可以查询任务。
 - 日志中能看到预扣、完成补差或失败退款。
 
-## 9. `happyhorse-1.0/video` 清除检查
+## 10. `happyhorse-1.0/video` 清除检查
 
 当前 Go 源码已清除 `happyhorse-1.0/video`，它不再是 `/happyhorse/api/generate` 和 `/v1/video/generations` 的提交模型名，也不再作为查询响应中的展示模型名。
 
@@ -225,7 +241,7 @@ HappyHorse 借用 new-api 任务计费链路：
 - `happyhorse-1.0/video` 不应出现在渠道模型列表、模型价格配置或新测试用例中。
 - 如果历史文档或历史测试产物中仍出现该字符串，只代表旧镜像或旧接口阶段的记录，不代表当前代码行为。
 
-## 10. 常见问题
+## 11. 常见问题
 
 ### 渠道类型只显示数字 59
 

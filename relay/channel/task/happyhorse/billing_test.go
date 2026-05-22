@@ -176,3 +176,51 @@ func TestToNativeStatus(t *testing.T) {
 	assert.Equal(t, NativeStatusCompleted, toNativeStatus(model.TaskStatusSuccess))
 	assert.Equal(t, NativeStatusFailed, toNativeStatus(model.TaskStatusFailure))
 }
+
+func TestAdjustBillingOnCompleteRefundDirection(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	// Pre-consumed for 5 seconds at 1080P, but actual output is only 3 seconds
+	task := &model.Task{
+		Data: []byte(`{"output":{"task_status":"SUCCEEDED"},"usage":{"output_video_duration":3,"duration":5,"SR":1080}}`),
+		PrivateData: model.TaskPrivateData{
+			BillingContext: &model.TaskBillingContext{
+				ModelPrice: 0.9,
+				GroupRatio: 2,
+				ModelRatio: 99,
+			},
+		},
+	}
+
+	quota := adaptor.AdjustBillingOnComplete(task, &relaycommon.TaskInfo{})
+
+	// Actual quota for 3s at 1080P
+	actualQuota := int(0.9 * common.QuotaPerUnit * 2 * 3 * (1.6 / 0.9))
+	// Pre-consumed quota for 5s at 1080P
+	preConsumedQuota := int(0.9 * common.QuotaPerUnit * 2 * 5 * (1.6 / 0.9))
+	assert.Equal(t, actualQuota, quota)
+	assert.Less(t, quota, preConsumedQuota)
+}
+
+func TestAdjustBillingOnCompleteResolutionFallback(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	// Upstream returns no SR field, but billing context has resolution ratio from submit
+	task := &model.Task{
+		Data: []byte(`{"output":{"task_status":"SUCCEEDED"},"usage":{"output_video_duration":5}}`),
+		PrivateData: model.TaskPrivateData{
+			BillingContext: &model.TaskBillingContext{
+				ModelPrice: 0.9,
+				GroupRatio: 2,
+				ModelRatio: 99,
+				OtherRatios: map[string]float64{
+					"resolution": 1.6 / 0.9, // 1080P ratio saved at submit time
+				},
+			},
+		},
+	}
+
+	quota := adaptor.AdjustBillingOnComplete(task, &relaycommon.TaskInfo{})
+
+	// Should use 1080P ratio from OtherRatios, not default 720P
+	expected := int(0.9 * common.QuotaPerUnit * 2 * 5 * (1.6 / 0.9))
+	assert.Equal(t, expected, quota)
+}

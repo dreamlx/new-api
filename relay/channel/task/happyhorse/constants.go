@@ -1,7 +1,5 @@
 package happyhorse
 
-import "fmt"
-
 const (
 	ChannelName = "happyhorse"
 
@@ -58,33 +56,11 @@ func IsHappyHorseModel(model string) bool {
 	}
 }
 
-func ModeToInternalModel(mode string) (string, error) {
-	m, ok := ModeToModel[mode]
-	if !ok {
-		return "", fmt.Errorf("unsupported mode: %s", mode)
-	}
-	return m, nil
-}
-
-var ModeToModel = map[string]string{
-	ModeT2V:       ModelT2V,
-	ModeI2V:       ModelI2V,
-	ModeR2V:       ModelR2V,
-	ModeVideoEdit: ModelVideoEdit,
-}
-
 var ModelToMode = map[string]string{
 	ModelT2V:       ModeT2V,
 	ModelI2V:       ModeI2V,
 	ModelR2V:       ModeR2V,
 	ModelVideoEdit: ModeVideoEdit,
-}
-
-var ValidModes = map[string]bool{
-	ModeT2V:       true,
-	ModeI2V:       true,
-	ModeR2V:       true,
-	ModeVideoEdit: true,
 }
 
 var ValidResolutions = map[string]bool{

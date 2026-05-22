@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
@@ -176,12 +177,12 @@ func buildVideoEditMedia(req relaycommon.TaskSubmitReq) ([]MediaItem, error) {
 }
 
 func parseMediaFromMetadata(raw interface{}) ([]MediaItem, error) {
-	data, err := commonMarshal(raw)
+	data, err := common.Marshal(raw)
 	if err != nil {
 		return nil, fmt.Errorf("invalid metadata.media: %w", err)
 	}
 	var items []MediaItem
-	if err := commonUnmarshal(data, &items); err != nil {
+	if err := common.Unmarshal(data, &items); err != nil {
 		return nil, fmt.Errorf("invalid metadata.media format: %w", err)
 	}
 	return items, nil
