@@ -64,7 +64,7 @@ GET /happyhorse/api/status/{task_id}
   "status": "completed",
   "message": "Video generation completed.",
   "data": {
-    "model": "happyhorse-1.0/video",
+    "model": "happyhorse-1.0-t2v",
     "mode": "text-to-video",
     "duration": 5,
     "aspect_ratio": "16:9",
@@ -644,8 +644,8 @@ GET  /happyhorse/api/status/{task_id}
 
 ### 6. 实现计费和补差
 
-- `EstimateBilling` 返回 `duration` 和 `resolution` 两个倍率。
-- `duration` 使用请求值或默认 `5`。
+- `EstimateBilling` 返回 `seconds` 和 `resolution` 两个内部计费倍率。
+- `seconds` 使用请求中的 `duration` 值或默认 `5`，不改变上游请求体里的 `parameters.duration` 字段。
 - `resolution` 为 `720P` 时倍率 `1`。
 - `resolution` 为 `1080P` 时倍率 `1.7777778`。
 - `AdjustBillingOnComplete` 读取上游 usage 并按输出秒数重算 quota。
@@ -656,7 +656,7 @@ GET  /happyhorse/api/status/{task_id}
 - HappyHorse 模型需要排除 `PerCallBilling`。
 - `PerCallBilling=true` 时，轮询完成结算会跳过 `AdjustBillingOnComplete`。
 - HappyHorse 需要在任务完成后读取上游 `usage.output_video_duration`，按实际输出秒数重算额度。
-- 因此 `controller/relay.go` 中对 `happyhorse-` 模型的 `PerCallBilling` 例外为有意保留，不是残留改动。
+- 因此 HappyHorse `TaskAdaptor` 通过 `DisablePerCallBilling()` 显式声明禁用按次计费，`controller/relay.go` 读取适配器声明后保留完成后补差路径。
 
 ### 7. 测试
 
@@ -753,11 +753,15 @@ if info.StreamStatus == nil {
 
 HappyHorse 借用 task 计费链路，但不能被标记为完成后不补差的按次计费任务。否则轮询完成时会跳过 `AdjustBillingOnComplete`，无法按上游输出秒数重新结算。
 
-因此需要保留：
+因此需要由 HappyHorse task adaptor 显式声明：
 
 ```go
-!strings.HasPrefix(relayInfo.OriginModelName, "happyhorse-")
+func (a *TaskAdaptor) DisablePerCallBilling() bool {
+	return true
+}
 ```
+
+通用 `controller/relay.go` 不再硬编码 `happyhorse-` 模型名前缀，而是读取 task adaptor 的计费声明。
 
 ## 已验证命令
 

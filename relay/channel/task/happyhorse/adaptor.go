@@ -33,6 +33,14 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	// Native path: read GenerateRequest directly from context
+	if v, exists := c.Get("happyhorse_generate_request"); exists {
+		if hhReq, ok := v.(GenerateRequest); ok {
+			return estimateBillingFromGenerateRequest(hhReq)
+		}
+	}
+
+	// V1 path: convert TaskSubmitReq -> GenerateRequest
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return nil
@@ -41,19 +49,23 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	if err != nil {
 		return nil
 	}
+	return estimateBillingFromGenerateRequest(*hhReq)
+}
+
+func estimateBillingFromGenerateRequest(hhReq GenerateRequest) map[string]float64 {
 	duration := DefaultDuration
-	if hhReq.Parameters.Duration != nil {
+	if hhReq.Parameters != nil && hhReq.Parameters.Duration != nil {
 		duration = *hhReq.Parameters.Duration
 	}
 	if duration <= 0 {
 		duration = DefaultDuration
 	}
-	resolution := hhReq.Parameters.Resolution
-	if resolution == "" {
-		resolution = DefaultResolution
+	resolution := DefaultResolution
+	if hhReq.Parameters != nil && hhReq.Parameters.Resolution != "" {
+		resolution = hhReq.Parameters.Resolution
 	}
 	return map[string]float64{
-		"duration":   float64(duration),
+		"seconds":    float64(duration),
 		"resolution": ResolutionRatio(resolution),
 	}
 }
@@ -249,6 +261,10 @@ func (a *TaskAdaptor) GetModelList() []string {
 
 func (a *TaskAdaptor) GetChannelName() string {
 	return ChannelName
+}
+
+func (a *TaskAdaptor) DisablePerCallBilling() bool {
+	return true
 }
 
 func firstNonEmpty(s ...string) string {

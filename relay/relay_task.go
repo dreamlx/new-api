@@ -24,10 +24,11 @@ import (
 )
 
 type TaskSubmitResult struct {
-	UpstreamTaskID string
-	TaskData       []byte
-	Platform       constant.TaskPlatform
-	Quota          int
+	UpstreamTaskID        string
+	TaskData              []byte
+	Platform              constant.TaskPlatform
+	Quota                 int
+	DisablePerCallBilling bool
 	//PerCallPrice   types.PriceData
 }
 
@@ -251,10 +252,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	return &TaskSubmitResult{
-		UpstreamTaskID: upstreamTaskID,
-		TaskData:       taskData,
-		Platform:       platform,
-		Quota:          finalQuota,
+		UpstreamTaskID:        upstreamTaskID,
+		TaskData:              taskData,
+		Platform:              platform,
+		Quota:                 finalQuota,
+		DisablePerCallBilling: adaptor.DisablePerCallBilling(),
 	}, nil
 }
 
@@ -364,9 +366,6 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	taskId := c.Param("task_id")
 	if taskId == "" {
 		taskId = c.GetString("task_id")
-	}
-	if taskId == "" {
-		taskId = c.Query("task_id")
 	}
 	userId := c.GetInt("id")
 

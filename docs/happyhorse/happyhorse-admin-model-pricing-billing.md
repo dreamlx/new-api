@@ -204,7 +204,8 @@ HappyHorse 借用 new-api 任务计费链路：
 特殊设计：
 
 - HappyHorse 不走 `PerCallBilling` 固定按次计费例外。
-- `controller/relay.go` 中对 `happyhorse-` 模型保留完成后补差路径。
+- HappyHorse task adaptor 通过 `DisablePerCallBilling()` 显式声明保留完成后补差路径。
+- `controller/relay.go` 不再硬编码 `happyhorse-` 模型名前缀。
 - Video Edit 只按输出视频秒数计费，不按输入视频秒数计费。
 
 ## 9. 管理检查清单
