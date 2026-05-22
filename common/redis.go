@@ -89,6 +89,9 @@ func RedisGet(key string) (string, error) {
 //}
 
 func RedisDel(key string) error {
+	if RDB == nil {
+		return nil
+	}
 	if DebugEnabled {
 		SysLog(fmt.Sprintf("Redis DEL: key=%s", key))
 	}
@@ -97,6 +100,9 @@ func RedisDel(key string) error {
 }
 
 func RedisDelKey(key string) error {
+	if RDB == nil {
+		return nil
+	}
 	if DebugEnabled {
 		SysLog(fmt.Sprintf("Redis DEL Key: key=%s", key))
 	}

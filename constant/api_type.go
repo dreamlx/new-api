@@ -60,5 +60,6 @@ const (
 	_                 // 56: reserved
 	_                 // 57: reserved
 	APITypeOspreyAI   // 58
-	APITypeDummy // this one is only for count, do not add any channel after this
+	APITypeHappyHorse // 59
+	APITypeDummy      // this one is only for count, do not add any channel after this
 )

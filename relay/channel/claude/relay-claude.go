@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -354,24 +355,67 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 						if source == nil {
 							continue
 						}
-						base64Data, mimeType, err := service.GetBase64Data(c, source, "formatting image for Claude")
+
+						// Derive MIME type from filename for ContentTypeFile
+						// where ToFileSource() passes an empty mimeType
+						var detectedMimeType string
+						if mediaMessage.Type == dto.ContentTypeFile {
+							if file := mediaMessage.GetFile(); file != nil && file.FileName != "" {
+								if idx := strings.LastIndex(file.FileName, "."); idx >= 0 {
+									ext := file.FileName[idx+1:]
+									detectedMimeType = service.GetMimeTypeByExtension(ext)
+								}
+							}
+						}
+
+						base64Data, mimeType, err := service.GetBase64Data(c, source, "formatting file for Claude")
 						if err != nil {
 							return nil, fmt.Errorf("get file data failed: %s", err.Error())
 						}
-						claudeMediaMessage := dto.ClaudeMediaMessage{
-							Source: &dto.ClaudeMessageSource{
-								Type: "base64",
-							},
-						}
-						if strings.HasPrefix(mimeType, "application/pdf") {
-							claudeMediaMessage.Type = "document"
-						} else {
-							claudeMediaMessage.Type = "image"
+
+						// Use filename-derived MIME if GetBase64Data returned no type or a generic type.
+						if (mimeType == "" || mimeType == "application/octet-stream") && detectedMimeType != "" {
+							mimeType = detectedMimeType
 						}
 
-						claudeMediaMessage.Source.MediaType = mimeType
-						claudeMediaMessage.Source.Data = base64Data
-						claudeMediaMessages = append(claudeMediaMessages, claudeMediaMessage)
+						// Map MIME type to Claude content type
+						if strings.HasPrefix(mimeType, "text/") {
+							decoded, err := base64.StdEncoding.DecodeString(base64Data)
+							if err != nil {
+								return nil, fmt.Errorf("failed to decode text file content: %s", err.Error())
+							}
+							claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
+								Type: "text",
+								Text: common.GetPointer[string](string(decoded)),
+							})
+							continue
+						}
+
+						if strings.HasPrefix(mimeType, "application/pdf") {
+							claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
+								Type: "document",
+								Source: &dto.ClaudeMessageSource{
+									Type:      "base64",
+									MediaType: mimeType,
+									Data:      base64Data,
+								},
+							})
+							continue
+						}
+
+						if strings.HasPrefix(mimeType, "image/") {
+							claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
+								Type: "image",
+								Source: &dto.ClaudeMessageSource{
+									Type:      "base64",
+									MediaType: mimeType,
+									Data:      base64Data,
+								},
+							})
+							continue
+						}
+
+						// Unsupported file type — skip
 						continue
 					}
 				}

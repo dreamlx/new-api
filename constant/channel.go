@@ -56,7 +56,8 @@ const (
 	ChannelTypeReplicate      = 56
 	ChannelTypeCodex          = 57
 	ChannelTypeOspreyAI       = 58
-	ChannelTypeDummy          // this one is only for count, do not add any channel after this
+	ChannelTypeHappyHorse     = 59
+	ChannelTypeDummy          = 60 // this one is only for count, do not add any channel after this
 
 )
 
@@ -120,6 +121,8 @@ var ChannelBaseURLs = []string{
 	"https://api.replicate.com",                 //56
 	"https://chatgpt.com",                       //57
 	"",                                          //58 OspreyAI (base URL configured per instance)
+	"https://dashscope.aliyuncs.com",            //59 HappyHorse
+	"",                                          //60 Dummy
 }
 
 var ChannelTypeNames = map[int]string{
@@ -178,6 +181,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeReplicate:      "Replicate",
 	ChannelTypeCodex:          "Codex",
 	ChannelTypeOspreyAI:       "OspreyAI",
+	ChannelTypeHappyHorse:     "HappyHorse",
 }
 
 func GetChannelTypeName(channelType int) string {
