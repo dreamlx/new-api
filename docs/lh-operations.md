@@ -321,12 +321,23 @@ PG `pg_data` 是 named volume，跨 `docker compose down` 保留。除非显式 
 
 ### 7.1 Admin 密码重置
 
-```bash
-# 生成 bcrypt hash
-ssh root@172.235.205.45 "htpasswd -bnBC 10 '' '<new_pass>' | tr -d ':\n' | sed 's/\\\$2y/\\\$2a/'"
+SSH 到 canary 后两步：
 
-# 写入 PG
-ssh root@172.235.205.45 "docker exec -i postgres psql -U root -d new-api -c \"UPDATE users SET password='<bcrypt_hash>' WHERE username='admin';\""
+```bash
+# Step 1: 生成 bcrypt hash（注意：单引号包密码避免 shell 解释；$2y -> $2a 是 Go bcrypt 兼容性需要）
+HASH=$(htpasswd -bnBC 10 '' 'NEW_PASSWORD_HERE' | tr -d ':\n' | sed 's/\$2y/\$2a/')
+echo "$HASH"
+
+# Step 2: 写入 PG（$HASH 在双引号内会展开，PG 内嵌单引号包字符串）
+docker exec -i postgres psql -U root -d new-api -c "UPDATE users SET password='$HASH' WHERE username='admin';"
+```
+
+Verify：用新密码 curl login：
+```bash
+curl -c /tmp/test.txt -X POST -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"NEW_PASSWORD_HERE"}' \
+  http://localhost:3001/api/user/login
+# expected: {"success":true,...}
 ```
 
 ### 7.2 创建 system token
@@ -413,8 +424,8 @@ API 拉权威列表：`GET /api/channel/?p=0&page_size=20` + `Authorization` + `
 /root/new-api/               # docker-compose root
   ├── docker-compose.yml     # compose config（include LH network attach）
   ├── docker-compose.yml.bak-*  # 历次 backup
-  ├── .session_secret.txt    # SESSION_SECRET (chmod 600)
-  ├── .admin_pass.txt        # 早期 reset 时密码备份（已过期）
+  ├── .session_secret.txt    # SESSION_SECRET (chmod 600) — 在 compose env 引用
+  ├── .admin_pass.txt        # ⚠️ 文件内容已过期；**当前密码见 memory/canary_new_api_credentials.md**，不要从这里读
   ├── data/                  # new-api persistent data
   └── logs/                  # new-api app logs
 /root/new-api-pg-backup-*.sql # PG dumps
