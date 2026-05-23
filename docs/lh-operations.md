@@ -198,6 +198,29 @@ docker exec -i postgres psql -U root -d new-api -c "SELECT version();"
 docker exec -i postgres psql -U root -d new-api -c "\dt" | head -20
 ```
 
+### 4.5 Channel health 自动监测
+
+每 5 分钟 cron 跑 `/root/new-api/scripts/channel_health_check.sh`，直接查 PG `channels` 表 status 列（不烧上游 channel test 成本），仅在 status 变化时往 `/var/log/channel-health.log` 写一行结构化 log：
+
+```
+2026-05-23T15:21:17+00:00 CHANNEL_STATE_CHANGE id=4 name=C1-deepseek-v4-pro-primary enabled -> manual-disabled response_time=1567ms
+```
+
+监测范围：LH 集成 channel 仅（id 3, 4, 5, 6）。状态值：
+- `1=enabled` 正常
+- `2=manual-disabled` ops 手动禁用
+- `3=auto-disabled` new-api 因连续失败自动禁用（**这条是真实告警信号**）
+
+**LH 侧的工作**：tail 这个 log file，匹配 `auto-disabled` 模式触发飞书/邮件告警。new-api 这边只负责检测，不做投递。
+
+State 持久化在 `/var/lib/new-api-monitor/channel-{id}.txt`。
+
+**手工跑**：
+```bash
+/root/new-api/scripts/channel_health_check.sh
+# (only prints if state changed since last run)
+```
+
 ---
 
 ## 5. 日志查询
@@ -226,19 +249,23 @@ docker exec -i postgres psql -U root -d new-api -c \
   "SELECT * FROM logs WHERE user_id = (SELECT id FROM users WHERE external_user_id='<orgId>') ORDER BY created_at DESC LIMIT 20;"
 ```
 
-### 5.3 Log retention（D6 配置后）
+### 5.3 Log retention
 
-docker daemon log-opts（计划写入 `/etc/docker/daemon.json`）：
-```json
-{
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "100m",
-    "max-file": "10"
-  }
-}
+`new-api` container 已配 compose 级 logging（`/root/new-api/docker-compose.yml` 的 `services.new-api.logging`）：
+
+```yaml
+logging:
+  driver: json-file
+  options:
+    max-size: "100m"
+    max-file: "10"
 ```
-→ 单容器最多 1 GB 日志，约 1-3 个月保留期。
+
+→ 单容器最多 1 GB docker engine 日志，约 1-3 个月保留期。**远超 LH §4.4 14 天要求**。
+
+Verify: `docker inspect new-api --format '{{json .HostConfig.LogConfig}}'`
+
+> postgres / redis 容器没配 rotation（log 量小，目前不必要）。如未来需要：在 compose 对应 service 加同样 `logging:` 块。
 
 ---
 
@@ -246,14 +273,18 @@ docker daemon log-opts（计划写入 `/etc/docker/daemon.json`）：
 
 ### 6.1 PG 备份
 
-**当前最新备份**：`/root/new-api-pg-backup-20260512-065630.sql`（320K，pre-LH-customizations 状态）
+**自动备份**：每日 02:00 UTC cron 跑 `/root/new-api/scripts/pg_backup.sh`，输出 `/root/new-api-pg-backup-YYYYMMDD-HHMMSS.sql.gz`（chmod 600），保留 30 天后自动删除。日志在 `/var/log/pg-backup.log`。
 
-**手工备份**：
+**手工触发**：
 ```bash
-docker exec -i postgres pg_dumpall -U root > /root/new-api-pg-backup-$(date +%Y%m%d-%H%M%S).sql
+/root/new-api/scripts/pg_backup.sh
 ```
 
-**D6 计划添加 cron**（每日 02:00 自动备份 + 保留 30 天）。
+**Verify cron 装好**：
+```bash
+crontab -l | grep pg_backup
+# 0 2 * * * /root/new-api/scripts/pg_backup.sh >> /var/log/pg-backup.log 2>&1
+```
 
 ### 6.2 PG 恢复
 
