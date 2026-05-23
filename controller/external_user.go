@@ -781,6 +781,7 @@ func GetExternalUserLogs(c *gin.Context) {
 			"token_key":   tokenKey,
 			"token_name":  tokenName,
 			"token_id":    tokenId,
+			"channel_id":  log.ChannelId,
 			"tokens":      tokens,
 			"prompt_tokens":     log.PromptTokens,
 			"completion_tokens": log.CompletionTokens,

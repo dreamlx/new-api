@@ -280,6 +280,7 @@ func V2GetPlatformLogs(c *gin.Context) {
 			"token_id":          log.TokenId,
 			"token_key":         tokenKey,
 			"model_name":        log.ModelName,
+			"channel_id":        log.ChannelId,
 			"prompt_tokens":     log.PromptTokens,
 			"completion_tokens": log.CompletionTokens,
 			"total_tokens":      log.PromptTokens + log.CompletionTokens,
