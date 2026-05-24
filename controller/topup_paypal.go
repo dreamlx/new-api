@@ -318,7 +318,7 @@ func completePayPalOrder(referenceID string, amount float64, currency string, ev
 	})
 
 	// 尝试完成订阅订单（如果存在）
-	if err := model.CompleteSubscriptionOrder(referenceID, payloadStr); err == nil {
+	if err := model.CompleteSubscriptionOrder(referenceID, payloadStr, "paypal"); err == nil {
 		log.Printf("PayPal 订阅订单完成成功: trade_no=%s event=%s\n", referenceID, event)
 		return nil
 	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
@@ -343,7 +343,7 @@ func completePayPalOrder(referenceID string, amount float64, currency string, ev
 		return err
 	}
 
-	if err := model.Recharge(referenceID, ""); err != nil {
+	if err := model.RechargePayPal(referenceID, ""); err != nil {
 		log.Println("充值失败:", err.Error(), referenceID)
 		return err
 	}
