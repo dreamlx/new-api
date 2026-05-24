@@ -298,12 +298,8 @@ func TokenAuth() func(c *gin.Context) {
 			key = parts[0]
 		} else {
 			key = strings.TrimPrefix(key, "sk-")
-			if strings.HasPrefix(key, "wisemodel-") {
-				parts = []string{key} // 不切割，保留完整 wisemodel key
-			} else {
-				parts = strings.Split(key, "-")
-				key = parts[0]
-			}
+			parts = strings.Split(key, "-")
+			key = parts[0]
 		}
 		token, err := model.ValidateUserToken(key)
 		if token != nil {

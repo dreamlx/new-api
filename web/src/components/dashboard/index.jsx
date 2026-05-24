@@ -83,7 +83,6 @@ const Dashboard = () => {
     dashboardData.performanceMetrics,
     dashboardData.navigate,
     dashboardData.t,
-    dashboardData.wisemodelStat,
     dashboardData.isAdminUser,
   );
 
@@ -105,7 +104,6 @@ const Dashboard = () => {
     });
     await loadUserData();
     await dashboardData.loadUptimeData();
-    await dashboardData.loadWisemodelStats();
   };
 
   const handleRefresh = async () => {

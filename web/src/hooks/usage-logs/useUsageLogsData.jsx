@@ -107,8 +107,6 @@ export const useLogsData = () => {
     channel: '',
     group: '',
     request_id: '',
-    wisemodel_package_id: '',
-    is_wisemodel: false,
     dateRange: [
       timestamp2string(getTodayStartTimestamp()),
       timestamp2string(now.getTime() / 1000 + 3600),
@@ -116,17 +114,8 @@ export const useLogsData = () => {
     logType: '0',
   };
 
-  // Read deep link params from URL on mount
   if (!initializedRef.current) {
     initializedRef.current = true;
-    const wisemodelPackageId = searchParams.get('wisemodel_package_id');
-    const isWisemodel = searchParams.get('is_wisemodel') === 'true';
-    if (wisemodelPackageId) {
-      formInitValues.wisemodel_package_id = wisemodelPackageId;
-    }
-    if (isWisemodel) {
-      formInitValues.is_wisemodel = true;
-    }
   }
 
   // Get default column visibility based on user role
@@ -278,8 +267,6 @@ export const useLogsData = () => {
       channel: formValues.channel || '',
       group: formValues.group || '',
       request_id: formValues.request_id || '',
-      wisemodel_package_id: formValues.wisemodel_package_id || '',
-      is_wisemodel: formValues.is_wisemodel || false,
       logType: formValues.logType ? parseInt(formValues.logType) : 0,
     };
   };
@@ -292,14 +279,12 @@ export const useLogsData = () => {
       start_timestamp,
       end_timestamp,
       group,
-      wisemodel_package_id,
-      is_wisemodel,
       logType: formLogType,
     } = getFormValues();
     const currentLogType = formLogType !== undefined ? formLogType : logType;
     let localStartTimestamp = Date.parse(start_timestamp) / 1000;
     let localEndTimestamp = Date.parse(end_timestamp) / 1000;
-    let url = `/api/log/self/stat?type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}&wisemodel_package_id=${wisemodel_package_id}&is_wisemodel=${is_wisemodel}`;
+    let url = `/api/log/self/stat?type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}`;
     url = encodeURI(url);
     let res = await API.get(url);
     const { success, message, data } = res.data;
@@ -319,14 +304,12 @@ export const useLogsData = () => {
       end_timestamp,
       channel,
       group,
-      wisemodel_package_id,
-      is_wisemodel,
       logType: formLogType,
     } = getFormValues();
     const currentLogType = formLogType !== undefined ? formLogType : logType;
     let localStartTimestamp = Date.parse(start_timestamp) / 1000;
     let localEndTimestamp = Date.parse(end_timestamp) / 1000;
-    let url = `/api/log/stat?type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&wisemodel_package_id=${wisemodel_package_id}&is_wisemodel=${is_wisemodel}`;
+    let url = `/api/log/stat?type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}`;
     url = encodeURI(url);
     let res = await API.get(url);
     const { success, message, data } = res.data;
@@ -762,8 +745,6 @@ export const useLogsData = () => {
       channel,
       group,
       request_id,
-      wisemodel_package_id,
-      is_wisemodel,
       logType: formLogType,
     } = getFormValues();
 
@@ -777,9 +758,9 @@ export const useLogsData = () => {
     let localStartTimestamp = Date.parse(start_timestamp) / 1000;
     let localEndTimestamp = Date.parse(end_timestamp) / 1000;
     if (isAdminUser) {
-      url = `/api/log/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&request_id=${request_id}&wisemodel_package_id=${wisemodel_package_id}&is_wisemodel=${is_wisemodel}`;
+      url = `/api/log/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&username=${username}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&channel=${channel}&group=${group}&request_id=${request_id}`;
     } else {
-      url = `/api/log/self/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}&request_id=${request_id}&wisemodel_package_id=${wisemodel_package_id}&is_wisemodel=${is_wisemodel}`;
+      url = `/api/log/self/?p=${startIdx}&page_size=${pageSize}&type=${currentLogType}&token_name=${token_name}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&group=${group}&request_id=${request_id}`;
     }
     url = encodeURI(url);
     const res = await API.get(url);

@@ -21,9 +21,7 @@ func GetAllLogs(c *gin.Context) {
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
 	requestId := c.Query("request_id")
-	wisemodelPackageId := c.Query("wisemodel_package_id")
-	isWisemodel, _ := strconv.ParseBool(c.Query("is_wisemodel"))
-	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId, wisemodelPackageId, isWisemodel)
+	logs, total, err := model.GetAllLogs(logType, startTimestamp, endTimestamp, modelName, username, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), channel, group, requestId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -104,9 +102,7 @@ func GetLogsStat(c *gin.Context) {
 	modelName := c.Query("model_name")
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
-	wisemodelPackageId := c.Query("wisemodel_package_id")
-	isWisemodel, _ := strconv.ParseBool(c.Query("is_wisemodel"))
-	stat, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, wisemodelPackageId, isWisemodel)
+	stat, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -134,9 +130,7 @@ func GetLogsSelfStat(c *gin.Context) {
 	modelName := c.Query("model_name")
 	channel, _ := strconv.Atoi(c.Query("channel"))
 	group := c.Query("group")
-	wisemodelPackageId := c.Query("wisemodel_package_id")
-	isWisemodel, _ := strconv.ParseBool(c.Query("is_wisemodel"))
-	quotaNum, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group, wisemodelPackageId, isWisemodel)
+	quotaNum, err := model.SumUsedQuota(logType, startTimestamp, endTimestamp, modelName, username, tokenName, channel, group)
 	if err != nil {
 		common.ApiError(c, err)
 		return

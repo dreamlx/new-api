@@ -304,7 +304,6 @@ PYROSCOPE_BLOCK_RATE=5
 |---|---|---|
 | `SESSION_SECRET` | `random_string` | Session 加密密钥，**生产环境必须修改为随机长字符串** |
 | `CRYPTO_SECRET` | （继承 `SESSION_SECRET`）| 敏感数据加密密钥，建议单独设置 |
-| `WISEMODEL_API_TOKEN` | （空）| WiseModel 外部 API 的 Bearer Token 认证 |
 | `TLS_INSECURE_SKIP_VERIFY` | `false` | 跳过 TLS 验证，**仅用于本地测试** |
 | `TRUSTED_REDIRECT_DOMAINS` | （空）| 允许支付回调重定向的可信域名 |
 | `NOTIFY_LIMIT_COUNT` | `2` | 通知发送频率上限（次数）|

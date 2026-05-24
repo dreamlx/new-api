@@ -120,25 +120,6 @@ const LogsFilters = ({
                 pure
                 size='small'
               />
-
-              {/* === 外部对接平台过滤区（未来新增对接方在此追加子块）=== */}
-              {/* --- WiseModel --- */}
-              <Form.Checkbox
-                field='is_wisemodel'
-                noLabel
-                size='small'
-              >
-                {t('仅 WiseModel 用户')}
-              </Form.Checkbox>
-
-              <Form.Input
-                field='wisemodel_package_id'
-                prefix={<IconSearch />}
-                placeholder={t('WiseModel 资源包 ID')}
-                showClear
-                pure
-                size='small'
-              />
             </>
           )}
         </div>
