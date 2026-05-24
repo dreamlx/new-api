@@ -24,6 +24,10 @@ plans
 !docs/superpowers/plans/
 .claude
 .worktrees/
+.aim
+.serena
+.pid
+new-api-test
 
 electron/node_modules
 electron/dist

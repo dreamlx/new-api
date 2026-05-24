@@ -1,9 +1,0 @@
-{"type":"_aim","source":"mcp-knowledge-graph"}
-{"type":"entity","name":"New API Makefile","entityType":"development_tool","observations":["完善的Makefile系统支持从开发到生产的完整工作流","使用.env.dev配置文件优先级，回退到默认配置","支持前台开发模式和后台部署模式","集成Docker数据库服务(MySQL+Redis)","包含自动化测试脚本和API验证","提供数据库备份、重置等运维功能","支持前端构建(bun/npm)和Docker镜像构建","一键启动命令: make dev","生产部署: make build-backend && make prod","测试验证: make test-api && make test-user-story"]}
-{"type":"entity","name":"开发环境配置","entityType":"development_environment","observations":["操作系统: macOS (OSX)","Shell环境: zsh (但通过Bash工具调用命令)","Docker不可用 (需要依赖本地安装的数据库)","MySQL服务运行但不在配置的端口3307","开发工具链: Go + Gin + SQLite测试环境","需要处理shell兼容性问题 (zsh vs Bash语法差异)","环境变量加载需要特殊处理 (避免zsh解析错误)","文件路径使用绝对路径确保兼容性"]}
-{"type":"entity","name":"V2 API集成测试完成","entityType":"milestone","observations":["V2外部系统集成API开发完成","9项集成测试全部通过","授权计费网关模式功能正常","密钥授权和平台日志查询功能验证成功"]}
-{"type":"entity","name":"V1与V2 API共存兼容性验证","entityType":"test_result","observations":["V1 API端点正常工作","V2 API端点正常工作","路由无冲突","可以同时提供服务"]}
-{"type":"entity","name":"开发环境配置优化","entityType":"configuration","observations":["使用zsh环境","SQLite数据库配置","环境变量管理优化","测试脚本路径修复完成"]}
-{"type":"relation","from":"New API Makefile","to":"V2 外部系统集成 API","relationType":"provides_development_environment"}
-{"type":"relation","from":"New API Makefile","to":"外部用户系统集成","relationType":"supports_testing"}
-{"type":"relation","from":"New API Makefile","to":"New API 项目架构","relationType":"manages_build_process"}
