@@ -100,7 +100,7 @@ func GetTopUpInfo(c *gin.Context) {
 	}
 
 	// 如果启用了 PayPal 支付，添加到支付方法列表
-	if setting.PayPalClientId != "" && setting.PayPalClientSecret != "" {
+	if isPayPalTopUpEnabled() {
 		hasPayPal := false
 		for _, method := range payMethods {
 			if method["type"] == "paypal" {
@@ -126,9 +126,9 @@ func GetTopUpInfo(c *gin.Context) {
 		"enable_creem_topup":               isCreemTopUpEnabled(),
 		"enable_waffo_topup":               enableWaffo,
 		"enable_waffo_pancake_topup":       enableWaffoPancake,
-		"enable_paypal_topup":              setting.PayPalClientId != "" && setting.PayPalClientSecret != "",
-		"enable_alipay_topup":              setting.AlipayEnabled,
-		"enable_wxpay_topup":               setting.WxpayEnabled,
+		"enable_paypal_topup":              isPayPalTopUpEnabled(),
+		"enable_alipay_topup":              isAlipayTopUpEnabled(),
+		"enable_wxpay_topup":               isWxpayTopUpEnabled(),
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,
