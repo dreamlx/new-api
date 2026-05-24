@@ -90,13 +90,14 @@ func RequestPayPalTopUp(c *gin.Context) {
 
 	// 创建本地充值记录
 	order := &model.TopUp{
-		UserId:        userId,
-		Amount:        req.Amount,
-		Money:         money,
-		TradeNo:       referenceId,
-		PaymentMethod: PaymentMethodPayPal,
-		CreateTime:    time.Now().Unix(),
-		Status:        common.TopUpStatusPending,
+		UserId:          userId,
+		Amount:          req.Amount,
+		Money:           money,
+		TradeNo:         referenceId,
+		PaymentMethod:   PaymentMethodPayPal,
+		PaymentProvider: model.PaymentProviderPayPal,
+		CreateTime:      time.Now().Unix(),
+		Status:          common.TopUpStatusPending,
 	}
 	if err := order.Insert(); err != nil {
 		log.Printf("创建 PayPal 本地充值订单失败: user_id=%d trade_no=%s err=%v\n", userId, referenceId, err)
@@ -318,7 +319,7 @@ func completePayPalOrder(referenceID string, amount float64, currency string, ev
 	})
 
 	// 尝试完成订阅订单（如果存在）
-	if err := model.CompleteSubscriptionOrder(referenceID, payloadStr, "paypal"); err == nil {
+	if err := model.CompleteSubscriptionOrder(referenceID, payloadStr, model.PaymentProviderPayPal, ""); err == nil {
 		log.Printf("PayPal 订阅订单完成成功: trade_no=%s event=%s\n", referenceID, event)
 		return nil
 	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
