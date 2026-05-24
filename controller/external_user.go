@@ -135,27 +135,46 @@ func SyncExternalUser(c *gin.Context) {
 		Quota:         common.QuotaForNewUser,
 	}
 	user.SetExternalUserId(req.ExternalUserId)
-	if req.AffCode != "" {
+	userProvidedAffCode := req.AffCode != ""
+	if userProvidedAffCode {
 		user.AffCode = req.AffCode
-	} else {
-		user.AffCode = common.GetRandomString(4)
 	}
 
-	if err := model.DB.Create(user).Error; err != nil {
+	// Retry on aff_code collision when auto-generating (4-char random has limited space).
+	// User-provided AffCode is honored as-is — collision returns a clear error instead of silently overriding.
+	var createErr error
+	for i := 0; i < 5; i++ {
+		if !userProvidedAffCode {
+			user.AffCode = common.GetRandomString(4)
+		}
+		createErr = model.DB.Create(user).Error
+		if createErr == nil {
+			break
+		}
+		errMsg := createErr.Error()
+		isAffCodeDup := strings.Contains(errMsg, "aff_code") &&
+			(strings.Contains(errMsg, "Duplicate entry") ||
+				strings.Contains(errMsg, "UNIQUE constraint failed") ||
+				strings.Contains(errMsg, "duplicate key"))
+		if userProvidedAffCode || !isAffCodeDup {
+			break
+		}
+	}
+	if createErr != nil {
 		errorMsg := "创建用户失败"
-		if strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			if strings.Contains(err.Error(), "username") {
+		if strings.Contains(createErr.Error(), "Duplicate entry") || strings.Contains(createErr.Error(), "UNIQUE constraint failed") {
+			if strings.Contains(createErr.Error(), "username") {
 				errorMsg = "用户名已存在，请使用其他用户名"
-			} else if strings.Contains(err.Error(), "email") {
+			} else if strings.Contains(createErr.Error(), "email") {
 				errorMsg = "邮箱已被使用，请使用其他邮箱"
-			} else if strings.Contains(err.Error(), "aff_code") {
+			} else if strings.Contains(createErr.Error(), "aff_code") {
 				errorMsg = "推荐码已被使用，请使用其他推荐码"
 			}
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success":      false,
 			"message":      errorMsg,
-			"error_detail": err.Error(),
+			"error_detail": createErr.Error(),
 		})
 		return
 	}
