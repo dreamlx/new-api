@@ -22,6 +22,10 @@ tiktoken_cache
 web/bun.lock
 plans
 .claude
+.aim
+.serena
+.pid
+new-api-test
 
 electron/node_modules
 electron/dist
