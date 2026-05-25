@@ -115,6 +115,17 @@ func main() {
 
 	go controller.AutomaticallyTestChannels()
 
+	// Wisemodel 过期资源包 quota 回收（每5分钟扫描一次）
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := model.ReclaimAllExpiredPackages(); err != nil {
+				common.SysError("ReclaimAllExpiredPackages failed: " + err.Error())
+			}
+		}
+	}()
+
 	// Alipay / WeChat Pay expiry sweep cron.
 	// Gated on IsMasterNode so multi-replica deployments only run the
 	// sweep on a single instance (matches the existing convention used

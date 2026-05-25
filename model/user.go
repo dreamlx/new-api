@@ -63,6 +63,7 @@ type User struct {
 	LoginType      string  `json:"login_type" gorm:"type:varchar(20);column:login_type;default:'email'"`
 	IsExternal     bool    `json:"is_external" gorm:"default:false"`
 	ExternalData   string  `json:"external_data" gorm:"type:text;column:external_data"`
+	WisemodelKey   string  `json:"wisemodel_key" gorm:"type:varchar(100);column:wisemodel_key;index"`
 }
 
 // GetExternalUserId returns the external user identifier without triggering any database access.
@@ -82,7 +83,7 @@ func (user *User) SetExternalUserId(externalUserId string) {
 	user.ExternalUserId = &externalUserId
 }
 
-// GetUserByPhone returns user by phone number (used by external user integration).
+// GetUserByPhone returns user by phone number (used by WiseModel integration).
 func GetUserByPhone(phone string) *User {
 	if phone == "" {
 		return nil
@@ -264,7 +265,7 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	return users, total, nil
 }
 
-func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, int64, error) {
+func SearchUsers(keyword string, group string, downstream string, startIdx int, num int) ([]*User, int64, error) {
 	var users []*User
 	var total int64
 	var err error
@@ -307,6 +308,11 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 			query = query.Where(likeCondition,
 				"%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 		}
+	}
+
+	// 下游平台过滤
+	if downstream == "wisemodel" {
+		query = query.Where("wisemodel_key != ''")
 	}
 
 	// 获取总数

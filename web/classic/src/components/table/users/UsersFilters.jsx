@@ -88,6 +88,25 @@ const UsersFilters = ({
             size='small'
           />
         </div>
+        <div className='w-full md:w-48'>
+          <Form.Select
+            field='searchDownstream'
+            placeholder={t('选择下游平台')}
+            optionList={[
+              { label: t('全部'), value: '' },
+              { label: 'WiseModel', value: 'wisemodel' },
+            ]}
+            onChange={() => {
+              setTimeout(() => {
+                searchUsers(1, pageSize);
+              }, 100);
+            }}
+            className='w-full'
+            showClear
+            pure
+            size='small'
+          />
+        </div>
         <div className='flex gap-2 w-full md:w-auto'>
           <Button
             type='tertiary'

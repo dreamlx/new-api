@@ -261,8 +261,8 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
-	// Migrate users.quota INT → BIGINT to support large quota values.
-	if err := migrateUserQuotaToBigint(); err != nil {
+	// Migrate INT columns to BIGINT to support large wisemodel point/quota values
+	if err := migrateWisemodelIntsToBigint(); err != nil {
 		return err
 	}
 
@@ -292,6 +292,7 @@ func migrateDB() error {
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
+		&WisemodelPackage{},
 	)
 	if err != nil {
 		return err
@@ -590,11 +591,14 @@ func migrateSubscriptionPlanPriceAmount() {
 	}
 }
 
-// migrateUserQuotaToBigint upgrades users.quota from INT to BIGINT to support large quota values.
+// migrateWisemodelIntsToBigint upgrades INT columns that may overflow for large wisemodel point values:
+//   - users.quota
+//   - wisemodel_packages.original_points
+//   - wisemodel_packages.original_tokens
 //
 // SQLite uses dynamic INTEGER (up to 64-bit) so no change is needed.
 // AutoMigrate does not alter column types for existing tables, so this must run explicitly.
-func migrateUserQuotaToBigint() error {
+func migrateWisemodelIntsToBigint() error {
 	if common.UsingSQLite {
 		return nil // SQLite INTEGER is already 64-bit
 	}
@@ -605,6 +609,8 @@ func migrateUserQuotaToBigint() error {
 	}
 	cols := []colSpec{
 		{"users", "quota"},
+		{"wisemodel_packages", "original_points"},
+		{"wisemodel_packages", "original_tokens"},
 	}
 
 	for _, c := range cols {

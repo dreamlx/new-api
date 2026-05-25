@@ -33,6 +33,7 @@ manual()  {
 BASE_URL="${BASE_URL:-http://localhost:3000}"
 ADMIN_TOKEN="${ADMIN_TOKEN:-}"
 RELAY_TOKEN="${RELAY_TOKEN:-}"              # 用于中继请求的 sk-xxx Token
+WISEMODEL_API_TOKEN="${WISEMODEL_API_TOKEN:-}"
 RELAY_MODEL="${RELAY_MODEL:-gpt-3.5-turbo}"
 
 # ── 检查依赖 ──────────────────────────────────────────────────────────────────
