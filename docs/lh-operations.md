@@ -6,15 +6,9 @@ Ops 手册：canary 期间 + cutover 后 production 的部署、监控、日志�
 
 > **⚠️ Canary compose 不在 git — 以本 runbook 为准**
 >
-> 仓库根的 `docker-compose.yml` 是 upstream Calcium-Ion/new-api 通用模板（`3000:3000` 单端口、单网络、无 LH 集成 env vars），**不是** canary 实际跑的版本。
+> 仓库根 `docker-compose.yml` 是 upstream Calcium-Ion/new-api 通用模板，**不是** canary 实际跑的版本。Canary `/root/new-api/docker-compose.yml` 是 ops 手 maintained 的 LH 特化版，cutover 前后状态不同，详见 §1（架构 + 端口）/ §3（cutover SOP）/ §8（known gotchas）。
 >
-> Canary `/root/new-api/docker-compose.yml` 是 ops 手 maintained 的 LH 特化版：
-> - `100.89.8.49:3001:3000`（Tailscale-bound publish；cutover 前是 `0.0.0.0:3001:3000`）
-> - 双网络挂载 `new-api_new-api-network` + `lh-enterprise_default`
-> - postgres 加 `new-api-postgres` alias 避免与 LH stack 的 `postgres` alias DNS 冲突（详见 §8）
-> - LH 集成相关 env vars（散见 §2 部署 SOP 与 §8 known gotchas）
->
-> 新部署或灾备重建时，**不要直接套仓库版本**，按本 runbook §2 / §3 配置。未来如果决定把 LH 版 compose 入 git，单独开 ADR 讨论 fork 策略。
+> 新部署或灾备重建：**不要直接套仓库版**，按本 runbook §2 / §3 配置。未来如要把 LH 版 compose 入 git，单独开 ADR 讨论 fork 策略。
 
 ---
 
@@ -35,18 +29,22 @@ Ops 手册：canary 期间 + cutover 后 production 的部署、监控、日志�
 
 ### 1.1 容器拓扑
 
-| Container | Image | Role | Network |
-|---|---|---|---|
-| `new-api` | `new-api:lh-main` | 主服务 | `new-api_new-api-network` + `lh-enterprise_default` |
-| `postgres` | `postgres:15` | new-api 自己的 DB（alias: `postgres`, `new-api-postgres`）| `new-api_new-api-network` |
-| `redis` | `redis:latest` | 缓存 | `new-api_new-api-network` |
-| `lh-enterprise-*` | 外部 LH stack | LH backend / web / postgres | `lh-enterprise_default`（new-api 同主机共存）|
+| Container | Image | Role | Network (cutover 前) | Network (cutover 后) |
+|---|---|---|---|---|
+| `new-api` | `new-api:lh-main` | 主服务 | `new-api-network` | `new-api-network` + `lh-shared` |
+| `postgres` | `postgres:15` | new-api 自己的 DB（alias: `postgres`, `new-api-postgres`）| `new-api-network` | `new-api-network` |
+| `redis` | `redis:latest` | 缓存 | `new-api-network` | `new-api-network` |
+| `lh-enterprise-backend-1` | LH backend | 调用 new-api 的 client | `lh-enterprise_default` | `lh-enterprise_default` + `lh-shared` |
+| `lh-enterprise-{postgres,web}-1` | LH 其他组件 | DB / web UI | `lh-enterprise_default` | `lh-enterprise_default`（**不进 lh-shared**）|
 
 ### 1.2 网络
 
-- `new-api_new-api-network` (172.18.0.0/16) — new-api 内部 stack（postgres + redis）
-- `lh-enterprise_default` (172.19.0.0/16) — LH stack 网络，new-api **作为成员**接入，LH backend 通过容器名 `new-api` 解析
-- 双网络挂载持久化：`/root/new-api/docker-compose.yml` 的 `networks` 区块
+- `new-api-network`（new-api compose 自动创建）— new-api 内部 stack（postgres + redis）通信
+- `lh-enterprise_default`（LH compose 自动创建）— LH 内部 stack（backend + postgres + web）通信
+- `lh-shared`（external bridge，LH `compose.prod.yml` 声明 `name: lh-shared, driver: bridge`）— **cutover 桥**：LH backend ↔ new-api 跨 stack 通信走这个网络
+  - LH 侧 PR：[dreamlx/lh-enterprise#352](https://github.com/dreamlx/lh-enterprise/pull/352)
+  - new-api 侧 join：见 §3.1 cutover SOP
+  - LH postgres / web **不在 lh-shared 上**（设计上限制跨 stack 服务可见性，只把 backend 这一个 actor 暴露给 new-api）
 
 ### 1.3 端口
 
@@ -119,30 +117,54 @@ PG 数据 rollback 用 backup（见 §6 灾备）。
 
 ### 3.1 ops 侧动作
 
+依赖：LH 侧 [dreamlx/lh-enterprise#352](https://github.com/dreamlx/lh-enterprise/pull/352) 已 merge + LH backend 已 `docker compose up -d` re-create（`lh-shared` 网络物化）。
+
 ```bash
 # 0. 备份当前 compose
 cp /root/new-api/docker-compose.yml /root/new-api/docker-compose.yml.bak-$(date +%Y%m%d-%H%M%S)
 
-# 1. 把 publish 从 0.0.0.0 改到 Tailscale interface
-sed -i 's|0\.0\.0\.0:3001:3000|100.89.8.49:3001:3000|' /root/new-api/docker-compose.yml
-grep '3001:3000' /root/new-api/docker-compose.yml  # 确认只剩 100.89.8.49 这一行
+# 1. 前置 verify
+systemctl is-active tailscaled                          # active
+tailscale ip -4                                         # 100.89.8.49
+docker network inspect lh-shared >/dev/null && echo OK  # LH 侧已物化才能 join
 
-# 2. 前置 verify：Tailscale interface 已 ready（否则 docker bind 会失败）
-systemctl is-active tailscaled    # active
-tailscale ip -4                   # 100.89.8.49
+# 2. 编辑 compose（结构改动，sed 不够，用 vim 或 yq）
+#    diff:
+#      services:
+#        new-api:
+#    -     ports:
+#    -       - "3001:3000"
+#    +     ports:
+#    +       - "100.89.8.49:3001:3000"
+#          networks:
+#            - new-api-network
+#    +       - lh-shared
+#      networks:
+#        new-api-network:
+#    +   lh-shared:
+#    +     external: true
+#    +     name: lh-shared
+vim /root/new-api/docker-compose.yml
 
 # 3. 应用
 cd /root/new-api && docker compose up -d
 
-# 4. 验证公网 :3001 拒接
+# 4. verify listen IP（lockdown evidence）
+ss -tlnp | grep ':3001'
+# expected: 100.89.8.49:3001（NOT 0.0.0.0:3001）
+
+# 5. verify Tailscale 维护通道
+curl -m 5 http://100.89.8.49:3001/api/status
+# 或本地 lh-canary ssh alias：curl -m 5 http://lh-canary:3001/api/status
+# expected: {"success": true, ...}
+
+# 6. verify cross-stack DNS（LH backend ↔ new-api）
+docker exec lh-enterprise-backend-1 getent hosts new-api
+# expected: 172.x.x.x  new-api  （lh-shared 子网 IP）
+
+# 7. verify 公网拒接（从 tailnet 外机器）
 curl -m 5 http://172.235.205.45:3001/api/status
 # expected: Connection refused / timeout
-
-# 5. 验证 Tailscale :3001 通
-curl -m 5 http://100.89.8.49:3001/api/status
-# 或本地（ssh config 有 lh-canary alias）：
-# curl -m 5 http://lh-canary:3001/api/status
-# expected: {"success": true, ...}
 ```
 
 ### 3.2 LH 侧动作（同步）
@@ -429,13 +451,17 @@ curl -c /tmp/test.txt -X POST -H "Content-Type: application/json" \
 
 ## 8. Known gotchas
 
-### 8.1 Postgres DNS collision（已 fix）
+### 8.1 Postgres DNS collision（preemptive defensive，未实际触发）
 
-new-api 容器同时在 `new-api_new-api-network` 和 `lh-enterprise_default` 网络。LH stack 自己的 postgres alias 也是 `postgres`，所以 new-api 的 `SQL_DSN=...@postgres:5432/...` 会解析到 LH 的库（错密码 + TLS required）→ 启动循环。
+**风险**：两个 docker compose stack（new-api + lh-enterprise）各自有 postgres，默认 alias 都叫 `postgres`。若 new-api 与 LH postgres 处于同一网络，new-api 的 `SQL_DSN=...@postgres:5432/...` 可能解析到 LH 的库（错密码 + TLS required）→ 启动循环。
 
-**Fix**: new-api 自己的 postgres 加 unique alias `new-api-postgres`，SQL_DSN 用新 alias。已在 compose 里写死。
+**Cutover 实际**：[lh-enterprise#352](https://github.com/dreamlx/lh-enterprise/pull/352) 只把 LH backend join `lh-shared`，**LH postgres 未 join**，因此 new-api 跟 LH postgres 不会在同一网络，DNS 冲突不会发生。
 
-**踩坑指标**：new-api 启动循环、log 报 `password authentication failed for user "root"` + IP 是 `172.19.0.x`（LH 网络）而不是 `172.18.0.x`（new-api 网络）。
+**仍保留的 defensive 配置**（万一未来 LH 把 postgres 也 join lh-shared）：
+- new-api compose 给自己的 postgres 加 alias `new-api-postgres`
+- `SQL_DSN=postgresql://root:123456@new-api-postgres:5432/new-api`
+
+**踩坑指标**（debug 用）：new-api 启动循环、log 报 `password authentication failed for user "root"` + IP 是 LH 网络段而不是 new-api 网络段。
 
 ### 8.2 SSH fail2ban
 
