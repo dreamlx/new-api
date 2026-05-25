@@ -28,6 +28,18 @@ import zhTWTranslation from './locales/zh-TW.json';
 import ruTranslation from './locales/ru.json';
 import jaTranslation from './locales/ja.json';
 import viTranslation from './locales/vi.json';
+
+// WiseModel extension namespace. Living in its own namespace so future
+// upstream syncs cannot conflict on these UI strings. See
+// extension/wisemodel/init.go and the Phase A refactor commit for rationale.
+import wisemodelEn from './wisemodel-locales/en.json';
+import wisemodelFr from './wisemodel-locales/fr.json';
+import wisemodelZhCN from './wisemodel-locales/zh-CN.json';
+import wisemodelZhTW from './wisemodel-locales/zh-TW.json';
+import wisemodelRu from './wisemodel-locales/ru.json';
+import wisemodelJa from './wisemodel-locales/ja.json';
+import wisemodelVi from './wisemodel-locales/vi.json';
+
 import { supportedLanguages } from './language';
 
 i18n
@@ -36,14 +48,17 @@ i18n
   .init({
     load: 'currentOnly',
     supportedLngs: supportedLanguages,
+    ns: ['translation', 'wisemodel'],
+    defaultNS: 'translation',
+    fallbackNS: 'translation',
     resources: {
-      en: enTranslation,
-      'zh-CN': zhCNTranslation,
-      'zh-TW': zhTWTranslation,
-      fr: frTranslation,
-      ru: ruTranslation,
-      ja: jaTranslation,
-      vi: viTranslation,
+      en: { ...enTranslation, wisemodel: wisemodelEn },
+      'zh-CN': { ...zhCNTranslation, wisemodel: wisemodelZhCN },
+      'zh-TW': { ...zhTWTranslation, wisemodel: wisemodelZhTW },
+      fr: { ...frTranslation, wisemodel: wisemodelFr },
+      ru: { ...ruTranslation, wisemodel: wisemodelRu },
+      ja: { ...jaTranslation, wisemodel: wisemodelJa },
+      vi: { ...viTranslation, wisemodel: wisemodelVi },
     },
     fallbackLng: 'zh-CN',
     nsSeparator: false,

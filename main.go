@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/extension/wisemodel"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
@@ -115,16 +116,9 @@ func main() {
 
 	go controller.AutomaticallyTestChannels()
 
-	// Wisemodel 过期资源包 quota 回收（每5分钟扫描一次）
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			if err := model.ReclaimAllExpiredPackages(); err != nil {
-				common.SysError("ReclaimAllExpiredPackages failed: " + err.Error())
-			}
-		}
-	}()
+	// WiseModel extension: starts the expired package quota reclaim cron
+	// and runs wisemodel_packages BIGINT migration. See extension/wisemodel/init.go.
+	wisemodel.Init()
 
 	// Alipay / WeChat Pay expiry sweep cron.
 	// Gated on IsMasterNode so multi-replica deployments only run the
@@ -315,6 +309,10 @@ func InitResources() error {
 	service.InitHttpClient()
 
 	service.InitTokenEncoders()
+
+	// Register WiseModel extension models for AutoMigrate. Must be called
+	// before model.InitDB() so migrateDB picks up &WisemodelPackage{}.
+	wisemodel.RegisterModels()
 
 	// Initialize SQL Database
 	err = model.InitDB()

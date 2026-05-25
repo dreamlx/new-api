@@ -139,7 +139,7 @@ export const useDashboardStats = (
         color: 'bg-teal-50',
         items: [
           {
-            title: t('WiseModel 消耗额度'),
+            title: t('quota_consumed', { ns: 'wisemodel' }),
             value: renderQuota(wisemodelStat?.quota || 0),
             icon: <IconCoinMoneyStroked />,
             avatarColor: 'teal',
@@ -147,7 +147,7 @@ export const useDashboardStats = (
             trendColor: '#14b8a6',
           },
           {
-            title: t('WiseModel 请求数'),
+            title: t('request_count', { ns: 'wisemodel' }),
             value: (wisemodelStat?.count || 0).toLocaleString(),
             icon: <IconSend />,
             avatarColor: 'cyan',

@@ -128,13 +128,13 @@ const LogsFilters = ({
                 noLabel
                 size='small'
               >
-                {t('仅 WiseModel 用户')}
+                {t('only_users', { ns: 'wisemodel' })}
               </Form.Checkbox>
 
               <Form.Input
                 field='wisemodel_package_id'
                 prefix={<IconSearch />}
-                placeholder={t('WiseModel 资源包 ID')}
+                placeholder={t('package_id_placeholder', { ns: 'wisemodel' })}
                 showClear
                 pure
                 size='small'

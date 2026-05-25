@@ -70,6 +70,19 @@ var DB *gorm.DB
 
 var LOG_DB *gorm.DB
 
+// extraAutoMigrate holds GORM model types registered by extensions
+// (e.g. the wisemodel-main customer branch's WisemodelPackage). Populated
+// by RegisterExtraAutoMigrate() before model.InitDB() runs. Empty on main.
+var extraAutoMigrate []interface{}
+
+// RegisterExtraAutoMigrate appends extension-owned GORM model types to the
+// AutoMigrate set. Call from an extension's wiring (e.g. wisemodel.RegisterModels())
+// BEFORE InitDB runs migrateDB(). The slice is iterated as part of the
+// AutoMigrate call inside migrateDB.
+func RegisterExtraAutoMigrate(targets ...interface{}) {
+	extraAutoMigrate = append(extraAutoMigrate, targets...)
+}
+
 func createRootAccountIfNeed() error {
 	var user User
 	//if user.Status != common.UserStatusEnabled {
@@ -261,12 +274,14 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
-	// Migrate INT columns to BIGINT to support large wisemodel point/quota values
-	if err := migrateWisemodelIntsToBigint(); err != nil {
+	// Migrate users.quota INT → BIGINT to support large quota values.
+	// (Generic improvement; wisemodel_packages.* migration is handled by
+	// extension/wisemodel/init.go on the wisemodel-main customer branch.)
+	if err := migrateUserQuotaToBigint(); err != nil {
 		return err
 	}
 
-	err := DB.AutoMigrate(
+	autoMigrateTargets := []interface{}{
 		&Channel{},
 		&Token{},
 		&User{},
@@ -292,8 +307,11 @@ func migrateDB() error {
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
-		&WisemodelPackage{},
-	)
+	}
+	// Extensions (e.g. wisemodel) may have registered additional model
+	// types via RegisterExtraAutoMigrate before this function ran.
+	autoMigrateTargets = append(autoMigrateTargets, extraAutoMigrate...)
+	err := DB.AutoMigrate(autoMigrateTargets...)
 	if err != nil {
 		return err
 	}
@@ -591,14 +609,17 @@ func migrateSubscriptionPlanPriceAmount() {
 	}
 }
 
-// migrateWisemodelIntsToBigint upgrades INT columns that may overflow for large wisemodel point values:
-//   - users.quota
-//   - wisemodel_packages.original_points
-//   - wisemodel_packages.original_tokens
+// migrateUserQuotaToBigint upgrades users.quota from INT to BIGINT to support
+// large quota values.
 //
 // SQLite uses dynamic INTEGER (up to 64-bit) so no change is needed.
-// AutoMigrate does not alter column types for existing tables, so this must run explicitly.
-func migrateWisemodelIntsToBigint() error {
+// AutoMigrate does not alter column types for existing tables, so this must
+// run explicitly.
+//
+// The wisemodel_packages.* column migration has moved to
+// extension/wisemodel/init.go's migrateWisemodelBigint (only relevant on the
+// wisemodel-main customer branch).
+func migrateUserQuotaToBigint() error {
 	if common.UsingSQLite {
 		return nil // SQLite INTEGER is already 64-bit
 	}
@@ -609,8 +630,6 @@ func migrateWisemodelIntsToBigint() error {
 	}
 	cols := []colSpec{
 		{"users", "quota"},
-		{"wisemodel_packages", "original_points"},
-		{"wisemodel_packages", "original_tokens"},
 	}
 
 	for _, c := range cols {
