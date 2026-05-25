@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -24,7 +25,7 @@ func setupTestDB() *gorm.DB {
 		panic("failed to connect database")
 	}
 
-	db.AutoMigrate(&model.User{}, &model.Token{}, &model.TopUp{}, &model.Log{})
+	db.AutoMigrate(&model.User{}, &model.Token{}, &model.TopUp{}, &model.Log{}, &model.Platform{})
 
 	// Create channels table
 	db.Exec(`CREATE TABLE IF NOT EXISTS channels (
@@ -49,7 +50,12 @@ func ptrExternalUserId(externalUserId string) *string {
 	return &externalUserId
 }
 
-func setupTestRouter() *gin.Engine {
+// setupTestRouter wires a fresh in-memory DB + V1 routes guarded by
+// PlatformAuth, and provisions a default platform whose credentials are
+// auto-injected into every subsequent doRequest call. Each top-level Test
+// function calls this once at the start.
+func setupTestRouter(t *testing.T) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 
@@ -57,8 +63,14 @@ func setupTestRouter() *gin.Engine {
 	model.DB = testDB
 	model.LOG_DB = testDB
 
+	// Provision the default platform for this test scope and arm auto-inject.
+	installDefaultTestPlatform(t, fmt.Sprintf("v1_%s", t.Name()))
+
+	// V1 group is guarded by PlatformAuth in production; mirror that here so
+	// tests cover the realistic request path (including the 401/403 branches).
 	api := router.Group("/api")
 	ext := api.Group("/user/external")
+	ext.Use(middleware.PlatformAuth())
 	{
 		ext.POST("/sync", SyncExternalUser)
 		ext.POST("/topup", ExternalUserTopUp)
@@ -73,9 +85,13 @@ func setupTestRouter() *gin.Engine {
 		ext.DELETE("/:external_user_id", DeleteExternalUser)
 	}
 
+	t.Cleanup(resetDefaultTestPlatform)
 	return router
 }
 
+// doRequest auto-injects defaultTestPlatformHeaders if installDefaultTestPlatform
+// has been called for this test. Use doRequestNoAuth (see test helpers) to
+// explicitly skip the headers for negative-path (401) tests.
 func doRequest(router *gin.Engine, method, path string, body interface{}) *httptest.ResponseRecorder {
 	var buf *bytes.Buffer
 	if body != nil {
@@ -86,6 +102,9 @@ func doRequest(router *gin.Engine, method, path string, body interface{}) *httpt
 	}
 	req, _ := http.NewRequest(method, path, buf)
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range defaultTestPlatformHeaders {
+		req.Header.Set(k, v)
+	}
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	return w
@@ -101,7 +120,7 @@ func parseResponse(t *testing.T, w *httptest.ResponseRecorder) map[string]interf
 // ==================== Sync ====================
 
 func TestSyncExternalUser(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	tests := []struct {
 		name       string
@@ -147,7 +166,7 @@ func TestSyncExternalUser(t *testing.T) {
 // ==================== TopUp ====================
 
 func TestTopupExternalUser(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "topup_user", Email: "topup@test.com",
@@ -192,7 +211,7 @@ func TestTopupExternalUser(t *testing.T) {
 // ==================== Deduct ====================
 
 func TestExternalUserDeduct(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "deduct_user", Email: "deduct@test.com",
@@ -250,7 +269,7 @@ func TestExternalUserDeduct(t *testing.T) {
 // ==================== Token Create ====================
 
 func TestCreateExternalUserToken(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "token_user", Email: "token@test.com",
@@ -327,7 +346,7 @@ func TestCreateExternalUserToken(t *testing.T) {
 // ==================== Token Delete ====================
 
 func TestDeleteExternalUserToken(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	user := &model.User{
 		Username: "del_token_user", Email: "del_token@test.com",
@@ -375,7 +394,7 @@ func TestDeleteExternalUserToken(t *testing.T) {
 // ==================== Token List ====================
 
 func TestGetExternalUserTokens(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	user := &model.User{
 		Username: "list_user", Email: "list@test.com",
@@ -410,7 +429,7 @@ func TestGetExternalUserTokens(t *testing.T) {
 // ==================== Token Verify ====================
 
 func TestVerifyExternalUserToken(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	user := &model.User{
 		Username: "verify_user", Email: "verify@test.com",
@@ -495,7 +514,7 @@ func TestVerifyExternalUserToken(t *testing.T) {
 // ==================== Stats ====================
 
 func TestGetExternalUserStats(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "stats_user", Email: "stats@test.com",
@@ -516,7 +535,7 @@ func TestGetExternalUserStats(t *testing.T) {
 // ==================== Logs ====================
 
 func TestGetExternalUserLogs(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	user := &model.User{
 		Username: "logs_user", Email: "logs@test.com",
@@ -549,7 +568,7 @@ func TestGetExternalUserLogs(t *testing.T) {
 // ==================== Models ====================
 
 func TestGetExternalUserModels(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 	w := doRequest(router, "GET", "/api/user/external/models", nil)
 	assert.Equal(t, 200, w.Code)
 
@@ -562,7 +581,7 @@ func TestGetExternalUserModels(t *testing.T) {
 // ==================== Delete User ====================
 
 func TestDeleteExternalUser(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	user := &model.User{
 		Username: "del_user", Email: "del@test.com",
@@ -593,7 +612,7 @@ func TestDeleteExternalUser(t *testing.T) {
 }
 
 func TestDeleteExternalUserThenReregister(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	// Create user
 	w := doRequest(router, "POST", "/api/user/external/sync", map[string]interface{}{
@@ -617,7 +636,7 @@ func TestDeleteExternalUserThenReregister(t *testing.T) {
 // ==================== TopUp Idempotency ====================
 
 func TestTopupIdempotency(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "idempotent_user", Email: "idempotent@test.com",
@@ -651,7 +670,7 @@ func TestTopupIdempotency(t *testing.T) {
 // ==================== Token Delete Refund ====================
 
 func TestDeleteExternalUserTokenNoRefund(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	initialQuota := 20000000
 	user := &model.User{
@@ -693,7 +712,7 @@ func TestDeleteExternalUserTokenNoRefund(t *testing.T) {
 // ==================== Token with ModelLimits ====================
 
 func TestCreateExternalUserTokenWithModelLimits(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "ml_user", Email: "ml@test.com",
@@ -742,7 +761,7 @@ func TestCreateExternalUserTokenWithModelLimits(t *testing.T) {
 // ==================== Token with Group ====================
 
 func TestCreateExternalUserTokenWithGroup(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "grp_user", Email: "grp@test.com",
@@ -782,7 +801,7 @@ func TestCreateExternalUserTokenWithGroup(t *testing.T) {
 // ==================== Models with Group ====================
 
 func TestGetExternalUserModelsWithGroup(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	t.Run("默认分组", func(t *testing.T) {
 		w := doRequest(router, "GET", "/api/user/external/models", nil)
@@ -805,7 +824,7 @@ func TestGetExternalUserModelsWithGroup(t *testing.T) {
 // ==================== Unlimited Quota Token ====================
 
 func TestCreateExternalUserTokenUnlimitedQuota(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	initialQuota := 10000000
 	model.DB.Create(&model.User{
