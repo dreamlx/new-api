@@ -123,15 +123,16 @@ func RequestWxpay(c *gin.Context) {
 	now := time.Now().Unix()
 	expireAt := now + wxpayOrderExpireSeconds
 	topUp := &model.TopUp{
-		UserId:         userId,
-		Amount:         amount,
-		Money:          payMoney,
-		TradeNo:        tradeNo,
-		PaymentMethod:  PaymentMethodWxpay,
-		CreateTime:     now,
-		Status:         common.TopUpStatusPending,
-		PayAmountCents: payAmountCents,
-		ExpireTime:     expireAt,
+		UserId:          userId,
+		Amount:          amount,
+		Money:           payMoney,
+		TradeNo:         tradeNo,
+		PaymentMethod:   PaymentMethodWxpay,
+		PaymentProvider: model.PaymentProviderWxpay,
+		CreateTime:      now,
+		Status:          common.TopUpStatusPending,
+		PayAmountCents:  payAmountCents,
+		ExpireTime:      expireAt,
 	}
 	// Insert the local order BEFORE calling NativePrepay so a failed Insert
 	// does not leave an orphan order on WeChat's side. WeChat will not have
