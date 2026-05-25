@@ -4,6 +4,18 @@ Ops 手册：canary 期间 + cutover 后 production 的部署、监控、日志�
 
 适用范围：`lh-main` 分支的 new-api 部署，集成 LH Enterprise backend 的环境。
 
+> **⚠️ Canary compose 不在 git — 以本 runbook 为准**
+>
+> 仓库根的 `docker-compose.yml` 是 upstream Calcium-Ion/new-api 通用模板（`3000:3000` 单端口、单网络、无 LH 集成 env vars），**不是** canary 实际跑的版本。
+>
+> Canary `/root/new-api/docker-compose.yml` 是 ops 手 maintained 的 LH 特化版：
+> - `100.89.8.49:3001:3000`（Tailscale-bound publish；cutover 前是 `0.0.0.0:3001:3000`）
+> - 双网络挂载 `new-api_new-api-network` + `lh-enterprise_default`
+> - postgres 加 `new-api-postgres` alias 避免与 LH stack 的 `postgres` alias DNS 冲突（详见 §8）
+> - LH 集成相关 env vars（散见 §2 部署 SOP 与 §8 known gotchas）
+>
+> 新部署或灾备重建时，**不要直接套仓库版本**，按本 runbook §2 / §3 配置。未来如果决定把 LH 版 compose 入 git，单独开 ADR 讨论 fork 策略。
+
 ---
 
 ## 0. 当前状态速查（2026-05-23）
@@ -12,7 +24,7 @@ Ops 手册：canary 期间 + cutover 后 production 的部署、监控、日志�
 |---|---|
 | Canary host | `172.235.205.45` (Linode 4 vCPU / 8 GB) |
 | new-api 镜像 | `new-api:lh-main`（本机 build，commit a82a6137d）|
-| new-api 公网入口 | `http://172.235.205.45:3001`（canary 期间公网开放，cutover 后切回 loopback）|
+| new-api 入口 | canary 期间：`http://172.235.205.45:3001` 公网开放。Cutover 后：公网 `:3001` 拒接；LH backend 走 docker network `http://new-api:3000`；ops 维护走 Tailscale `http://lh-canary:3001`（IP `100.89.8.49`）|
 | Admin login | `admin` / 见 `memory/canary_new_api_credentials.md` |
 | Source on canary | `/root/new-api-src/`（git lh-main）|
 | Compose on canary | `/root/new-api/docker-compose.yml` |
@@ -40,8 +52,9 @@ Ops 手册：canary 期间 + cutover 后 production 的部署、监控、日志�
 
 | 端口 | 状态 | Cutover 后 |
 |---|---|---|
-| `0.0.0.0:3001` → new-api:3000 | canary 期间公网开放（debug）| **删除**，仅 docker network 内可达 |
-| `new-api:3000`（docker network 内）| 持续可用 | 持续可用（LH backend 的访问路径）|
+| `0.0.0.0:3001` → new-api:3000 | canary 期间公网开放（debug）| **改为 Tailscale-bound publish**（见下）|
+| `100.89.8.49:3001` → new-api:3000 | 不存在 | **新增**，docker bind 到 Tailscale interface；公网 `:3001` 拒接，tailnet 内可达 |
+| `new-api:3000`（docker network 内）| 持续可用 | 持续可用（LH backend 走 `http://new-api:3000`）|
 
 ---
 
@@ -100,20 +113,36 @@ PG 数据 rollback 用 backup（见 §6 灾备）。
 
 ---
 
-## 3. Cutover (D7) — 切换 docker network 访问
+## 3. Cutover (D7) — 切换 docker network 访问 + Tailscale-only 维护
+
+设计：LH backend 走 docker network DNS `http://new-api:3000`（容器间直连，无公网暴露）。Ops 维护入口从 `0.0.0.0:3001` 收紧到 `100.89.8.49:3001`（Tailscale-bound），公网 `:3001` 拒接。
 
 ### 3.1 ops 侧动作
 
 ```bash
-# 1. 编辑 compose 删除 ports 行
-sed -i '/^\s\+-\s\+"3001:3000"/d' /root/new-api/docker-compose.yml
+# 0. 备份当前 compose
+cp /root/new-api/docker-compose.yml /root/new-api/docker-compose.yml.bak-$(date +%Y%m%d-%H%M%S)
 
-# 2. 应用
+# 1. 把 publish 从 0.0.0.0 改到 Tailscale interface
+sed -i 's|0\.0\.0\.0:3001:3000|100.89.8.49:3001:3000|' /root/new-api/docker-compose.yml
+grep '3001:3000' /root/new-api/docker-compose.yml  # 确认只剩 100.89.8.49 这一行
+
+# 2. 前置 verify：Tailscale interface 已 ready（否则 docker bind 会失败）
+systemctl is-active tailscaled    # active
+tailscale ip -4                   # 100.89.8.49
+
+# 3. 应用
 cd /root/new-api && docker compose up -d
 
-# 3. 验证公网 :3001 拒接
+# 4. 验证公网 :3001 拒接
 curl -m 5 http://172.235.205.45:3001/api/status
-# expected: Connection refused
+# expected: Connection refused / timeout
+
+# 5. 验证 Tailscale :3001 通
+curl -m 5 http://100.89.8.49:3001/api/status
+# 或本地（ssh config 有 lh-canary alias）：
+# curl -m 5 http://lh-canary:3001/api/status
+# expected: {"success": true, ...}
 ```
 
 ### 3.2 LH 侧动作（同步）
@@ -139,10 +168,46 @@ docker exec -i lh-enterprise-backend-1 node - < smoke_test.js
 如果 cutover 出问题，临时恢复公网访问：
 
 ```bash
-# 加回 ports 行（compose 备份在 /root/new-api/docker-compose.yml.bak-*）
-cp /root/new-api/docker-compose.yml.bak-20260523 /root/new-api/docker-compose.yml
+# 1. 用 §3.1 step 0 生成的最新 backup 还原（ls -t 取最新）
+LATEST_BAK=$(ls -t /root/new-api/docker-compose.yml.bak-* | head -1)
+cp "$LATEST_BAK" /root/new-api/docker-compose.yml
+docker compose up -d
+
+# 或 inline 反向 sed（不依赖 backup）
+sed -i 's|100.89.8.49:3001:3000|0.0.0.0:3001:3000|' /root/new-api/docker-compose.yml
 docker compose up -d
 ```
+
+### 3.5 Boot ordering — Tailscale 必须先于 docker
+
+方案 A 把 docker publish bind 到 Tailscale IP `100.89.8.49`，所以 `tailscaled.service` 必须先于 `docker.service` ready，否则 `docker compose up` 报 `bind: cannot assign requested address`。
+
+默认 systemd 顺序通常 OK（`tailscaled` 依赖 `network.target`，早于 `docker.service`），但 reboot 后建议 verify：
+
+```bash
+# reboot 后检查顺序
+systemctl is-active tailscaled    # active
+tailscale ip -4                   # 100.89.8.49（确认 IP 没变）
+systemctl is-active docker        # active
+docker compose -f /root/new-api/docker-compose.yml ps  # new-api running
+```
+
+**failure mode：** docker 启动报 bind error → `systemctl status tailscaled` 检查；如果 Tailscale IP 变了（罕见，Linode 不会自动改但 manual `tailscale logout`/`up` 会重分配），改 compose 里的 IP 或考虑把 IP 外提到 `.env` 的 `TAILSCALE_IP` 变量。
+
+### 3.6 Cutover 后 host 内诊断命令替换
+
+本 runbook 多处示例命令用 `localhost:3001`（canary 期 `0.0.0.0:3001` publish 时 ssh 进 host 跑 loopback 通）。Cutover 后 publish 只绑 `100.89.8.49`，host 上 `localhost:3001` 不再 work，需替换为 Tailscale IP。
+
+**建议在 canary host 的 `~/.bashrc` 加：**
+```bash
+export NEW_API_LOCAL="http://$(tailscale ip -4):3001"
+```
+
+后续所有 host 内诊断命令用 `$NEW_API_LOCAL/api/status` 等，runbook 例子里的 `http://localhost:3001/...` 一律换成 `$NEW_API_LOCAL/...`。
+
+涉及位置：§2.1 readiness probe (line ~74)、§2.1 smoke test (line ~84)、§4.1 健康查询、§4.4 / §5 诊断命令。
+
+> 从开发者本地访问无影响：`http://lh-canary:3001/...`（ssh config alias）走 Tailscale 直达，cutover 前后一致。
 
 ---
 
