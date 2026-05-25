@@ -12,7 +12,7 @@ Ops 手册：canary 期间 + cutover 后 production 的部署、监控、日志�
 
 ---
 
-## 0. 当前状态速查（2026-05-23）
+## 0. 当前状态速查（2026-05-25，post-cutover）
 
 | 项 | 值 |
 |---|---|
@@ -31,7 +31,7 @@ Ops 手册：canary 期间 + cutover 后 production 的部署、监控、日志�
 
 | Container | Image | Role | Network (cutover 前) | Network (cutover 后) |
 |---|---|---|---|---|
-| `new-api` | `new-api:lh-main` | 主服务 | `new-api-network` | `new-api-network` + `lh-shared` |
+| `new-api` | `new-api:lh-main` | 主服务 | `new-api-network` + `lh-enterprise_default` | `new-api-network` + `lh-enterprise_default` + `lh-shared`（3 networks）|
 | `postgres` | `postgres:15` | new-api 自己的 DB（alias: `postgres`, `new-api-postgres`）| `new-api-network` | `new-api-network` |
 | `redis` | `redis:latest` | 缓存 | `new-api-network` | `new-api-network` |
 | `lh-enterprise-backend-1` | LH backend | 调用 new-api 的 client | `lh-enterprise_default` | `lh-enterprise_default` + `lh-shared` |
@@ -45,6 +45,8 @@ Ops 手册：canary 期间 + cutover 后 production 的部署、监控、日志�
   - LH 侧 PR：[dreamlx/lh-enterprise#352](https://github.com/dreamlx/lh-enterprise/pull/352)
   - new-api 侧 join：见 §3.1 cutover SOP
   - LH postgres / web **不在 lh-shared 上**（设计上限制跨 stack 服务可见性，只把 backend 这一个 actor 暴露给 new-api）
+
+**Cutover 后实际拓扑 nuance（已 verify 2026-05-25）**：new-api 同时 attach 3 个网络（`new-api-network` 内部 stack + 历史 `lh-enterprise_default` pre-attach + 今天加的 `lh-shared`），docker DNS 解析 `new-api` 时优先返回 `lh-enterprise_default` subnet IP（172.19.0.x）而不是 lh-shared (172.20.0.x)。Functionally OK，LH backend → new-api 流量通畅，但 `lh-shared` contract 不是 sole 路径。如要让 lh-shared 成为唯一 cross-stack bridge，单独 follow-up issue 移除 new-api 的 `lh-enterprise_default` attachment。
 
 ### 1.3 端口
 
