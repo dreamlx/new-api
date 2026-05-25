@@ -360,6 +360,56 @@ func GetUserByExternalId(externalUserId string) (*User, error) {
 	return &user, err
 }
 
+// PlatformShadowQuotaForNewUser is the initial quota for auto-created shadow
+// users that back V2 platform integrations. Sized at ~$1M-equivalent so
+// Trust Quota Bypass / upstream BillingSession routines don't trip on a low
+// balance during normal platform-wide aggregate consumption.
+const PlatformShadowQuotaForNewUser = 499999500000
+
+// GetOrCreatePlatformShadowUser returns (and lazily creates) the User row that
+// owns all tokens registered by a V2 platform. The username convention is
+// "platform_<platform_id>"; the external_user_id mirrors that. Concurrent
+// callers race-create safely: a UNIQUE conflict triggers a re-read.
+//
+// This is shared by middleware.PlatformAuth (for first-call provisioning)
+// and controller.V2AuthorizeToken (idempotent re-entry).
+func GetOrCreatePlatformShadowUser(platformId string) (*User, error) {
+	if platformId == "" {
+		return nil, errors.New("platform_id is empty")
+	}
+	username := "platform_" + platformId
+	var user User
+	if err := DB.Where("username = ?", username).First(&user).Error; err == nil {
+		return &user, nil
+	}
+
+	user = User{
+		Username:    username,
+		DisplayName: "Platform: " + platformId,
+		Email:       fmt.Sprintf("%s@platform.local", platformId),
+		Password:    common.GetRandomString(32),
+		AffCode:     common.GetRandomString(16),
+		IsExternal:  true,
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Quota:       PlatformShadowQuotaForNewUser,
+	}
+	user.SetExternalUserId(username)
+
+	if err := DB.Create(&user).Error; err != nil {
+		// Concurrent path: another goroutine won the race; re-read.
+		if strings.Contains(err.Error(), "Duplicate") ||
+			strings.Contains(err.Error(), "UNIQUE") ||
+			strings.Contains(err.Error(), "duplicate") {
+			if err2 := DB.Where("username = ?", username).First(&user).Error; err2 == nil {
+				return &user, nil
+			}
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 func GetUserIdByAffCode(affCode string) (int, error) {
 	if affCode == "" {
 		return 0, errors.New("affCode 为空！")
