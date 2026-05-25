@@ -741,6 +741,11 @@ func GetExternalUserLogs(c *gin.Context) {
 		return
 	}
 
+	if err := model.PopulateChannelNames(logs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询失败"})
+		return
+	}
+
 	var totalTokens int
 	var totalSpend float64
 	logItems := make([]gin.H, 0, len(logs))
@@ -773,16 +778,17 @@ func GetExternalUserLogs(c *gin.Context) {
 		}
 
 		logItems = append(logItems, gin.H{
-			"log_id":      log.Id,
-			"request_id":  log.RequestId,
-			"time":        time.Unix(log.CreatedAt, 0).Format("2006-01-02 15:04:05"),
-			"created_at":  log.CreatedAt,
-			"username":    log.Username,
-			"token_key":   tokenKey,
-			"token_name":  tokenName,
-			"token_id":    tokenId,
-			"channel_id":  log.ChannelId,
-			"tokens":      tokens,
+			"log_id":       log.Id,
+			"request_id":   log.RequestId,
+			"time":         time.Unix(log.CreatedAt, 0).Format("2006-01-02 15:04:05"),
+			"created_at":   log.CreatedAt,
+			"username":     log.Username,
+			"token_key":    tokenKey,
+			"token_name":   tokenName,
+			"token_id":     tokenId,
+			"channel_id":   log.ChannelId,
+			"channel_name": log.ChannelName,
+			"tokens":       tokens,
 			"prompt_tokens":     log.PromptTokens,
 			"completion_tokens": log.CompletionTokens,
 			"type":        logType,

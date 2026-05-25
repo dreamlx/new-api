@@ -253,6 +253,11 @@ func V2GetPlatformLogs(c *gin.Context) {
 		return
 	}
 
+	if err := model.PopulateChannelNames(logs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询失败"})
+		return
+	}
+
 	// Build response
 	var totalPromptTokens, totalCompletionTokens, totalQuotaConsumed int
 	uniqueTokens := make(map[int]bool)
@@ -281,6 +286,7 @@ func V2GetPlatformLogs(c *gin.Context) {
 			"token_key":         tokenKey,
 			"model_name":        log.ModelName,
 			"channel_id":        log.ChannelId,
+			"channel_name":      log.ChannelName,
 			"prompt_tokens":     log.PromptTokens,
 			"completion_tokens": log.CompletionTokens,
 			"total_tokens":      log.PromptTokens + log.CompletionTokens,
