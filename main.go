@@ -15,11 +15,13 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/extension/wisemodel"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
 	"github.com/QuantumNous/new-api/service"
@@ -36,11 +38,17 @@ import (
 	_ "net/http/pprof"
 )
 
-//go:embed web/dist
+//go:embed web/default/dist
 var buildFS embed.FS
 
-//go:embed web/dist/index.html
+//go:embed web/default/dist/index.html
 var indexPage []byte
+
+//go:embed web/classic/dist
+var classicBuildFS embed.FS
+
+//go:embed web/classic/dist/index.html
+var classicIndexPage []byte
 
 func main() {
 	startTime := time.Now()
@@ -108,16 +116,9 @@ func main() {
 
 	go controller.AutomaticallyTestChannels()
 
-	// Wisemodel 过期资源包 quota 回收（每5分钟扫描一次）
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			if err := model.ReclaimAllExpiredPackages(); err != nil {
-				common.SysError("ReclaimAllExpiredPackages failed: " + err.Error())
-			}
-		}
-	}()
+	// WiseModel extension: starts the expired package quota reclaim cron
+	// and runs wisemodel_packages BIGINT migration. See extension/wisemodel/init.go.
+	wisemodel.Init()
 
 	// Alipay / WeChat Pay expiry sweep cron.
 	// Gated on IsMasterNode so multi-replica deployments only run the
@@ -222,7 +223,12 @@ func main() {
 	InjectGoogleAnalytics()
 
 	// 设置路由
-	router.SetRouter(server, buildFS, indexPage)
+	router.SetRouter(server, router.ThemeAssets{
+		DefaultBuildFS:   buildFS,
+		DefaultIndexPage: indexPage,
+		ClassicBuildFS:   classicBuildFS,
+		ClassicIndexPage: classicIndexPage,
+	})
 	var port = os.Getenv("PORT")
 	if port == "" {
 		port = strconv.Itoa(*common.Port)
@@ -252,8 +258,10 @@ func InjectUmamiAnalytics() {
 		analyticsInjectBuilder.WriteString("\"></script>")
 	}
 	analyticsInjectBuilder.WriteString("<!--Umami QuantumNous-->\n")
-	analyticsInject := analyticsInjectBuilder.String()
-	indexPage = bytes.ReplaceAll(indexPage, []byte("<!--umami-->\n"), []byte(analyticsInject))
+	analyticsInject := []byte(analyticsInjectBuilder.String())
+	placeholder := []byte("<!--umami-->\n")
+	indexPage = bytes.ReplaceAll(indexPage, placeholder, analyticsInject)
+	classicIndexPage = bytes.ReplaceAll(classicIndexPage, placeholder, analyticsInject)
 }
 
 func InjectGoogleAnalytics() {
@@ -274,8 +282,10 @@ func InjectGoogleAnalytics() {
 		analyticsInjectBuilder.WriteString("</script>")
 	}
 	analyticsInjectBuilder.WriteString("<!--Google Analytics QuantumNous-->\n")
-	analyticsInject := analyticsInjectBuilder.String()
-	indexPage = bytes.ReplaceAll(indexPage, []byte("<!--Google Analytics-->\n"), []byte(analyticsInject))
+	analyticsInject := []byte(analyticsInjectBuilder.String())
+	placeholder := []byte("<!--Google Analytics-->\n")
+	indexPage = bytes.ReplaceAll(indexPage, placeholder, analyticsInject)
+	classicIndexPage = bytes.ReplaceAll(classicIndexPage, placeholder, analyticsInject)
 }
 
 func InitResources() error {
@@ -299,6 +309,10 @@ func InitResources() error {
 	service.InitHttpClient()
 
 	service.InitTokenEncoders()
+
+	// Register WiseModel extension models for AutoMigrate. Must be called
+	// before model.InitDB() so migrateDB picks up &WisemodelPackage{}.
+	wisemodel.RegisterModels()
 
 	// Initialize SQL Database
 	err = model.InitDB()
@@ -329,6 +343,8 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
+
+	perfmetrics.Init()
 
 	// 启动系统监控
 	common.StartSystemMonitor()

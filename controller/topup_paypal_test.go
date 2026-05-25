@@ -57,13 +57,14 @@ func seedPayPalTopUp(t *testing.T, db *gorm.DB, tradeNo string) {
 	require.NoError(t, db.Create(user).Error)
 
 	topUp := &model.TopUp{
-		UserId:        user.Id,
-		Amount:        100,
-		Money:         2,
-		TradeNo:       tradeNo,
-		PaymentMethod: PaymentMethodPayPal,
-		CreateTime:    1,
-		Status:        common.TopUpStatusPending,
+		UserId:          user.Id,
+		Amount:          100,
+		Money:           2,
+		TradeNo:         tradeNo,
+		PaymentMethod:   PaymentMethodPayPal,
+		PaymentProvider: model.PaymentProviderPayPal,
+		CreateTime:      1,
+		Status:          common.TopUpStatusPending,
 	}
 	require.NoError(t, db.Create(topUp).Error)
 }

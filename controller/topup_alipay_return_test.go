@@ -46,14 +46,15 @@ func seedAlipayCompletedTopUp(t *testing.T, db *gorm.DB, tradeNo string) *model.
 	t.Helper()
 	user := seedAlipayUser(t, db)
 	topUp := &model.TopUp{
-		UserId:         user.Id,
-		Amount:         100,
-		Money:          1.0,
-		TradeNo:        tradeNo,
-		PaymentMethod:  PaymentMethodAlipay,
-		CreateTime:     1,
-		Status:         common.TopUpStatusSuccess,
-		PayAmountCents: 10000,
+		UserId:          user.Id,
+		Amount:          100,
+		Money:           1.0,
+		TradeNo:         tradeNo,
+		PaymentMethod:   PaymentMethodAlipay,
+		PaymentProvider: model.PaymentProviderAlipay,
+		CreateTime:      1,
+		Status:          common.TopUpStatusSuccess,
+		PayAmountCents:  10000,
 	}
 	require.NoError(t, db.Create(topUp).Error)
 	return topUp
