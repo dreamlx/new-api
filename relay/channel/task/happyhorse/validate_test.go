@@ -680,6 +680,44 @@ func TestValidateV1I2VMultipleImages(t *testing.T) {
 }
 
 // V1 Video Edit with >5 reference_images → 400
+func TestValidateV1I2VImageCopiedToImagesIsNotDuplicated(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelI2V,
+		Prompt: "test",
+		Image:  "https://example.com/a.png",
+		Images: []string{"https://example.com/a.png"},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	assert.Nil(t, taskErr)
+}
+
+func TestValidateV1R2VImageCopiedToImagesIsNotDuplicated(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelR2V,
+		Prompt: "test",
+		Image:  "https://example.com/a.png",
+		Images: []string{"https://example.com/a.png"},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	assert.Nil(t, taskErr)
+}
+
 func TestValidateV1VideoEditTooManyRefs(t *testing.T) {
 	refs := make([]interface{}, 6)
 	for i := range refs {
