@@ -196,8 +196,11 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/return", controller.SubscriptionEpayReturn)
 		apiRouter.POST("/subscription/epay/return", controller.SubscriptionEpayReturn)
-		// External user API (V1)
+		// External user API (V1) — secured by PlatformAuth.
+		// Any new endpoint under /api/user/external/* MUST be declared inside
+		// this group block so it inherits platform-credential authentication.
 		externalRoute := apiRouter.Group("/user/external")
+		externalRoute.Use(middleware.PlatformAuth())
 		{
 			externalRoute.POST("/sync", controller.SyncExternalUser)
 			externalRoute.POST("/topup", controller.ExternalUserTopUp)
@@ -212,11 +215,27 @@ func SetApiRouter(router *gin.Engine) {
 			externalRoute.DELETE("/:external_user_id/token/:token_id", controller.DeleteExternalUserToken)
 		}
 
-		// External platform API (V2)
+		// External platform API (V2) — secured by PlatformAuth.
+		// platform_id is no longer embedded in the URL (header-derived); see
+		// the platforms/asd/logs → /logs migration in the corresponding plan.
 		v2ExternalRoute := apiRouter.Group("/v2/external")
+		v2ExternalRoute.Use(middleware.PlatformAuth())
 		{
 			v2ExternalRoute.POST("/tokens/authorize", controller.V2AuthorizeToken)
-			v2ExternalRoute.GET("/platforms/:platform_id/logs", controller.V2GetPlatformLogs)
+			v2ExternalRoute.GET("/logs", controller.V2GetPlatformLogs)
+		}
+
+		// Admin-managed platform provisioning. AdminAuth-protected so only
+		// staff with admin role can create/edit/disable platforms; the
+		// plaintext platform_sk is returned exactly once at Create.
+		adminPlatformRoute := apiRouter.Group("/admin/v2/platforms")
+		adminPlatformRoute.Use(middleware.AdminAuth())
+		{
+			adminPlatformRoute.POST("", controller.CreatePlatform)
+			adminPlatformRoute.GET("", controller.ListPlatforms)
+			adminPlatformRoute.GET("/:id", controller.GetPlatform)
+			adminPlatformRoute.PATCH("/:id", controller.UpdatePlatform)
+			adminPlatformRoute.DELETE("/:id", controller.DeletePlatform)
 		}
 
 		optionRoute := apiRouter.Group("/option")
