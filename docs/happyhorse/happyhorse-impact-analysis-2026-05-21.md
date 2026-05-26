@@ -53,7 +53,7 @@ happyhorse-1.0/video
 - I2V 正好 1 张首帧图。
 - R2V 参考图数量为 1-9。
 - Video Edit 正好 1 个输入视频，参考图数量为 0-5。
-- media URL 必须非空且使用 `http/https`。
+- media 值必须非空；图片媒体支持公网 `http/https` URL 或图片 base64 data URL，视频媒体仅支持公网 `http/https` URL。
 - `quality`、`sound` 不再透传。
 
 ## 4. 计费影响
@@ -113,7 +113,7 @@ model_price * QuotaPerUnit * group_ratio * actual_seconds * resolution_ratio
 - I2V 传 ratio 会返回 400。
 - Video Edit 传 ratio 或 duration 会返回 400。
 - `quality`、`sound` 不再作为 HappyHorse 参数透传。
-- 空 URL、非 http/https URL 会在本地返回 400。
+- 空媒体值会在本地返回 400；图片媒体既不是公网 `http/https` URL，也不是图片 base64 data URL 时返回 400；视频媒体非公网 `http/https` URL 返回 400。
 
 ### 对其他任务渠道
 
@@ -156,7 +156,7 @@ go build ./...
 - `/happyhorse/api/status/{task_id}` 查询完成结果。
 - `/v1/video/generations` 4 个模型提交成功。
 - `/v1/video/generations/{task_id}` 查询完成结果。
-- 负向测试覆盖 duration、ratio、media 数量、空 URL、非 http/https URL。
+- 负向测试覆盖 duration、ratio、media 数量、空媒体值、非法图片 data URL、视频 base64、非 http/https 视频 URL。
 - 计费日志覆盖普通模型输出秒数结算和 Video Edit 输入+输出秒数结算。
 
 ## 9. 当前结论

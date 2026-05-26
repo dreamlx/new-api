@@ -223,7 +223,7 @@ HappyHorse 借用 new-api 任务计费链路：
 
 ### 任务失败，提示素材下载失败
 
-图片或视频 URL 不能被上游直接下载。换用公网可访问的 `http/https` URL 后重试。
+图片或视频不能被上游直接读取。视频请换用公网可访问的 `http/https` URL；图片可换用公网 `http/https` URL，或使用 `data:image/{jpeg|jpg|png|webp};base64,{base64_data}` 格式。
 
 ### `aspect_ratio` 未返回
 
