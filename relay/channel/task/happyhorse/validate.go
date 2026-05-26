@@ -125,16 +125,25 @@ func v1ToMediaItems(req relaycommon.TaskSubmitReq) ([]MediaItem, error) {
 
 	case ModelI2V:
 		var items []MediaItem
+		seen := map[string]bool{}
 		if req.Image != "" {
 			items = append(items, MediaItem{Type: MediaTypeFirstFrame, URL: req.Image})
+			seen[req.Image] = true
 		}
 		for _, url := range req.Images {
 			if url == "" {
 				return nil, fmt.Errorf("images contains empty url")
 			}
+			if seen[url] {
+				continue
+			}
 			items = append(items, MediaItem{Type: MediaTypeFirstFrame, URL: url})
+			seen[url] = true
 		}
 		if req.InputReference != "" {
+			if seen[req.InputReference] {
+				return items, nil
+			}
 			items = append(items, MediaItem{Type: MediaTypeFirstFrame, URL: req.InputReference})
 		}
 		return items, nil
@@ -145,16 +154,28 @@ func v1ToMediaItems(req relaycommon.TaskSubmitReq) ([]MediaItem, error) {
 			return parseMediaFromMetadata(raw)
 		}
 		var items []MediaItem
+		seen := map[string]bool{}
 		for _, url := range req.Images {
 			if url == "" {
 				return nil, fmt.Errorf("images contains empty url")
 			}
+			if seen[url] {
+				continue
+			}
 			items = append(items, MediaItem{Type: MediaTypeReferenceImage, URL: url})
+			seen[url] = true
 		}
 		if req.Image != "" {
+			if seen[req.Image] {
+				return items, nil
+			}
 			items = append(items, MediaItem{Type: MediaTypeReferenceImage, URL: req.Image})
+			seen[req.Image] = true
 		}
 		if req.InputReference != "" {
+			if seen[req.InputReference] {
+				return items, nil
+			}
 			items = append(items, MediaItem{Type: MediaTypeReferenceImage, URL: req.InputReference})
 		}
 		return items, nil
