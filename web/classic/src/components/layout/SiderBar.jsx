@@ -47,6 +47,7 @@ const routerMap = {
   task: '/console/task',
   models: '/console/models',
   deployment: '/console/deployment',
+  platforms: '/console/platforms',
   playground: '/console/playground',
   personal: '/console/personal',
 };
@@ -169,6 +170,12 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         text: t('模型部署'),
         itemKey: 'deployment',
         to: '/deployment',
+        className: isAdmin() ? '' : 'tableHiddle',
+      },
+      {
+        text: t('平台管理'),
+        itemKey: 'platforms',
+        to: '/platforms',
         className: isAdmin() ? '' : 'tableHiddle',
       },
       {
