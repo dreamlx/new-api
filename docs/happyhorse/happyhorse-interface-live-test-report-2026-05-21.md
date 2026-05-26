@@ -162,7 +162,8 @@
 | Video Edit 2 个 video | 2 个 `video` | 400，`exactly 1 video` |
 | Video Edit 6 张参考图 | 6 个 `reference_image` | 400，`at most 5 reference images` |
 | 空 URL | `images[]` 或 `reference_images[]` 含空字符串 | 400，`contains empty url` |
-| 非 http/https URL | `ftp://...` | 400，`http or https` |
+| 非法图片媒体 | `ftp://...` 或非法图片 base64 data URL | 400，`image base64 data url` |
+| 非法视频媒体 | `data:video/mp4;base64,...` 或非 http/https 视频 URL | 400，`video media must use http or https url` |
 
 ## 6. 计费观察
 
