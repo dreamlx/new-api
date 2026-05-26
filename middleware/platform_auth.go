@@ -14,9 +14,9 @@ import (
 // Context keys exposed by PlatformAuth so downstream handlers can resolve the
 // authenticated caller without re-querying the database.
 const (
-	CtxKeyPlatform       = "platform"          // *model.Platform
-	CtxKeyShadowUserId   = "shadow_user_id"    // int — user.Id of the V2 shadow user owning tokens
-	CtxKeyPlatformId     = "auth_platform_id"  // string — convenience copy of platform.PlatformId
+	CtxKeyPlatform     = "platform"         // *model.Platform
+	CtxKeyShadowUserId = "shadow_user_id"   // int — user.Id of the V2 shadow user owning tokens
+	CtxKeyPlatformId   = "auth_platform_id" // string — convenience copy of platform.PlatformId
 )
 
 // PlatformAuth is the unified gateway middleware for /api/user/external/* (V1)
@@ -73,9 +73,19 @@ func PlatformAuth() gin.HandlerFunc {
 			return
 		}
 
-		// Lazy shadow user provisioning: V2 (and any future feature relying on
-		// platform.shadow_user_id) needs a user row to hang tokens off. V1
-		// handlers ignore this value and continue resolving by external_user_id.
+		// V2 (and any future feature relying on platform.shadow_user_id) needs
+		// a live user row to hang tokens off. V1 handlers ignore this value
+		// and continue resolving by external_user_id.
+		if platform.ShadowUserId > 0 {
+			var user model.User
+			if err := model.DB.Select("id").First(&user, platform.ShadowUserId).Error; err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					respondPlatformServerError(c)
+					return
+				}
+				platform.ShadowUserId = 0
+			}
+		}
 		if platform.ShadowUserId <= 0 {
 			user, err := model.GetOrCreatePlatformShadowUser(platform.PlatformId)
 			if err != nil || user == nil {
@@ -83,8 +93,10 @@ func PlatformAuth() gin.HandlerFunc {
 				return
 			}
 			platform.ShadowUserId = user.Id
-			// Best-effort persist; if it fails we still proceed for this request.
-			_ = model.DB.Model(platform).Update("shadow_user_id", user.Id).Error
+			if err := model.DB.Model(platform).Update("shadow_user_id", user.Id).Error; err != nil {
+				respondPlatformServerError(c)
+				return
+			}
 		}
 
 		c.Set(CtxKeyPlatform, platform)

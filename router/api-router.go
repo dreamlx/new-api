@@ -231,8 +231,8 @@ func SetApiRouter(router *gin.Engine) {
 		adminPlatformRoute := apiRouter.Group("/admin/v2/platforms")
 		adminPlatformRoute.Use(middleware.AdminAuth())
 		{
-			adminPlatformRoute.POST("/", controller.CreatePlatform)
-			adminPlatformRoute.GET("/", controller.ListPlatforms)
+			adminPlatformRoute.POST("", controller.CreatePlatform)
+			adminPlatformRoute.GET("", controller.ListPlatforms)
 			adminPlatformRoute.GET("/:id", controller.GetPlatform)
 			adminPlatformRoute.PATCH("/:id", controller.UpdatePlatform)
 			adminPlatformRoute.DELETE("/:id", controller.DeletePlatform)

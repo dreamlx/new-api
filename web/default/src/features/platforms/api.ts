@@ -23,7 +23,7 @@ export async function listPlatforms(
   page = 1,
   pageSize = 20
 ): Promise<ApiEnvelope<ListPlatformsResponse>> {
-  const res = await api.get(`${BASE}/?page=${page}&page_size=${pageSize}`)
+  const res = await api.get(`${BASE}?page=${page}&page_size=${pageSize}`)
   return res.data
 }
 
@@ -40,7 +40,7 @@ export async function getPlatform(id: number): Promise<ApiEnvelope<Platform>> {
 export async function createPlatform(
   payload: CreatePlatformPayload
 ): Promise<ApiEnvelope<PlatformCreated>> {
-  const res = await api.post(`${BASE}/`, payload)
+  const res = await api.post(BASE, payload)
   return res.data
 }
 

@@ -49,6 +49,7 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
 
   const [platformId, setPlatformId] = useState('')
   const [name, setName] = useState('')
+  const [shadowUserId, setShadowUserId] = useState('')
   const [status, setStatus] = useState<PlatformStatus>(PLATFORM_STATUS.ENABLED)
   const [submitting, setSubmitting] = useState(false)
 
@@ -58,13 +59,26 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
     if (currentRow) {
       setPlatformId(currentRow.platform_id)
       setName(currentRow.name ?? '')
+      setShadowUserId(String(currentRow.shadow_user_id))
       setStatus(currentRow.status as PlatformStatus)
     } else {
       setPlatformId('')
       setName('')
+      setShadowUserId('')
       setStatus(PLATFORM_STATUS.ENABLED)
     }
   }, [open, currentRow])
+
+  const parseShadowUserId = () => {
+    const raw = shadowUserId.trim()
+    if (!raw) return undefined
+    const parsed = Number(raw)
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      toast.error(t('shadow_user_id must be a positive integer'))
+      return null
+    }
+    return parsed
+  }
 
   const validate = () => {
     if (!isUpdate && !PLATFORM_ID_PATTERN.test(platformId)) {
@@ -78,6 +92,8 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
 
   const onSubmit = async () => {
     if (!validate()) return
+    const parsedShadowUserId = parseShadowUserId()
+    if (parsedShadowUserId === null) return
     setSubmitting(true)
     try {
       if (isUpdate && currentRow) {
@@ -85,6 +101,7 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
           id: currentRow.id,
           name,
           status,
+          ...(parsedShadowUserId ? { shadow_user_id: parsedShadowUserId } : {}),
         })
         if (!res.success) {
           toast.error(res.message || t('Failed to update platform'))
@@ -96,7 +113,11 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
         return
       }
 
-      const res = await createPlatform({ platform_id: platformId, name })
+      const res = await createPlatform({
+        platform_id: platformId,
+        name,
+        ...(parsedShadowUserId ? { shadow_user_id: parsedShadowUserId } : {}),
+      })
       if (!res.success || !res.data) {
         toast.error(res.message || t('Failed to create platform'))
         return
@@ -122,7 +143,7 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
           </SheetTitle>
           <SheetDescription>
             {isUpdate
-              ? t('Update the platform name or status. platform_id and sk cannot be changed here.')
+              ? t('Update the platform name, status, or shadow user. platform_id and sk cannot be changed here.')
               : t('Provision a new downstream platform credential. The plaintext sk is returned exactly once.')}
           </SheetDescription>
         </SheetHeader>
@@ -150,6 +171,20 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
               onChange={(e) => setName(e.target.value)}
               placeholder={t('Display name (optional)')}
             />
+          </div>
+
+          <div className='flex flex-col gap-2'>
+            <Label htmlFor='shadow_user_id'>{t('Shadow User ID')}</Label>
+            <Input
+              id='shadow_user_id'
+              inputMode='numeric'
+              value={shadowUserId}
+              onChange={(e) => setShadowUserId(e.target.value)}
+              placeholder={t('Leave empty to auto-create a shadow user')}
+            />
+            <p className='text-xs text-muted-foreground'>
+              {t('When provided, this must be an existing user ID.')}
+            </p>
           </div>
 
           {isUpdate && (

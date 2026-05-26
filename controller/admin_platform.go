@@ -17,13 +17,15 @@ import (
 // ==================== Request / Response Structs ====================
 
 type CreatePlatformRequest struct {
-	PlatformId string `json:"platform_id" binding:"required,min=1,max=80"`
-	Name       string `json:"name" binding:"max=200"`
+	PlatformId   string `json:"platform_id" binding:"required,min=1,max=80"`
+	Name         string `json:"name" binding:"max=200"`
+	ShadowUserId *int   `json:"shadow_user_id"`
 }
 
 type UpdatePlatformRequest struct {
-	Name   *string `json:"name"`
-	Status *int    `json:"status"` // 1=enabled, 2=disabled
+	Name         *string `json:"name"`
+	Status       *int    `json:"status"` // 1=enabled, 2=disabled
+	ShadowUserId *int    `json:"shadow_user_id"`
 }
 
 // platformIdPattern restricts platform_id to a charset that produces a valid
@@ -33,14 +35,36 @@ var platformIdPattern = regexp.MustCompile(`^[a-z0-9_-]{1,80}$`)
 // platformDTO renders a Platform for admin responses; never includes the hash.
 func platformDTO(p *model.Platform) gin.H {
 	return gin.H{
-		"id":              p.Id,
-		"platform_id":     p.PlatformId,
-		"name":            p.Name,
-		"status":          p.Status,
-		"shadow_user_id":  p.ShadowUserId,
-		"created_at":      time.Unix(p.CreatedTime, 0).UTC().Format(time.RFC3339),
-		"updated_at":      time.Unix(p.UpdatedTime, 0).UTC().Format(time.RFC3339),
+		"id":             p.Id,
+		"platform_id":    p.PlatformId,
+		"name":           p.Name,
+		"status":         p.Status,
+		"shadow_user_id": p.ShadowUserId,
+		"created_at":     time.Unix(p.CreatedTime, 0).UTC().Format(time.RFC3339),
+		"updated_at":     time.Unix(p.UpdatedTime, 0).UTC().Format(time.RFC3339),
 	}
+}
+
+func resolvePlatformShadowUserId(platformId string, shadowUserId *int) (int, error) {
+	if shadowUserId != nil {
+		if *shadowUserId <= 0 {
+			return 0, errors.New("shadow_user_id 必须为正整数")
+		}
+		var user model.User
+		if err := model.DB.First(&user, *shadowUserId).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return 0, errors.New("shadow_user_id 对应用户不存在")
+			}
+			return 0, err
+		}
+		return user.Id, nil
+	}
+
+	shadowUser, err := model.GetOrCreatePlatformShadowUser(platformId)
+	if err != nil || shadowUser == nil {
+		return 0, errors.New("创建平台 shadow user 失败")
+	}
+	return shadowUser.Id, nil
 }
 
 // ==================== Handlers ====================
@@ -63,10 +87,9 @@ func CreatePlatform(c *gin.Context) {
 		return
 	}
 
-	// Lazily provision the shadow user so it's ready for first authorize call.
-	shadowUser, err := model.GetOrCreatePlatformShadowUser(req.PlatformId)
-	if err != nil || shadowUser == nil {
-		common.ApiErrorMsg(c, "创建平台 shadow user 失败")
+	shadowUserId, err := resolvePlatformShadowUserId(req.PlatformId, req.ShadowUserId)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
 		return
 	}
 
@@ -78,7 +101,7 @@ func CreatePlatform(c *gin.Context) {
 		PlatformId:     req.PlatformId,
 		Name:           req.Name,
 		PlatformSkHash: model.HashPlatformSk(plaintextSk),
-		ShadowUserId:   shadowUser.Id,
+		ShadowUserId:   shadowUserId,
 		Status:         common.UserStatusEnabled,
 	}
 
@@ -201,6 +224,14 @@ func UpdatePlatform(c *gin.Context) {
 	}
 	if req.Status != nil {
 		updates["status"] = *req.Status
+	}
+	if req.ShadowUserId != nil {
+		shadowUserId, err := resolvePlatformShadowUserId(p.PlatformId, req.ShadowUserId)
+		if err != nil {
+			common.ApiErrorMsg(c, err.Error())
+			return
+		}
+		updates["shadow_user_id"] = shadowUserId
 	}
 	if len(updates) == 0 {
 		common.ApiErrorMsg(c, "无可更新字段")

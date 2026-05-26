@@ -61,10 +61,12 @@ export interface ListPlatformsResponse {
 export interface CreatePlatformPayload {
   platform_id: string
   name?: string
+  shadow_user_id?: number
 }
 
 export interface UpdatePlatformPayload {
   id: number
   name?: string
   status?: PlatformStatus
+  shadow_user_id?: number
 }

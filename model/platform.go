@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -124,7 +125,7 @@ func (p *Platform) UpdateFields(updates map[string]interface{}) error {
 	if p.Id <= 0 {
 		return errors.New("platform not loaded")
 	}
-	allowed := map[string]bool{"name": true, "status": true}
+	allowed := map[string]bool{"name": true, "status": true, "shadow_user_id": true}
 	filtered := make(map[string]interface{}, len(updates))
 	for k, v := range updates {
 		if allowed[k] {
@@ -156,6 +157,13 @@ func (p *Platform) Delete() (tokensDisabled int64, err error) {
 				return res.Error
 			}
 			tokensDisabled = res.RowsAffected
+		}
+		// Free the unique platform_id before soft-delete so an admin can
+		// recreate the same public id after losing the one-time sk.
+		tombstonePlatformId := fmt.Sprintf("deleted_%d_%d", p.Id, common.GetTimestamp())
+		if err := tx.Model(&Platform{}).Where("id = ?", p.Id).
+			Update("platform_id", tombstonePlatformId).Error; err != nil {
+			return err
 		}
 		// Soft-delete the platform row (DeletedAt index makes it invisible
 		// to GetPlatformByPlatformId on subsequent calls).
