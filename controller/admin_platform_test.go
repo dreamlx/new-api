@@ -91,6 +91,56 @@ func TestAdminPlatform_Create_DuplicatePlatformId(t *testing.T) {
 	assert.Equal(t, 409, w.Code)
 }
 
+func TestAdminPlatform_Create_AllowsRecreateAfterDelete(t *testing.T) {
+	router := setupAdminPlatformRouter(t)
+	body := map[string]interface{}{"platform_id": "recreate_same_id", "name": "First"}
+	w := doRequest(router, "POST", "/api/admin/v2/platforms/", body)
+	require.Equal(t, 200, w.Code, w.Body.String())
+	id := int(parseResponse(t, w)["data"].(map[string]interface{})["id"].(float64))
+
+	w = doRequest(router, "DELETE", fmt.Sprintf("/api/admin/v2/platforms/%d", id), nil)
+	require.Equal(t, 200, w.Code, w.Body.String())
+
+	w = doRequest(router, "POST", "/api/admin/v2/platforms/", body)
+	require.Equal(t, 200, w.Code, w.Body.String())
+	resp := parseResponse(t, w)
+	assert.Equal(t, true, resp["success"])
+	assert.Equal(t, "recreate_same_id", resp["data"].(map[string]interface{})["platform_id"])
+}
+
+func TestAdminPlatform_CreateWithManualShadowUserId(t *testing.T) {
+	router := setupAdminPlatformRouter(t)
+
+	shadow := &model.User{Username: "manual_shadow", Email: "manual@example.com", Status: common.UserStatusEnabled}
+	require.NoError(t, model.DB.Create(shadow).Error)
+
+	w := doRequest(router, "POST", "/api/admin/v2/platforms/", map[string]interface{}{
+		"platform_id":    "manual_shadow_platform",
+		"name":           "Manual",
+		"shadow_user_id": shadow.Id,
+	})
+	require.Equal(t, 200, w.Code, w.Body.String())
+	resp := parseResponse(t, w)
+	data := resp["data"].(map[string]interface{})
+	assert.Equal(t, float64(shadow.Id), data["shadow_user_id"])
+
+	var p model.Platform
+	require.NoError(t, model.DB.Where("platform_id = ?", "manual_shadow_platform").First(&p).Error)
+	assert.Equal(t, shadow.Id, p.ShadowUserId)
+}
+
+func TestAdminPlatform_CreateRejectsMissingManualShadowUserId(t *testing.T) {
+	router := setupAdminPlatformRouter(t)
+
+	w := doRequest(router, "POST", "/api/admin/v2/platforms/", map[string]interface{}{
+		"platform_id":    "missing_shadow_platform",
+		"shadow_user_id": 999999,
+	})
+	resp := parseResponse(t, w)
+	assert.Equal(t, false, resp["success"])
+	assert.Contains(t, resp["message"], "shadow_user_id")
+}
+
 func TestAdminPlatform_ListDoesNotLeakHash(t *testing.T) {
 	router := setupAdminPlatformRouter(t)
 	for _, id := range []string{"list_a", "list_b", "list_c"} {
@@ -142,6 +192,37 @@ func TestAdminPlatform_UpdateNameAndStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Renamed", p.Name)
 	assert.Equal(t, common.UserStatusDisabled, p.Status)
+}
+
+func TestAdminPlatform_UpdateShadowUserId(t *testing.T) {
+	router := setupAdminPlatformRouter(t)
+	w := doRequest(router, "POST", "/api/admin/v2/platforms/", map[string]interface{}{"platform_id": "upd_shadow"})
+	require.Equal(t, 200, w.Code)
+	id := int(parseResponse(t, w)["data"].(map[string]interface{})["id"].(float64))
+
+	shadow := &model.User{Username: "updated_shadow", Email: "updated@example.com", Status: common.UserStatusEnabled}
+	require.NoError(t, model.DB.Create(shadow).Error)
+
+	w = doRequest(router, "PATCH", fmt.Sprintf("/api/admin/v2/platforms/%d", id),
+		map[string]interface{}{"shadow_user_id": shadow.Id})
+	require.Equal(t, 200, w.Code, w.Body.String())
+
+	p, err := model.GetPlatformById(id)
+	require.NoError(t, err)
+	assert.Equal(t, shadow.Id, p.ShadowUserId)
+}
+
+func TestAdminPlatform_UpdateRejectsMissingShadowUserId(t *testing.T) {
+	router := setupAdminPlatformRouter(t)
+	w := doRequest(router, "POST", "/api/admin/v2/platforms/", map[string]interface{}{"platform_id": "upd_missing_shadow"})
+	require.Equal(t, 200, w.Code)
+	id := int(parseResponse(t, w)["data"].(map[string]interface{})["id"].(float64))
+
+	w = doRequest(router, "PATCH", fmt.Sprintf("/api/admin/v2/platforms/%d", id),
+		map[string]interface{}{"shadow_user_id": 999999})
+	resp := parseResponse(t, w)
+	assert.Equal(t, false, resp["success"])
+	assert.Contains(t, resp["message"], "shadow_user_id")
 }
 
 func TestAdminPlatform_UpdateRejectsInvalidStatus(t *testing.T) {

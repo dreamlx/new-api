@@ -161,6 +161,32 @@ func TestPlatformAuth_LazyShadowUserCreation(t *testing.T) {
 	assert.Equal(t, u.Id, p.ShadowUserId)
 }
 
+func TestPlatformAuth_RepairsStaleShadowUserId(t *testing.T) {
+	model.DB = setupAuthTestDB(t)
+	hash := model.HashPlatformSk("pk_stale")
+	require.NoError(t, model.DB.Create(&model.Platform{
+		PlatformId: "p_stale", PlatformSkHash: hash,
+		ShadowUserId: 999999, Status: common.UserStatusEnabled,
+	}).Error)
+	r := makeAuthTestRouter(t)
+
+	req := httptest.NewRequest("GET", "/probe", nil)
+	req.Header.Set("X-Platform-Id", "p_stale")
+	req.Header.Set("X-Platform-Sk", "pk_stale")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, 200, w.Code, w.Body.String())
+
+	var u model.User
+	require.NoError(t, model.DB.Where("username = ?", "platform_p_stale").First(&u).Error)
+	assert.Contains(t, w.Body.String(), "\"shadow_user_id\":"+itoa(u.Id))
+
+	var p model.Platform
+	require.NoError(t, model.DB.Where("platform_id = ?", "p_stale").First(&p).Error)
+	assert.Equal(t, u.Id, p.ShadowUserId)
+	assert.NotEqual(t, 999999, p.ShadowUserId)
+}
+
 // itoa is a tiny stdlib-only int-to-string for assertion substring builds.
 // strconv.Itoa would do, but we keep this file's import surface minimal.
 func itoa(n int) string {
