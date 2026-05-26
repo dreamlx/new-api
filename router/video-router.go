@@ -49,4 +49,13 @@ func SetVideoRouter(router *gin.Engine) {
 		// Maps to: /?Action=CVSync2AsyncSubmitTask&Version=2022-08-31 and /?Action=CVSync2AsyncGetResult&Version=2022-08-31
 		jimengOfficialGroup.POST("/", controller.RelayTask)
 	}
+
+	// HappyHorse native API routes
+	happyHorseRouter := router.Group("/happyhorse/api")
+	happyHorseRouter.Use(middleware.RouteTag("relay"))
+	happyHorseRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	{
+		happyHorseRouter.POST("/generate", controller.RelayTask)
+		happyHorseRouter.GET("/status/:task_id", controller.RelayTaskFetch)
+	}
 }

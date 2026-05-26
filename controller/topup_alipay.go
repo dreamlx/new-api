@@ -135,15 +135,16 @@ func RequestAlipay(c *gin.Context) {
 
 	now := time.Now().Unix()
 	topUp := &model.TopUp{
-		UserId:         userId,
-		Amount:         amount,
-		Money:          payMoney,
-		TradeNo:        tradeNo,
-		PaymentMethod:  PaymentMethodAlipay,
-		CreateTime:     now,
-		Status:         common.TopUpStatusPending,
-		PayAmountCents: payAmountCents,
-		ExpireTime:     now + alipayOrderExpireSeconds,
+		UserId:          userId,
+		Amount:          amount,
+		Money:           payMoney,
+		TradeNo:         tradeNo,
+		PaymentMethod:   PaymentMethodAlipay,
+		PaymentProvider: model.PaymentProviderAlipay,
+		CreateTime:      now,
+		Status:          common.TopUpStatusPending,
+		PayAmountCents:  payAmountCents,
+		ExpireTime:      now + alipayOrderExpireSeconds,
 	}
 	if err := topUp.Insert(); err != nil {
 		log.Printf("alipay topup insert failed: %v (trade_no=%s)", err, tradeNo)

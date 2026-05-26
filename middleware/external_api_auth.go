@@ -8,7 +8,7 @@ import (
 )
 
 // ExternalAPIAuth is a unified Bearer Token authentication middleware
-// for external platform APIs (V1, V2, WiseModel).
+// for external platform APIs (V1, V2).
 // Token is configured via the specified environment variable.
 func ExternalAPIAuth(envVar string) gin.HandlerFunc {
 	return func(c *gin.Context) {
