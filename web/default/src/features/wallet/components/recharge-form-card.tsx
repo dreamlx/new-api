@@ -41,6 +41,7 @@ import {
   getMinTopupAmount,
   calculatePresetPricing,
 } from '../lib'
+import { PAYMENT_TYPES } from '../constants'
 import type {
   PaymentMethod,
   PresetAmount,
@@ -78,6 +79,10 @@ interface RechargeFormCardProps {
   waffoMinTopup?: number
   onWaffoMethodSelect?: (method: WaffoPayMethod, index: number) => void
   enableWaffoPancakeTopup?: boolean
+  enablePayPalTopup?: boolean
+  enableAlipayTopup?: boolean
+  enableWxpayTopup?: boolean
+  enableStripeTopup?: boolean
 }
 
 export function RechargeFormCard({
@@ -108,6 +113,10 @@ export function RechargeFormCard({
   waffoMinTopup,
   onWaffoMethodSelect,
   enableWaffoPancakeTopup,
+  enablePayPalTopup,
+  enableAlipayTopup,
+  enableWxpayTopup,
+  enableStripeTopup,
 }: RechargeFormCardProps) {
   const { t } = useTranslation()
   const [localAmount, setLocalAmount] = useState(topupAmount.toString())
@@ -128,10 +137,32 @@ export function RechargeFormCard({
     topupInfo?.enable_online_topup ||
     topupInfo?.enable_stripe_topup ||
     enableWaffoTopup ||
-    enableWaffoPancakeTopup
+    enableWaffoPancakeTopup ||
+    enablePayPalTopup ||
+    enableAlipayTopup ||
+    enableWxpayTopup
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
-  const hasStandardPaymentMethods =
-    Array.isArray(topupInfo?.pay_methods) && topupInfo.pay_methods.length > 0
+
+  // Filter payment methods from the pay_methods list (matching classic logic):
+  // - Remove 'waffo' (handled by dedicated Waffo section)
+  // - Remove 'alipay' when direct Alipay is enabled (replaced by dedicated button)
+  // - Remove 'wxpay' when direct Wxpay is enabled (replaced by dedicated button)
+  // - When enableOnlineTopUp is false, only keep standalone gateways (stripe, paypal)
+  const enableOnlineTopUp = topupInfo?.enable_online_topup ?? false
+  const visiblePayMethods = (topupInfo?.pay_methods || []).filter((method) => {
+    if (!method || !method.type) return false
+    if (method.type === 'waffo') return false
+    if (method.type === PAYMENT_TYPES.ALIPAY && enableAlipayTopup) return false
+    if (method.type === PAYMENT_TYPES.WECHAT && enableWxpayTopup) return false
+    // When online topup (Epay) is disabled, only show standalone gateway methods
+    const isStandaloneGateway =
+      method.type === PAYMENT_TYPES.STRIPE ||
+      method.type === PAYMENT_TYPES.PAYPAL
+    if (!enableOnlineTopUp && !isStandaloneGateway) return false
+    return true
+  })
+
+  const hasStandardPaymentMethods = visiblePayMethods.length > 0
   const hasWaffoPaymentMethods =
     Array.isArray(waffoPayMethods) && waffoPayMethods.length > 0
   const minTopup = getMinTopupAmount(topupInfo)
@@ -309,9 +340,14 @@ export function RechargeFormCard({
                 </Label>
                 {hasStandardPaymentMethods ? (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    {topupInfo?.pay_methods?.map((method) => {
-                      const minTopup = method.min_topup || 0
-                      const disabled = minTopup > topupAmount
+                    {visiblePayMethods.map((method) => {
+                      const methodMinTopup = method.min_topup || 0
+                      // Disable button if the gateway is not enabled (matching classic's
+                      // disabled logic on each payment method button)
+                      const isGatewayDisabled =
+                        (method.type === PAYMENT_TYPES.PAYPAL && !enablePayPalTopup) ||
+                        (method.type === PAYMENT_TYPES.STRIPE && !enableStripeTopup)
+                      const disabled = isGatewayDisabled || methodMinTopup > topupAmount
 
                       const button = (
                         <Button
@@ -341,7 +377,7 @@ export function RechargeFormCard({
                             <TooltipTrigger render={button}></TooltipTrigger>
                             <TooltipContent>
                               {t('Minimum topup amount: {{amount}}', {
-                                amount: minTopup,
+                                amount: methodMinTopup,
                               })}
                             </TooltipContent>
                           </Tooltip>
@@ -359,6 +395,110 @@ export function RechargeFormCard({
                       )}
                     </AlertDescription>
                   </Alert>
+                )}
+
+                {/* Direct Alipay button — shown when enable_alipay_topup is true */}
+                {enableAlipayTopup && (
+                  <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
+                    {(() => {
+                      const alipayMinTopup =
+                        topupInfo?.alipay_min_topup || minTopup
+                      const disabled = alipayMinTopup > topupAmount
+                      const alipayMethod: PaymentMethod = {
+                        name: 'Alipay',
+                        type: PAYMENT_TYPES.ALIPAY,
+                      }
+
+                      const button = (
+                        <Button
+                          key='direct-alipay'
+                          variant='outline'
+                          onClick={() => onPaymentMethodSelect(alipayMethod)}
+                          disabled={disabled || !!paymentLoading}
+                          className='h-9 min-w-0 justify-start gap-2 rounded-lg px-3'
+                        >
+                          {paymentLoading === PAYMENT_TYPES.ALIPAY ? (
+                            <Loader2 className='h-4 w-4 animate-spin' />
+                          ) : (
+                            getPaymentIcon(
+                              PAYMENT_TYPES.ALIPAY,
+                              'h-4 w-4',
+                              undefined,
+                              'Alipay'
+                            )
+                          )}
+                          <span className='truncate'>Alipay</span>
+                        </Button>
+                      )
+
+                      return disabled ? (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger render={button}></TooltipTrigger>
+                            <TooltipContent>
+                              {t('Minimum topup amount: {{amount}}', {
+                                amount: alipayMinTopup,
+                              })}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : (
+                        button
+                      )
+                    })()}
+                  </div>
+                )}
+
+                {/* Direct Wxpay button — shown when enable_wxpay_topup is true */}
+                {enableWxpayTopup && (
+                  <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
+                    {(() => {
+                      const wxpayMinTopup =
+                        topupInfo?.wxpay_min_topup || minTopup
+                      const disabled = wxpayMinTopup > topupAmount
+                      const wxpayMethod: PaymentMethod = {
+                        name: t('WeChat Pay'),
+                        type: PAYMENT_TYPES.WECHAT,
+                      }
+
+                      const button = (
+                        <Button
+                          key='direct-wxpay'
+                          variant='outline'
+                          onClick={() => onPaymentMethodSelect(wxpayMethod)}
+                          disabled={disabled || !!paymentLoading}
+                          className='h-9 min-w-0 justify-start gap-2 rounded-lg px-3'
+                        >
+                          {paymentLoading === PAYMENT_TYPES.WECHAT ? (
+                            <Loader2 className='h-4 w-4 animate-spin' />
+                          ) : (
+                            getPaymentIcon(
+                              PAYMENT_TYPES.WECHAT,
+                              'h-4 w-4',
+                              undefined,
+                              t('WeChat Pay')
+                            )
+                          )}
+                          <span className='truncate'>{t('WeChat Pay')}</span>
+                        </Button>
+                      )
+
+                      return disabled ? (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger render={button}></TooltipTrigger>
+                            <TooltipContent>
+                              {t('Minimum topup amount: {{amount}}', {
+                                amount: wxpayMinTopup,
+                              })}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : (
+                        button
+                      )
+                    })()}
+                  </div>
                 )}
               </div>
 

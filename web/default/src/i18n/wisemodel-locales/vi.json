@@ -1,0 +1,7 @@
+{
+  "quota_consumed": "WiseModel hạn mức tiêu thụ",
+  "request_count": "WiseModel số yêu cầu",
+  "only_users": "Chỉ người dùng WiseModel",
+  "package_id_placeholder": "ID gói WiseModel",
+  "select_downstream_platform": "Chọn nền tảng hạ nguồn"
+}

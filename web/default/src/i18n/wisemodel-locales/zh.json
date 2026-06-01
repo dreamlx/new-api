@@ -1,0 +1,7 @@
+{
+  "quota_consumed": "WiseModel 消耗额度",
+  "request_count": "WiseModel 请求数",
+  "only_users": "仅 WiseModel 用户",
+  "package_id_placeholder": "WiseModel 资源包 ID",
+  "select_downstream_platform": "选择下游平台"
+}

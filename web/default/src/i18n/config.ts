@@ -16,23 +16,33 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import i18n from 'i18next'
-import LanguageDetector from 'i18next-browser-languagedetector'
-import { initReactI18next } from 'react-i18next'
-import en from './locales/en.json'
-import fr from './locales/fr.json'
-import ja from './locales/ja.json'
-import ru from './locales/ru.json'
-import vi from './locales/vi.json'
-import zh from './locales/zh.json'
+import LanguageDetector from 'i18next-browser-languagedetector';
+import { initReactI18next } from 'react-i18next';
+import i18n from 'i18next';
+
+import wisemodelZh from './wisemodel-locales/zh.json';
+import wisemodelVi from './wisemodel-locales/vi.json';
+import wisemodelRu from './wisemodel-locales/ru.json';
+import wisemodelJa from './wisemodel-locales/ja.json';
+import wisemodelFr from './wisemodel-locales/fr.json';
+// WiseModel extension namespace. Living in its own namespace so future
+// upstream syncs cannot conflict on these UI strings.
+import wisemodelEn from './wisemodel-locales/en.json';
+import zh from './locales/zh.json';
+import vi from './locales/vi.json';
+import ru from './locales/ru.json';
+import ja from './locales/ja.json';
+import fr from './locales/fr.json';
+import en from './locales/en.json';
+
 
 export const resources = {
-  en,
-  zh,
-  fr,
-  ru,
-  ja,
-  vi,
+  en: { ...en, wisemodel: wisemodelEn },
+  zh: { ...zh, wisemodel: wisemodelZh },
+  fr: { ...fr, wisemodel: wisemodelFr },
+  ru: { ...ru, wisemodel: wisemodelRu },
+  ja: { ...ja, wisemodel: wisemodelJa },
+  vi: { ...vi, wisemodel: wisemodelVi },
 } as const
 
 i18n
@@ -42,6 +52,9 @@ i18n
     resources,
     fallbackLng: 'en',
     supportedLngs: ['en', 'zh', 'fr', 'ru', 'ja', 'vi'],
+    ns: ['translation', 'wisemodel'],
+    defaultNS: 'translation',
+    fallbackNS: 'translation',
     load: 'languageOnly', // Convert zh-CN -> zh
     nsSeparator: false, // Allow literal colons in keys (e.g., URLs, labels)
     debug: import.meta.env.DEV,

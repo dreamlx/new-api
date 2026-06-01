@@ -1,0 +1,7 @@
+{
+  "quota_consumed": "WiseModel Quota Consumed",
+  "request_count": "WiseModel Requests",
+  "only_users": "WiseModel users only",
+  "package_id_placeholder": "WiseModel package ID",
+  "select_downstream_platform": "Select downstream platform"
+}

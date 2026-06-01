@@ -16,40 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { getRouteApi } from '@tanstack/react-router'
-import {
-  type SortingState,
-  type VisibilityState,
-  getCoreRowModel,
-  getFacetedRowModel,
-  getFacetedUniqueValues,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-} from '@tanstack/react-table'
-import { useMediaQuery } from '@/hooks'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
-import { useTableUrlState } from '@/hooks/use-table-url-state'
-import {
-  DISABLED_ROW_DESKTOP,
-  DISABLED_ROW_MOBILE,
-  DataTablePage,
-} from '@/components/data-table'
-import { getUsers, searchUsers } from '../api'
-import {
-  USER_STATUS,
-  getUserStatusOptions,
-  getUserRoleOptions,
-  isUserDeleted,
-} from '../constants'
-import type { User } from '../types'
-import { DataTableBulkActions } from './data-table-bulk-actions'
-import { useUsersColumns } from './users-columns'
-import { useUsers } from './users-provider'
+import { type SortingState, type VisibilityState, getCoreRowModel, getFacetedRowModel, getFacetedUniqueValues, getFilteredRowModel, getPaginationRowModel, getSortedRowModel, useReactTable, } from '@tanstack/react-table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DISABLED_ROW_DESKTOP, DISABLED_ROW_MOBILE, DataTablePage, } from '@/components/data-table';
+import { useTableUrlState } from '@/hooks/use-table-url-state';
+import { getRouteApi } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
+import { useIsAdmin } from '@/hooks/use-admin';
+import { useEffect, useState } from 'react';
+import { useMediaQuery } from '@/hooks';
+import { toast } from 'sonner';
+
+import { USER_STATUS, getUserStatusOptions, getUserRoleOptions, isUserDeleted, } from '../constants';
+import { DataTableBulkActions } from './data-table-bulk-actions';
+import { useUsersColumns } from './users-columns';
+import { getUsers, searchUsers } from '../api';
+import { useUsers } from './users-provider';
+import type { User } from '../types';
+
 
 const route = getRouteApi('/_authenticated/users/')
 
@@ -62,9 +47,11 @@ export function UsersTable() {
   const columns = useUsersColumns()
   const { refreshTrigger } = useUsers()
   const isMobile = useMediaQuery('(max-width: 640px)')
+  const isAdmin = useIsAdmin()
   const [rowSelection, setRowSelection] = useState({})
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
+  const [downstream, setDownstream] = useState<string>('')
 
   const {
     globalFilter,
@@ -93,17 +80,20 @@ export function UsersTable() {
       pagination.pageIndex + 1,
       pagination.pageSize,
       globalFilter,
+      downstream,
       refreshTrigger,
     ],
     queryFn: async () => {
       const hasFilter = globalFilter?.trim()
+      const hasDownstream = downstream?.trim()
       const params = {
         p: pagination.pageIndex + 1,
         page_size: pagination.pageSize,
       }
 
-      const result = hasFilter
-        ? await searchUsers({ ...params, keyword: globalFilter })
+      // When downstream filter is active, always use searchUsers
+      const result = hasFilter || hasDownstream
+        ? await searchUsers({ ...params, keyword: globalFilter, downstream })
         : await getUsers(params)
 
       if (!result.success) {
@@ -196,6 +186,21 @@ export function UsersTable() {
             singleSelect: true,
           },
         ],
+        additionalSearch: isAdmin ? (
+          <Select value={downstream || undefined} onValueChange={(value) => setDownstream(value === '__all__' || value === null ? '' : value)}>
+            <SelectTrigger className='h-8 w-[140px]'>
+              <SelectValue placeholder={t('Select downstream platform', { ns: 'wisemodel' })} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='__all__'>{t('All')}</SelectItem>
+              <SelectItem value='wisemodel'>WiseModel</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : undefined,
+        hasAdditionalFilters: !!downstream,
+        onReset: () => {
+          setDownstream('')
+        },
       }}
       getRowClassName={(row, { isMobile }) =>
         isDisabledUserRow(row.original)

@@ -1,0 +1,7 @@
+{
+  "quota_consumed": "WiseModel 消費額",
+  "request_count": "WiseModel リクエスト数",
+  "only_users": "WiseModel ユーザーのみ",
+  "package_id_placeholder": "WiseModel パッケージ ID",
+  "select_downstream_platform": "下流プラットフォームを選択"
+}

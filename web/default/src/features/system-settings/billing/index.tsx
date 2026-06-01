@@ -101,9 +101,34 @@ const defaultBillingSettings: BillingSettings = {
   WaffoPancakeReturnURL: '',
   WaffoPancakeStoreID: '',
   WaffoPancakeProductID: '',
+  // PayPal gateway
+  PayPalClientId: '',
+  PayPalClientSecret: '',
+  PayPalWebhookSecret: '',
+  PayPalMode: 'sandbox',
+  PayPalMinTopUp: 1,
+  // Alipay gateway
+  AlipayEnabled: false,
+  AlipayAppId: '',
+  AlipayPrivateKey: '',
+  AlipayPublicKey: '',
+  AlipaySellerId: '',
+  AlipayIsSandbox: false,
+  AlipayMinTopUp: 1,
+  // WeChat Pay gateway
+  WxpayEnabled: false,
+  WxpayAppId: '',
+  WxpayMchId: '',
+  WxpayMchSerialNo: '',
+  WxpayApiV3Key: '',
+  WxpayPrivateKey: '',
+  WxpayPublicKeyId: '',
+  WxpayPublicKey: '',
+  WxpayMinTopUp: 1,
   'checkin_setting.enabled': false,
   'checkin_setting.min_quota': 1000,
   'checkin_setting.max_quota': 10000,
+  ServerAddress: '',
 }
 
 export function BillingSettings() {

@@ -46,7 +46,10 @@ export function PlatformsSkRevealDialog() {
   const handleCopy = async () => {
     if (!skReveal?.platform_sk) return
     try {
-      await navigator.clipboard.writeText(skReveal.platform_sk)
+      // Copy both headers in the same format as the API expects them
+      // (matching Classic's "复制凭证" behavior)
+      const text = `X-Platform-Id: ${skReveal.platform_id}\nX-Platform-Sk: ${skReveal.platform_sk}`
+      await navigator.clipboard.writeText(text)
       setCopied(true)
       toast.success(t('Copied'))
     } catch {

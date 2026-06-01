@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { z } from 'zod'
+import { z } from 'zod';
+
 
 // ============================================================================
 // User Schema & Types
@@ -92,6 +93,8 @@ export interface GetUsersResponse {
 export interface SearchUsersParams {
   keyword?: string
   group?: string
+  /** Filter by downstream platform (e.g. 'wisemodel') */
+  downstream?: string
   p?: number
   page_size?: number
 }

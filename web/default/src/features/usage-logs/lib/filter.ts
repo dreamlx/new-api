@@ -19,14 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Utility functions for usage logs filters
  */
-import { LOG_CATEGORY_LABELS } from '../constants'
-import type {
-  LogCategory,
-  LogFilters,
-  CommonLogFilters,
-  DrawingLogFilters,
-  TaskLogFilters,
-} from '../types'
+import type { LogCategory, LogFilters, CommonLogFilters, DrawingLogFilters, TaskLogFilters, } from '../types';
+import { LOG_CATEGORY_LABELS } from '../constants';
+
 
 // ============================================================================
 // Filter Building Functions
@@ -57,6 +52,12 @@ export function buildSearchParams(
         ...(commonFilters.requestId && { requestId: commonFilters.requestId }),
         ...(commonFilters.upstreamRequestId && {
           upstreamRequestId: commonFilters.upstreamRequestId,
+        }),
+        ...(commonFilters.isWisemodel && {
+          is_wisemodel: commonFilters.isWisemodel,
+        }),
+        ...(commonFilters.wisemodelPackageId && {
+          wisemodel_package_id: commonFilters.wisemodelPackageId,
         }),
       }
     }

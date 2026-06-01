@@ -19,7 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Type definitions for usage logs
  */
-import type { UsageLog } from './data/schema'
+import type { UsageLog } from './data/schema';
+
 
 // ============================================================================
 // Log Category Types
@@ -53,6 +54,10 @@ export interface CommonLogFilters extends CommonFilters {
   username?: string
   requestId?: string
   upstreamRequestId?: string
+  /** Filter logs for WiseModel users only */
+  isWisemodel?: boolean
+  /** Filter logs by WiseModel package ID */
+  wisemodelPackageId?: string
 }
 
 /**

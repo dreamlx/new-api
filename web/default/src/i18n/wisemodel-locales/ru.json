@@ -1,0 +1,7 @@
+{
+  "quota_consumed": "Потреблённая квота WiseModel",
+  "request_count": "Запросы WiseModel",
+  "only_users": "Только пользователи WiseModel",
+  "package_id_placeholder": "ID пакета WiseModel",
+  "select_downstream_platform": "Выберите нижестоящую платформу"
+}

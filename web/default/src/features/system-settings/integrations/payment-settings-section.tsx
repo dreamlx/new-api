@@ -1,3 +1,17 @@
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage, } from '@/components/ui/form';
+import { Alert, AlertAction, AlertDescription, AlertTitle, } from '@/components/ui/alert';
+import { RiskAcknowledgementDialog } from '@/components/risk-acknowledgement-dialog';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Code2, Eye, ShieldAlert } from 'lucide-react';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { Button } from '@/components/ui/button';
+import { useTranslation } from 'react-i18next';
+import { Input } from '@/components/ui/input';
+import { useForm } from 'react-hook-form';
+import { cn } from '@/lib/utils';
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -16,57 +30,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import * as React from 'react'
-import * as z from 'zod'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Code2, Eye, ShieldAlert } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-  AlertTitle,
-} from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
-import { Separator } from '@/components/ui/separator'
-import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
-import { RiskAcknowledgementDialog } from '@/components/risk-acknowledgement-dialog'
-import { confirmPaymentCompliance } from '../api'
-import { SettingsSection } from '../components/settings-section'
-import { useUpdateOption } from '../hooks/use-update-option'
-import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
-import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
-import { CreemProductsVisualEditor } from './creem-products-visual-editor'
-import { PaymentMethodsVisualEditor } from './payment-methods-visual-editor'
-import {
-  formatJsonForEditor,
-  getJsonError,
-  normalizeJsonForComparison,
-  removeTrailingSlash,
-} from './utils'
-import {
-  WaffoPancakeSettingsSection,
-  type WaffoPancakeSettingsValues,
-} from './waffo-pancake-settings-section'
-import {
-  WaffoSettingsSection,
-  type WaffoSettingsValues,
-} from './waffo-settings-section'
+import * as React from 'react';
+import { toast } from 'sonner';
+import * as z from 'zod';
+
+import { WaffoPancakeSettingsSection, type WaffoPancakeSettingsValues, } from './waffo-pancake-settings-section';
+import { formatJsonForEditor, getJsonError, normalizeJsonForComparison, removeTrailingSlash, } from './utils';
+import { PayPalSettingsSection, type PayPalSettingsValues, } from './paypal-settings-section';
+import { AlipaySettingsSection, type AlipaySettingsValues, } from './alipay-settings-section';
+import { WxpaySettingsSection, type WxpaySettingsValues, } from './wxpay-settings-section';
+import { WaffoSettingsSection, type WaffoSettingsValues, } from './waffo-settings-section';
+import { PaymentMethodsVisualEditor } from './payment-methods-visual-editor';
+import { AmountDiscountVisualEditor } from './amount-discount-visual-editor';
+import { CreemProductsVisualEditor } from './creem-products-visual-editor';
+import { AmountOptionsVisualEditor } from './amount-options-visual-editor';
+import { SettingsSection } from '../components/settings-section';
+import { useUpdateOption } from '../hooks/use-update-option';
+import { confirmPaymentCompliance } from '../api';
+
 
 const paymentSchema = z.object({
   PayAddress: z.string().refine((value) => {
@@ -152,6 +133,10 @@ type PaymentSettingsSectionProps = {
   waffoPancakeProvisionedStoreID?: string
   waffoPancakeProvisionedProductID?: string
   complianceDefaults: PaymentComplianceDefaults
+  paypalDefaultValues: PayPalSettingsValues
+  alipayDefaultValues: AlipaySettingsValues
+  wxpayDefaultValues: WxpaySettingsValues
+  serverAddress?: string
 }
 
 export function PaymentSettingsSection({
@@ -161,6 +146,10 @@ export function PaymentSettingsSection({
   waffoPancakeProvisionedStoreID,
   waffoPancakeProvisionedProductID,
   complianceDefaults,
+  paypalDefaultValues,
+  alipayDefaultValues,
+  wxpayDefaultValues,
+  serverAddress,
 }: PaymentSettingsSectionProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -1481,6 +1470,18 @@ export function PaymentSettingsSection({
       <Separator />
 
       <WaffoSettingsSection defaultValues={waffoDefaultValues} />
+
+      <Separator />
+
+      <PayPalSettingsSection defaultValues={paypalDefaultValues} serverAddress={serverAddress} />
+
+      <Separator />
+
+      <AlipaySettingsSection defaultValues={alipayDefaultValues} serverAddress={serverAddress} />
+
+      <Separator />
+
+      <WxpaySettingsSection defaultValues={wxpayDefaultValues} serverAddress={serverAddress} />
       {/* eslint-enable react-hooks/refs */}
     </SettingsSection>
   )
