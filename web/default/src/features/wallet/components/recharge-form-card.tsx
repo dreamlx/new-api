@@ -287,11 +287,11 @@ export function RechargeFormCard({
                             )}
                           </div>
                           <div className='text-muted-foreground mt-1.5 w-full text-xs sm:mt-2'>
-                            Pay {formatCurrency(actualPrice)}
+                            {t('Pay {{amount}}', { amount: formatCurrency(actualPrice) })}
                             {hasDiscount && savedAmount > 0 && (
                               <span className='text-green-600'>
                                 {' '}
-                                • Save {formatCurrency(savedAmount)}
+                                • {t('Save {{amount}}', { amount: formatCurrency(savedAmount) })}
                               </span>
                             )}
                           </div>
@@ -338,7 +338,7 @@ export function RechargeFormCard({
                 <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
                   {t('Payment Method')}
                 </Label>
-                {hasStandardPaymentMethods ? (
+                {hasStandardPaymentMethods || enableAlipayTopup || enableWxpayTopup ? (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
                     {visiblePayMethods.map((method) => {
                       const methodMinTopup = method.min_topup || 0
@@ -387,7 +387,7 @@ export function RechargeFormCard({
                       )
                     })}
                   </div>
-                ) : hasWaffoPaymentMethods ? null : (
+                ) : enableAlipayTopup || enableWxpayTopup || enableWaffoPancakeTopup || hasWaffoPaymentMethods ? null : (
                   <Alert>
                     <AlertDescription>
                       {t(
@@ -405,7 +405,7 @@ export function RechargeFormCard({
                         topupInfo?.alipay_min_topup || minTopup
                       const disabled = alipayMinTopup > topupAmount
                       const alipayMethod: PaymentMethod = {
-                        name: 'Alipay',
+                        name: t('Alipay'),
                         type: PAYMENT_TYPES.ALIPAY,
                       }
 
@@ -424,10 +424,10 @@ export function RechargeFormCard({
                               PAYMENT_TYPES.ALIPAY,
                               'h-4 w-4',
                               undefined,
-                              'Alipay'
+                              t('Alipay')
                             )
                           )}
-                          <span className='truncate'>Alipay</span>
+                          <span className='truncate'>{t('Alipay')}</span>
                         </Button>
                       )
 
@@ -490,6 +490,58 @@ export function RechargeFormCard({
                             <TooltipContent>
                               {t('Minimum topup amount: {{amount}}', {
                                 amount: wxpayMinTopup,
+                              })}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : (
+                        button
+                      )
+                    })()}
+                  </div>
+                )}
+
+                {/* Waffo Pancake button — shown when enable_waffo_pancake_topup is true */}
+                {enableWaffoPancakeTopup && (
+                  <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
+                    {(() => {
+                      const pancakeMinTopup =
+                        topupInfo?.waffo_pancake_min_topup || minTopup
+                      const disabled = pancakeMinTopup > topupAmount
+                      const pancakeMethod: PaymentMethod = {
+                        name: t('Waffo Pancake'),
+                        type: PAYMENT_TYPES.WAFFO_PANCAKE,
+                      }
+
+                      const button = (
+                        <Button
+                          key='waffo-pancake'
+                          variant='outline'
+                          onClick={() => onPaymentMethodSelect(pancakeMethod)}
+                          disabled={disabled || !!paymentLoading}
+                          className='h-9 min-w-0 justify-start gap-2 rounded-lg px-3'
+                        >
+                          {paymentLoading === PAYMENT_TYPES.WAFFO_PANCAKE ? (
+                            <Loader2 className='h-4 w-4 animate-spin' />
+                          ) : (
+                            getPaymentIcon(
+                              PAYMENT_TYPES.WAFFO_PANCAKE,
+                              'h-4 w-4',
+                              undefined,
+                              t('Waffo Pancake')
+                            )
+                          )}
+                          <span className='truncate'>{t('Waffo Pancake')}</span>
+                        </Button>
+                      )
+
+                      return disabled ? (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger render={button}></TooltipTrigger>
+                            <TooltipContent>
+                              {t('Minimum topup amount: {{amount}}', {
+                                amount: pancakeMinTopup,
                               })}
                             </TooltipContent>
                           </Tooltip>
