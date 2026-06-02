@@ -331,7 +331,7 @@ export function RechargeFormCard({
                 <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
                   {t('Payment Method')}
                 </Label>
-                {hasStandardPaymentMethods || enableAlipayTopup || enableWxpayTopup ? (
+                {hasStandardPaymentMethods || enableAlipayTopup || enableWxpayTopup || enableWaffoPancakeTopup ? (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
                     {visiblePayMethods.map((method) => {
                       const methodMinTopup = method.min_topup || 0
@@ -379,8 +379,44 @@ export function RechargeFormCard({
                         button
                       )
                     })}
+
+                    {/* Direct Alipay button — shown when enable_alipay_topup is true */}
+                    {enableAlipayTopup && (
+                      <StandaloneGatewayButton
+                        paymentType={PAYMENT_TYPES.ALIPAY}
+                        label={t('Alipay')}
+                        minTopup={topupInfo?.alipay_min_topup || minTopup}
+                        topupAmount={topupAmount}
+                        paymentLoading={paymentLoading}
+                        onSelect={onPaymentMethodSelect}
+                      />
+                    )}
+
+                    {/* Direct Wxpay button — shown when enable_wxpay_topup is true */}
+                    {enableWxpayTopup && (
+                      <StandaloneGatewayButton
+                        paymentType={PAYMENT_TYPES.WECHAT}
+                        label={t('WeChat Pay')}
+                        minTopup={topupInfo?.wxpay_min_topup || minTopup}
+                        topupAmount={topupAmount}
+                        paymentLoading={paymentLoading}
+                        onSelect={onPaymentMethodSelect}
+                      />
+                    )}
+
+                    {/* Waffo Pancake button — shown when enable_waffo_pancake_topup is true */}
+                    {enableWaffoPancakeTopup && (
+                      <StandaloneGatewayButton
+                        paymentType={PAYMENT_TYPES.WAFFO_PANCAKE}
+                        label={t('Waffo Pancake')}
+                        minTopup={topupInfo?.waffo_pancake_min_topup || minTopup}
+                        topupAmount={topupAmount}
+                        paymentLoading={paymentLoading}
+                        onSelect={onPaymentMethodSelect}
+                      />
+                    )}
                   </div>
-                ) : enableAlipayTopup || enableWxpayTopup || enableWaffoPancakeTopup || hasWaffoPaymentMethods ? null : (
+                ) : hasWaffoPaymentMethods ? null : (
                   <Alert>
                     <AlertDescription>
                       {t(
@@ -388,48 +424,6 @@ export function RechargeFormCard({
                       )}
                     </AlertDescription>
                   </Alert>
-                )}
-
-                {/* Direct Alipay button — shown when enable_alipay_topup is true */}
-                {enableAlipayTopup && (
-                  <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    <StandaloneGatewayButton
-                      paymentType={PAYMENT_TYPES.ALIPAY}
-                      label={t('Alipay')}
-                      minTopup={topupInfo?.alipay_min_topup || minTopup}
-                      topupAmount={topupAmount}
-                      paymentLoading={paymentLoading}
-                      onSelect={onPaymentMethodSelect}
-                    />
-                  </div>
-                )}
-
-                {/* Direct Wxpay button — shown when enable_wxpay_topup is true */}
-                {enableWxpayTopup && (
-                  <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    <StandaloneGatewayButton
-                      paymentType={PAYMENT_TYPES.WECHAT}
-                      label={t('WeChat Pay')}
-                      minTopup={topupInfo?.wxpay_min_topup || minTopup}
-                      topupAmount={topupAmount}
-                      paymentLoading={paymentLoading}
-                      onSelect={onPaymentMethodSelect}
-                    />
-                  </div>
-                )}
-
-                {/* Waffo Pancake button — shown when enable_waffo_pancake_topup is true */}
-                {enableWaffoPancakeTopup && (
-                  <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    <StandaloneGatewayButton
-                      paymentType={PAYMENT_TYPES.WAFFO_PANCAKE}
-                      label={t('Waffo Pancake')}
-                      minTopup={topupInfo?.waffo_pancake_min_topup || minTopup}
-                      topupAmount={topupAmount}
-                      paymentLoading={paymentLoading}
-                      onSelect={onPaymentMethodSelect}
-                    />
-                  </div>
                 )}
               </div>
 
