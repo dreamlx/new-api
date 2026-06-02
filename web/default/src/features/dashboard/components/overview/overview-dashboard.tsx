@@ -16,31 +16,53 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ArrowRight, BookOpen, Check, ChevronDown, ChevronUp, Circle, CreditCard, FileText, KeyRound, ListChecks, Play, RadioTower, ShieldCheck, TerminalSquare, Timer, type LucideIcon, } from 'lucide-react';
-import { CardStaggerContainer, CardStaggerItem, } from '@/components/page-transition';
-import { fetchTokenKey, getApiKeys } from '@/features/keys/api';
-import { motion, useReducedMotion } from 'motion/react';
-import { CopyButton } from '@/components/copy-button';
-import type { ApiKey } from '@/features/keys/types';
-import { useAuthStore } from '@/stores/auth-store';
-import { useQuery } from '@tanstack/react-query';
-import { MOTION_TRANSITION } from '@/lib/motion';
-import { Button } from '@/components/ui/button';
-import { useTranslation } from 'react-i18next';
-import { Link } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
-import { getUserModels } from '@/lib/api';
-import { ROLE } from '@/lib/roles';
-import { cn } from '@/lib/utils';
-
-import { useApiInfo, useDashboardContentVisibility, } from '../../hooks/use-status-data';
-import { PerformanceHealthPanel } from './performance-health-panel';
-import { WiseModelStatsPanel } from './wisemodel-stats-panel';
-import { AnnouncementsPanel } from './announcements-panel';
-import { ApiInfoPanel } from './api-info-panel';
-import { SummaryCards } from './summary-cards';
-import { UptimePanel } from './uptime-panel';
-import { FAQPanel } from './faq-panel';
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
+import {
+  ArrowRight,
+  BookOpen,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Circle,
+  CreditCard,
+  FileText,
+  KeyRound,
+  ListChecks,
+  Play,
+  RadioTower,
+  ShieldCheck,
+  TerminalSquare,
+  Timer,
+  type LucideIcon,
+} from 'lucide-react'
+import { motion, useReducedMotion } from 'motion/react'
+import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '@/stores/auth-store'
+import { getUserModels } from '@/lib/api'
+import { MOTION_TRANSITION } from '@/lib/motion'
+import { ROLE } from '@/lib/roles'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { CopyButton } from '@/components/copy-button'
+import {
+  CardStaggerContainer,
+  CardStaggerItem,
+} from '@/components/page-transition'
+import { fetchTokenKey, getApiKeys } from '@/features/keys/api'
+import type { ApiKey } from '@/features/keys/types'
+import {
+  useApiInfo,
+  useDashboardContentVisibility,
+} from '../../hooks/use-status-data'
+import { AnnouncementsPanel } from './announcements-panel'
+import { ApiInfoPanel } from './api-info-panel'
+import { FAQPanel } from './faq-panel'
+import { PerformanceHealthPanel } from './performance-health-panel'
+import { SummaryCards } from './summary-cards'
+import { UptimePanel } from './uptime-panel'
+import { WiseModelStatsPanel } from './wisemodel-stats-panel'
 
 
 const SETUP_GUIDE_VISIBILITY_STORAGE_KEY =

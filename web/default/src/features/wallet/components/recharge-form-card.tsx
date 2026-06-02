@@ -41,6 +41,7 @@ import {
   getMinTopupAmount,
   calculatePresetPricing,
 } from '../lib'
+import { filterVisiblePayMethods, hasAnyConfigurableTopup } from '../lib/visible-pay-methods'
 import { PAYMENT_TYPES } from '../constants'
 import type {
   PaymentMethod,
@@ -50,6 +51,7 @@ import type {
   WaffoPayMethod,
 } from '../types'
 import { CreemProductsSection } from './creem-products-section'
+import { StandaloneGatewayButton } from './standalone-gateway-button'
 
 interface RechargeFormCardProps {
   topupInfo: TopupInfo | null
@@ -133,14 +135,13 @@ export function RechargeFormCard({
     }
   }
 
-  const hasConfigurableTopup =
-    topupInfo?.enable_online_topup ||
-    topupInfo?.enable_stripe_topup ||
-    enableWaffoTopup ||
-    enableWaffoPancakeTopup ||
-    enablePayPalTopup ||
-    enableAlipayTopup ||
-    enableWxpayTopup
+  const hasConfigurableTopup = hasAnyConfigurableTopup(topupInfo, {
+    enableWaffoTopup,
+    enableWaffoPancakeTopup,
+    enablePayPalTopup,
+    enableAlipayTopup,
+    enableWxpayTopup,
+  })
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
 
   // Filter payment methods from the pay_methods list (matching classic logic):
@@ -149,18 +150,10 @@ export function RechargeFormCard({
   // - Remove 'wxpay' when direct Wxpay is enabled (replaced by dedicated button)
   // - When enableOnlineTopUp is false, only keep standalone gateways (stripe, paypal)
   const enableOnlineTopUp = topupInfo?.enable_online_topup ?? false
-  const visiblePayMethods = (topupInfo?.pay_methods || []).filter((method) => {
-    if (!method || !method.type) return false
-    if (method.type === 'waffo') return false
-    if (method.type === PAYMENT_TYPES.ALIPAY && enableAlipayTopup) return false
-    if (method.type === PAYMENT_TYPES.WECHAT && enableWxpayTopup) return false
-    // When online topup (Epay) is disabled, only show standalone gateway methods
-    const isStandaloneGateway =
-      method.type === PAYMENT_TYPES.STRIPE ||
-      method.type === PAYMENT_TYPES.PAYPAL
-    if (!enableOnlineTopUp && !isStandaloneGateway) return false
-    return true
-  })
+  const visiblePayMethods = filterVisiblePayMethods(
+    topupInfo?.pay_methods || [],
+    { enableAlipayTopup, enableWxpayTopup, enableOnlineTopUp }
+  )
 
   const hasStandardPaymentMethods = visiblePayMethods.length > 0
   const hasWaffoPaymentMethods =
@@ -400,156 +393,42 @@ export function RechargeFormCard({
                 {/* Direct Alipay button — shown when enable_alipay_topup is true */}
                 {enableAlipayTopup && (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    {(() => {
-                      const alipayMinTopup =
-                        topupInfo?.alipay_min_topup || minTopup
-                      const disabled = alipayMinTopup > topupAmount
-                      const alipayMethod: PaymentMethod = {
-                        name: t('Alipay'),
-                        type: PAYMENT_TYPES.ALIPAY,
-                      }
-
-                      const button = (
-                        <Button
-                          key='direct-alipay'
-                          variant='outline'
-                          onClick={() => onPaymentMethodSelect(alipayMethod)}
-                          disabled={disabled || !!paymentLoading}
-                          className='h-9 min-w-0 justify-start gap-2 rounded-lg px-3'
-                        >
-                          {paymentLoading === PAYMENT_TYPES.ALIPAY ? (
-                            <Loader2 className='h-4 w-4 animate-spin' />
-                          ) : (
-                            getPaymentIcon(
-                              PAYMENT_TYPES.ALIPAY,
-                              'h-4 w-4',
-                              undefined,
-                              t('Alipay')
-                            )
-                          )}
-                          <span className='truncate'>{t('Alipay')}</span>
-                        </Button>
-                      )
-
-                      return disabled ? (
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger render={button}></TooltipTrigger>
-                            <TooltipContent>
-                              {t('Minimum topup amount: {{amount}}', {
-                                amount: alipayMinTopup,
-                              })}
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      ) : (
-                        button
-                      )
-                    })()}
+                    <StandaloneGatewayButton
+                      paymentType={PAYMENT_TYPES.ALIPAY}
+                      label={t('Alipay')}
+                      minTopup={topupInfo?.alipay_min_topup || minTopup}
+                      topupAmount={topupAmount}
+                      paymentLoading={paymentLoading}
+                      onSelect={onPaymentMethodSelect}
+                    />
                   </div>
                 )}
 
                 {/* Direct Wxpay button — shown when enable_wxpay_topup is true */}
                 {enableWxpayTopup && (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    {(() => {
-                      const wxpayMinTopup =
-                        topupInfo?.wxpay_min_topup || minTopup
-                      const disabled = wxpayMinTopup > topupAmount
-                      const wxpayMethod: PaymentMethod = {
-                        name: t('WeChat Pay'),
-                        type: PAYMENT_TYPES.WECHAT,
-                      }
-
-                      const button = (
-                        <Button
-                          key='direct-wxpay'
-                          variant='outline'
-                          onClick={() => onPaymentMethodSelect(wxpayMethod)}
-                          disabled={disabled || !!paymentLoading}
-                          className='h-9 min-w-0 justify-start gap-2 rounded-lg px-3'
-                        >
-                          {paymentLoading === PAYMENT_TYPES.WECHAT ? (
-                            <Loader2 className='h-4 w-4 animate-spin' />
-                          ) : (
-                            getPaymentIcon(
-                              PAYMENT_TYPES.WECHAT,
-                              'h-4 w-4',
-                              undefined,
-                              t('WeChat Pay')
-                            )
-                          )}
-                          <span className='truncate'>{t('WeChat Pay')}</span>
-                        </Button>
-                      )
-
-                      return disabled ? (
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger render={button}></TooltipTrigger>
-                            <TooltipContent>
-                              {t('Minimum topup amount: {{amount}}', {
-                                amount: wxpayMinTopup,
-                              })}
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      ) : (
-                        button
-                      )
-                    })()}
+                    <StandaloneGatewayButton
+                      paymentType={PAYMENT_TYPES.WECHAT}
+                      label={t('WeChat Pay')}
+                      minTopup={topupInfo?.wxpay_min_topup || minTopup}
+                      topupAmount={topupAmount}
+                      paymentLoading={paymentLoading}
+                      onSelect={onPaymentMethodSelect}
+                    />
                   </div>
                 )}
 
                 {/* Waffo Pancake button — shown when enable_waffo_pancake_topup is true */}
                 {enableWaffoPancakeTopup && (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    {(() => {
-                      const pancakeMinTopup =
-                        topupInfo?.waffo_pancake_min_topup || minTopup
-                      const disabled = pancakeMinTopup > topupAmount
-                      const pancakeMethod: PaymentMethod = {
-                        name: t('Waffo Pancake'),
-                        type: PAYMENT_TYPES.WAFFO_PANCAKE,
-                      }
-
-                      const button = (
-                        <Button
-                          key='waffo-pancake'
-                          variant='outline'
-                          onClick={() => onPaymentMethodSelect(pancakeMethod)}
-                          disabled={disabled || !!paymentLoading}
-                          className='h-9 min-w-0 justify-start gap-2 rounded-lg px-3'
-                        >
-                          {paymentLoading === PAYMENT_TYPES.WAFFO_PANCAKE ? (
-                            <Loader2 className='h-4 w-4 animate-spin' />
-                          ) : (
-                            getPaymentIcon(
-                              PAYMENT_TYPES.WAFFO_PANCAKE,
-                              'h-4 w-4',
-                              undefined,
-                              t('Waffo Pancake')
-                            )
-                          )}
-                          <span className='truncate'>{t('Waffo Pancake')}</span>
-                        </Button>
-                      )
-
-                      return disabled ? (
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger render={button}></TooltipTrigger>
-                            <TooltipContent>
-                              {t('Minimum topup amount: {{amount}}', {
-                                amount: pancakeMinTopup,
-                              })}
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      ) : (
-                        button
-                      )
-                    })()}
+                    <StandaloneGatewayButton
+                      paymentType={PAYMENT_TYPES.WAFFO_PANCAKE}
+                      label={t('Waffo Pancake')}
+                      minTopup={topupInfo?.waffo_pancake_min_topup || minTopup}
+                      topupAmount={topupAmount}
+                      paymentLoading={paymentLoading}
+                      onSelect={onPaymentMethodSelect}
+                    />
                   </div>
                 )}
               </div>

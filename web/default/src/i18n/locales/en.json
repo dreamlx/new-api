@@ -4651,6 +4651,8 @@
     "Stripe top-up is not enabled by the administrator": "Stripe top-up is not enabled by the administrator",
     "Alipay top-up is not enabled by the administrator": "Alipay top-up is not enabled by the administrator",
     "WeChat Pay top-up is not enabled by the administrator": "WeChat Pay top-up is not enabled by the administrator",
-    "Online top-up is not enabled by the administrator": "Online top-up is not enabled by the administrator"
+    "Online top-up is not enabled by the administrator": "Online top-up is not enabled by the administrator",
+    "Waffo Pancake top-up is not enabled by the administrator": "Waffo Pancake top-up is not enabled by the administrator",
+    "Waffo top-up is not enabled by the administrator": "Waffo top-up is not enabled by the administrator"
   }
 }

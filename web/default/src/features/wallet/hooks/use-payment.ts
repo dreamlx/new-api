@@ -25,11 +25,6 @@ import {
   calculateWaffoPancakeAmount,
   requestPayment,
   requestStripePayment,
-  requestPayPalPayment,
-  requestAlipayPayment,
-  requestWxpayPayment,
-  requestCreemPayment,
-  requestWaffoPayment,
   isApiSuccess,
 } from '../api'
 import {
@@ -40,24 +35,23 @@ import {
   isWaffoPancakePayment,
   submitPaymentForm,
 } from '../lib'
-import type { WxpayResult } from '../types'
+import {
+  type PaymentResult,
+  processPayPalBranch,
+  processAlipayBranch,
+  processWxpayBranch,
+  processCreemBranch,
+  processWaffoBranch,
+  extractPaymentError,
+} from '../lib/payment-result'
+
+// Re-export types for backward compatibility — consumers import from this hook
+export type { AlipayResult } from '../lib/payment-result'
+export type { PaymentResult } from '../lib/payment-result'
 
 // ============================================================================
 // Payment Hook
 // ============================================================================
-
-/** Result from Alipay payment — needs polling to auto-refresh balance */
-export interface AlipayResult {
-  pay_link: string
-  trade_no: string
-}
-
-/** Discriminated return type for processPayment */
-export type PaymentResult =
-  | { type: 'redirect'; success: boolean }
-  | { type: 'form'; success: boolean }
-  | { type: 'alipay'; success: boolean; data: AlipayResult }
-  | { type: 'wxpay'; success: boolean; data: WxpayResult }
 
 export function usePayment() {
   const [amount, setAmount] = useState<number>(0)
@@ -116,10 +110,7 @@ export function usePayment() {
             payment_method: 'stripe',
           })
           if (!isApiSuccess(response)) {
-            toast.error(
-              (response as unknown as { message?: string }).message ||
-                i18next.t('Payment request failed')
-            )
+            toast.error(extractPaymentError(response as Record<string, unknown>))
             return { type: 'redirect', success: false }
           }
           if (response.data?.pay_link) {
@@ -127,121 +118,24 @@ export function usePayment() {
             toast.success(i18next.t('Redirecting to payment page...'))
             return { type: 'redirect', success: true }
           }
+          toast.error(i18next.t('Payment failed'))
           return { type: 'redirect', success: false }
         }
 
         // ── PayPal ─────────────────────────────────────────────
-        if (isPayPalPayment(paymentType)) {
-          const response = await requestPayPalPayment({
-            amount: topupAmountInt,
-          })
-          if (!isApiSuccess(response)) {
-            toast.error(
-              (response as unknown as { message?: string }).message ||
-                i18next.t('Payment request failed')
-            )
-            return { type: 'redirect', success: false }
-          }
-          if (response.data?.pay_link) {
-            window.open(response.data.pay_link as string, '_blank')
-            toast.success(i18next.t('Redirecting to payment page...'))
-            return { type: 'redirect', success: true }
-          }
-          return { type: 'redirect', success: false }
-        }
+        if (isPayPalPayment(paymentType)) return processPayPalBranch(topupAmountInt)
 
         // ── Alipay (direct) ─────────────────────────────────────
-        if (isAlipayPayment(paymentType)) {
-          const response = await requestAlipayPayment({
-            amount: topupAmountInt,
-          })
-          if (!isApiSuccess(response)) {
-            toast.error(
-              (response as unknown as { message?: string }).message ||
-                i18next.t('Payment request failed')
-            )
-            return { type: 'alipay', success: false, data: { pay_link: '', trade_no: '' } }
-          }
-          if (response.data?.pay_link) {
-            window.open(response.data.pay_link as string, '_blank')
-            toast.success(i18next.t('Redirecting to payment page...'))
-            return {
-              type: 'alipay',
-              success: true,
-              data: {
-                pay_link: response.data.pay_link,
-                trade_no: response.data.trade_no || '',
-              },
-            }
-          }
-          return { type: 'alipay', success: false, data: { pay_link: '', trade_no: '' } }
-        }
+        if (isAlipayPayment(paymentType)) return processAlipayBranch(topupAmountInt)
 
         // ── Wxpay (direct) — returns QR code data ───────────────
-        if (isWxpayPayment(paymentType)) {
-          const response = await requestWxpayPayment({
-            amount: topupAmountInt,
-          })
-          if (!isApiSuccess(response)) {
-            toast.error(
-              (response as unknown as { message?: string }).message ||
-                i18next.t('Payment request failed')
-            )
-            return { type: 'wxpay', success: false, data: { code_url: '', trade_no: '' } }
-          }
-          if (response.data?.code_url) {
-            toast.success(i18next.t('Please scan QR code to pay'))
-            return {
-              type: 'wxpay',
-              success: true,
-              data: {
-                code_url: response.data.code_url,
-                trade_no: response.data.trade_no || '',
-              },
-            }
-          }
-          return { type: 'wxpay', success: false, data: { code_url: '', trade_no: '' } }
-        }
+        if (isWxpayPayment(paymentType)) return processWxpayBranch(topupAmountInt)
 
         // ── Creem ───────────────────────────────────────────────
-        // Note: Creem is typically handled via a separate UI path
-        // (product cards), but we support it here as a fallback.
-        if (paymentType === 'creem') {
-          toast.error(
-            i18next.t(
-              'Please select a Creem product below to proceed with payment.'
-            )
-          )
-          return { type: 'redirect', success: false }
-        }
+        if (paymentType === 'creem') return processCreemBranch()
 
         // ── Waffo (legacy) ─────────────────────────────────────
-        // Note: Waffo is typically handled via dedicated Waffo payment
-        // method buttons, but we support it here as a fallback.
-        if (paymentType === 'waffo') {
-          const response = await requestWaffoPayment({
-            amount: topupAmountInt,
-          })
-          if (!isApiSuccess(response)) {
-            toast.error(
-              (response as unknown as { message?: string }).message ||
-                i18next.t('Payment request failed')
-            )
-            return { type: 'redirect', success: false }
-          }
-          const paymentUrl =
-            response.data &&
-            typeof response.data === 'object' &&
-            'payment_url' in response.data
-              ? (response.data as { payment_url: string }).payment_url
-              : null
-          if (paymentUrl) {
-            window.open(paymentUrl, '_blank')
-            toast.success(i18next.t('Redirecting to payment page...'))
-            return { type: 'redirect', success: true }
-          }
-          return { type: 'redirect', success: false }
-        }
+        if (paymentType === 'waffo') return processWaffoBranch(topupAmountInt)
 
         // ── Epay (generic) — form submission ────────────────────
         const response = await requestPayment({
@@ -250,10 +144,7 @@ export function usePayment() {
         })
 
         if (!isApiSuccess(response)) {
-          toast.error(
-            (response as unknown as { message?: string }).message ||
-              i18next.t('Payment request failed')
-          )
+          toast.error(extractPaymentError(response as Record<string, unknown>))
           return { type: 'form', success: false }
         }
 

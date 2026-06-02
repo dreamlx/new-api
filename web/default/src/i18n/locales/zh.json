@@ -4648,6 +4648,8 @@
     "Stripe top-up is not enabled by the administrator": "管理员未开启 Stripe 充值",
     "Alipay top-up is not enabled by the administrator": "管理员未开启支付宝充值",
     "WeChat Pay top-up is not enabled by the administrator": "管理员未开启微信支付充值",
-    "Online top-up is not enabled by the administrator": "管理员未开启在线充值"
+    "Online top-up is not enabled by the administrator": "管理员未开启在线充值",
+    "Waffo Pancake top-up is not enabled by the administrator": "管理员未开启 Waffo Pancake 充值",
+    "Waffo top-up is not enabled by the administrator": "管理员未开启 Waffo 充值"
   }
 }

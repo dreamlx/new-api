@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, getSelf } from '@/lib/api'
+import { getSelf } from '@/lib/api'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { SectionPageLayout } from '@/components/layout'
@@ -42,11 +42,13 @@ import {
   useWaffoPayment,
   useWaffoPancakePayment,
 } from './hooks'
+import { useAlipayPolling } from './hooks/use-alipay-polling'
 import {
   getDefaultPaymentType,
   getMinTopupAmount,
   isWaffoPancakePayment,
 } from './lib'
+import { validatePaymentGateway } from './lib/gateway-validation'
 import type {
   UserWalletData,
   PaymentMethod,
@@ -84,12 +86,6 @@ export function Wallet(props: WalletProps) {
     trade_no: '',
   })
 
-  // Alipay polling state — after opening pay_link, poll topup/status until
-  // the async Alipay notify confirms payment, then auto-refresh the balance.
-  const [alipayPolling, setAlipayPolling] = useState(false)
-  const alipayPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const fetchUserRef = useRef<() => Promise<void>>()
-
   // Keep fetchUserRef in sync so pollAlipayStatus always calls the latest version
   // without needing fetchUser in its dependency array (avoids stale-closure issues).
   const fetchUser = useCallback(async () => {
@@ -107,88 +103,12 @@ export function Wallet(props: WalletProps) {
     }
   }, [])
 
+  const fetchUserRef = useRef<() => Promise<void>>()
   fetchUserRef.current = fetchUser
 
-  // Maximum number of Alipay polling attempts before giving up
-  const ALIPAY_MAX_POLLS = 100 // ~5 minutes at 3-second intervals
-
-  // Poll /api/user/topup/status for an Alipay trade_no until terminal state
-  const pollAlipayStatus = useCallback(
-    (tradeNo: string) => {
-      if (!tradeNo) return
-      setAlipayPolling(true)
-      let cancelled = false
-      let attempt = 0
-
-      const tick = async () => {
-        if (cancelled) return
-        attempt++
-        try {
-          const res = await api.get('/api/user/topup/status', {
-            params: { trade_no: tradeNo },
-          })
-          const { message, data } = res.data || {}
-          if (message === 'success' && data) {
-            const next = data.status
-            if (
-              next === 'success' ||
-              next === 'failed' ||
-              next === 'expired' ||
-              next === 'anomaly'
-            ) {
-              if (!cancelled) {
-                setAlipayPolling(false)
-                if (next === 'success') {
-                  toast.success(t('Payment successful'))
-                  await fetchUserRef.current?.()
-                } else {
-                  toast.error(
-                    next === 'expired'
-                      ? t('Order expired')
-                      : next === 'anomaly'
-                        ? t('Order anomaly')
-                        : t('Payment failed')
-                  )
-                }
-              }
-              return
-            }
-          }
-        } catch {
-          // Network errors are transient — keep polling
-        }
-        if (cancelled) return
-        if (attempt >= ALIPAY_MAX_POLLS) {
-          setAlipayPolling(false)
-          toast.warning(t('Payment status check timed out. Please refresh the page to verify.'))
-          return
-        }
-        alipayPollTimerRef.current = setTimeout(tick, 3000)
-      }
-
-      alipayPollTimerRef.current = setTimeout(tick, 3000)
-
-      // Return cleanup function
-      return () => {
-        cancelled = true
-        if (alipayPollTimerRef.current) {
-          clearTimeout(alipayPollTimerRef.current)
-          alipayPollTimerRef.current = null
-        }
-        setAlipayPolling(false)
-      }
-    },
-    [t]
-  )
-
-  // Cleanup Alipay polling on unmount
-  useEffect(() => {
-    return () => {
-      if (alipayPollTimerRef.current) {
-        clearTimeout(alipayPollTimerRef.current)
-      }
-    }
-  }, [])
+  // Alipay polling — after opening pay_link, poll topup/status until
+  // the async Alipay notify confirms payment, then auto-refresh the balance.
+  const { alipayPolling, pollAlipayStatus } = useAlipayPolling(fetchUserRef)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -264,32 +184,9 @@ export function Wallet(props: WalletProps) {
   // Handle payment method selection
   const handlePaymentMethodSelect = async (method: PaymentMethod) => {
     // Gateway-enable validation (matching classic's preTopUp checks)
-    // Block submission with an error if the gateway is not enabled
-    if (method.type === 'paypal' && !topupInfo?.enable_paypal_topup) {
-      toast.error(t('PayPal top-up is not enabled by the administrator'))
-      return
-    }
-    if (method.type === 'stripe' && !topupInfo?.enable_stripe_topup) {
-      toast.error(t('Stripe top-up is not enabled by the administrator'))
-      return
-    }
-    if (method.type === 'alipay' && !topupInfo?.enable_alipay_topup) {
-      toast.error(t('Alipay top-up is not enabled by the administrator'))
-      return
-    }
-    if (method.type === 'wxpay' && !topupInfo?.enable_wxpay_topup) {
-      toast.error(t('WeChat Pay top-up is not enabled by the administrator'))
-      return
-    }
-    if (
-      !topupInfo?.enable_online_topup &&
-      method.type !== 'stripe' &&
-      method.type !== 'paypal' &&
-      method.type !== 'alipay' &&
-      method.type !== 'wxpay' &&
-      !method.type.startsWith('waffo')
-    ) {
-      toast.error(t('Online top-up is not enabled by the administrator'))
+    const validationError = validatePaymentGateway(method.type, topupInfo)
+    if (validationError) {
+      toast.error(t(validationError))
       return
     }
 
