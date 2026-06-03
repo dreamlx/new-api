@@ -341,17 +341,29 @@ const PaymentSetting = () => {
                   hideSectionTitle
                 />
               </Tabs.TabPane>
+              <Tabs.TabPane tab={t('PayPal 设置')} itemKey='paypal'>
+                <SettingsPaymentGatewayPayPal
+                  options={inputs}
+                  refresh={onRefresh}
+                  hideSectionTitle
+                />
+              </Tabs.TabPane>
+              <Tabs.TabPane tab={t('支付宝设置')} itemKey='alipay'>
+                <SettingsPaymentGatewayAlipay
+                  options={inputs}
+                  refresh={onRefresh}
+                  hideSectionTitle
+                />
+              </Tabs.TabPane>
+              <Tabs.TabPane tab={t('微信支付设置')} itemKey='wxpay'>
+                <SettingsPaymentGatewayWxpay
+                  options={inputs}
+                  refresh={onRefresh}
+                  hideSectionTitle
+                />
+              </Tabs.TabPane>
             </Tabs>
           </div>
-        </Card>
-        <Card style={{ marginTop: '10px' }}>
-          <SettingsPaymentGatewayPayPal options={inputs} refresh={onRefresh} />
-        </Card>
-        <Card style={{ marginTop: '10px' }}>
-          <SettingsPaymentGatewayAlipay options={inputs} refresh={onRefresh} />
-        </Card>
-        <Card style={{ marginTop: '10px' }}>
-          <SettingsPaymentGatewayWxpay options={inputs} refresh={onRefresh} />
         </Card>
         <RiskAcknowledgementModal
           visible={complianceVisible}

@@ -39,6 +39,7 @@ import { useTranslation } from 'react-i18next';
 
 export default function SettingsPaymentGatewayPayPal(props) {
   const { t } = useTranslation();
+  const sectionTitle = props.hideSectionTitle ? undefined : t('PayPal 设置');
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState({
     PayPalClientId: '',
@@ -154,7 +155,7 @@ export default function SettingsPaymentGatewayPayPal(props) {
         onValueChange={handleFormChange}
         getFormApi={(api) => (formApiRef.current = api)}
       >
-        <Form.Section text={t('PayPal 设置')}>
+        <Form.Section text={sectionTitle}>
           <Text>
             PayPal 凭证请前往
             <a

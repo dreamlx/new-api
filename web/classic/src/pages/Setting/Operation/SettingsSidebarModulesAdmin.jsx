@@ -63,6 +63,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       channel: true,
       models: true,
       deployment: true,
+      platforms: true,
       redemption: true,
       user: true,
       subscription: true,
@@ -259,6 +260,11 @@ export default function SettingsSidebarModulesAdmin(props) {
           key: 'deployment',
           title: t('模型部署'),
           description: t('模型部署管理'),
+        },
+        {
+          key: 'platforms',
+          title: t('平台管理'),
+          description: t('下游平台凭证管理'),
         },
         {
           key: 'subscription',

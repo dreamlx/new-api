@@ -105,6 +105,8 @@ export default function SettingsSidebarModulesUser() {
         channel: isSidebarModuleAllowed('admin', 'channel'),
         models: isSidebarModuleAllowed('admin', 'models'),
         deployment: isSidebarModuleAllowed('admin', 'deployment'),
+        platforms: isSidebarModuleAllowed('admin', 'platforms'),
+        subscription: isSidebarModuleAllowed('admin', 'subscription'),
         redemption: isSidebarModuleAllowed('admin', 'redemption'),
         user: isSidebarModuleAllowed('admin', 'user'),
         setting: isSidebarModuleAllowed('admin', 'setting'),
@@ -343,6 +345,11 @@ export default function SettingsSidebarModulesUser() {
           key: 'deployment',
           title: t('模型部署'),
           description: t('模型部署管理'),
+        },
+        {
+          key: 'platforms',
+          title: t('平台管理'),
+          description: t('下游平台凭证管理'),
         },
         {
           key: 'redemption',

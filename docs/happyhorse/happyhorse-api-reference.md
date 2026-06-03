@@ -231,11 +231,11 @@ Content-Type: application/json
 | `duration` | int | T2V/I2V/R2V 可选 | 缺省 5；显式传入必须 3-15；Video Edit 不支持 |
 | `metadata.resolution` | string | 否 | `720P` 或 `1080P`，默认 `1080P` |
 | `metadata.ratio` | string | T2V/R2V 可选 | `16:9`、`9:16`、`1:1`、`4:3`、`3:4`；I2V 不支持 |
-| `image` | string | I2V 可用 | 首帧图 URL；I2V 最终必须正好 1 张首帧图 |
-| `images` | array | R2V 可用 | 参考图 URL 数组，数量 1-9 |
+| `image` | string | I2V 可用 | 首帧图，支持公网 `http/https` URL 或图片 base64 data URL；I2V 最终必须正好 1 张首帧图 |
+| `images` | array | R2V 可用 | 参考图数组，支持公网 `http/https` URL 或图片 base64 data URL，数量 1-9 |
 | `metadata.media` | array | R2V 可用 | HappyHorse media 结构；如果存在，优先用于 R2V |
-| `metadata.video_url` | string | Video Edit 必填 | 输入视频 URL |
-| `metadata.reference_images` | array | Video Edit 可选 | 参考图 URL 数组，数量 0-5 |
+| `metadata.video_url` | string | Video Edit 必填 | 输入视频 URL，仅支持公网 `http/https` URL |
+| `metadata.reference_images` | array | Video Edit 可选 | 参考图数组，支持公网 `http/https` URL 或图片 base64 data URL，数量 0-5 |
 
 ### T2V
 
@@ -361,7 +361,8 @@ Authorization: Bearer <token>
 | Video Edit 显式传入 `ratio` | `happyhorse-1.0-video-edit does not support ratio parameter` |
 | Video Edit 显式传入 `duration` | `video-edit does not support duration parameter` |
 | 媒体 URL 为空 | `media item url is required`、`images contains empty url` 或 `reference_images contains empty url` |
-| 媒体 URL 非 http/https | `media url must use http or https scheme` |
+| 图片媒体格式非法 | `image media must use http/https url or image base64 data url` |
+| 视频媒体格式非法 | `video media must use http or https url` |
 | 非法分辨率 | 仅支持 `720P`、`1080P` |
 | 非法比例 | 仅支持 `16:9`、`9:16`、`1:1`、`4:3`、`3:4` |
 | T2V/I2V/R2V 显式 duration 超范围 | `duration must be between 3 and 15 seconds` |

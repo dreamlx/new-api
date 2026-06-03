@@ -41,7 +41,7 @@ HappyHorse 基础提交和查询链路已跑通，但评审指出官方契约、
 | I2V media | 正好 1 个 `first_frame` |
 | R2V media | 1-9 个 `reference_image` |
 | Video Edit media | 正好 1 个 `video`，0-5 个 `reference_image` |
-| media URL | 非空，且必须为 http/https |
+| media 值 | 非空；图片媒体支持公网 `http/https` URL 或图片 base64 data URL，视频媒体仅支持公网 `http/https` URL |
 | `quality` / `sound` | 不支持，不透传 |
 
 ## 4. 计费规则
@@ -90,13 +90,13 @@ model_price * QuotaPerUnit * group_ratio * actual_seconds * resolution_ratio
 - Video Edit 5 张参考图通过。
 - Video Edit 6 张参考图返回 400。
 - media URL 为空返回 400。
-- media URL 非 http/https 返回 400。
+- 图片媒体既不是公网 `http/https` URL，也不是图片 base64 data URL 时返回 400；视频媒体非公网 `http/https` URL 返回 400。
 
 ### V1 绕过路径
 
 - V1 Video Edit 显式 duration 返回 400。
 - V1 R2V `metadata.media` 超过 9 张参考图返回 400。
-- V1 media URL 非 http/https 返回 400。
+- V1 图片媒体既不是公网 `http/https` URL，也不是图片 base64 data URL 时返回 400；视频媒体非公网 `http/https` URL 返回 400。
 - V1 I2V 多张 `images` 返回 400。
 - V1 Video Edit 超过 5 张 `reference_images` 返回 400。
 - V1 I2V `images[]` 中含空字符串返回 400。
