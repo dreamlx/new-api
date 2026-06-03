@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -38,12 +37,6 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	a.ChannelType = info.ChannelType
 	a.baseURL = info.ChannelBaseUrl
 	a.apiKey = info.ApiKey
-}
-
-// ValidateRequestAndSetAction parses body, validates fields and sets default action.
-func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.TaskError) {
-	// Accept POST /v1/video/generations or POST /api/v3/contents/generations/tasks as "generate" action.
-	return relaycommon.ValidateBasicTaskRequest(c, info, constant.TaskActionGenerate)
 }
 
 // BuildRequestURL constructs the upstream Volcano-compatible URL.
@@ -301,37 +294,27 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq) (*
 		}
 	}
 
-	// Add videos if present (from metadata)
-	if req.Metadata != nil {
-		if videos, ok := req.Metadata["videos"]; ok {
-			if videosSlice, ok := videos.([]interface{}); ok {
-				for _, v := range videosSlice {
-					if videoURL, ok := v.(string); ok {
-						r.Content = append(r.Content, ContentItem{
-							Type: "video_url",
-							VideoURL: &MediaURL{
-								URL: videoURL,
-							},
-						})
-					}
-				}
-			}
+	// Add videos if present
+	if len(req.Videos) > 0 {
+		for _, videoURL := range req.Videos {
+			r.Content = append(r.Content, ContentItem{
+				Type: "video_url",
+				VideoURL: &MediaURL{
+					URL: videoURL,
+				},
+			})
 		}
+	}
 
-		// Add audios if present (from metadata)
-		if audios, ok := req.Metadata["audios"]; ok {
-			if audiosSlice, ok := audios.([]interface{}); ok {
-				for _, a := range audiosSlice {
-					if audioURL, ok := a.(string); ok {
-						r.Content = append(r.Content, ContentItem{
-							Type: "audio_url",
-							AudioURL: &MediaURL{
-								URL: audioURL,
-							},
-						})
-					}
-				}
-			}
+	// Add audios if present
+	if len(req.Audios) > 0 {
+		for _, audioURL := range req.Audios {
+			r.Content = append(r.Content, ContentItem{
+				Type: "audio_url",
+				AudioURL: &MediaURL{
+					URL: audioURL,
+				},
+			})
 		}
 	}
 
@@ -347,16 +330,12 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq) (*
 	}
 	if sec, _ := strconv.Atoi(req.Seconds); sec > 0 {
 		r.Duration = lo.ToPtr(dto.IntValue(sec))
+	} else if req.Duration > 0 {
+		r.Duration = lo.ToPtr(dto.IntValue(req.Duration))
 	}
-	// Extract seed from metadata if present
-	if req.Metadata != nil {
-		if seed, ok := req.Metadata["seed"]; ok {
-			if seedInt, ok := seed.(float64); ok {
-				r.Seed = lo.ToPtr(dto.IntValue(int(seedInt)))
-			} else if seedInt, ok := seed.(int); ok {
-				r.Seed = lo.ToPtr(dto.IntValue(seedInt))
-			}
-		}
+	// Extract seed
+	if req.Seed != nil {
+		r.Seed = lo.ToPtr(dto.IntValue(*req.Seed))
 	}
 
 	// Remove existing text items and add prompt as text
