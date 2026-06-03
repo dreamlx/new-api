@@ -57,7 +57,8 @@ const (
 	ChannelTypeCodex          = 57
 	ChannelTypeOspreyAI       = 58
 	ChannelTypeHappyHorse     = 59
-	ChannelTypeDummy          = 60 // this one is only for count, do not add any channel after this
+	ChannelTypeSeedance       = 60
+	ChannelTypeDummy          = 61 // this one is only for count, do not add any channel after this
 
 )
 
@@ -122,7 +123,8 @@ var ChannelBaseURLs = []string{
 	"https://chatgpt.com",                       //57
 	"",                                          //58 OspreyAI (base URL configured per instance)
 	"https://dashscope.aliyuncs.com",            //59 HappyHorse
-	"",                                          //60 Dummy
+	"",                                          //60 Seedance (third-party gateway URL)
+	"",                                          //61 Dummy
 }
 
 var ChannelTypeNames = map[int]string{
@@ -182,6 +184,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeCodex:          "Codex",
 	ChannelTypeOspreyAI:       "OspreyAI",
 	ChannelTypeHappyHorse:     "HappyHorse",
+	ChannelTypeSeedance:       "Seedance",
 }
 
 func GetChannelTypeName(channelType int) string {
