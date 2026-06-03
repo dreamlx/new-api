@@ -12,10 +12,10 @@ import (
 )
 
 // Wisemodel Points/Tokens 换算常量
-// 定价: 100,000,000 points = $100 USD → 1,000,000 points = $1 = QuotaPerUnit quota
+// WiseModel usage units map 1:1 to internal quota at the default QuotaPerUnit.
 const (
-	WisemodelPointsPerUnit = 1_000_000
-	WisemodelTokensPerUnit = 1_000_000
+	WisemodelPointsPerUnit = 500_000
+	WisemodelTokensPerUnit = 500_000
 )
 
 // WisemodelPackage Wisemodel资源包模型
