@@ -310,9 +310,9 @@ func TestCreateOrder(t *testing.T) {
 		})
 		assert.Equal(t, 200, w.Code)
 
-		// Verify quota added: 2000000 points * 0.5 = 1000000 quota
+		// Verify quota added: 2000000 points = 2000000 quota
 		user := model.GetUserByPhone("13800000050")
-		assert.Equal(t, 1000000, user.Quota)
+		assert.Equal(t, 2000000, user.Quota)
 	})
 
 	t.Run("Tokens模式充值成功", func(t *testing.T) {
@@ -325,9 +325,9 @@ func TestCreateOrder(t *testing.T) {
 		})
 		assert.Equal(t, 200, w.Code)
 
-		// Additional 1000000 * 0.5 = 500000 quota
+		// Additional 1000000 tokens = 1000000 quota
 		user := model.GetUserByPhone("13800000050")
-		assert.Equal(t, 1500000, user.Quota)
+		assert.Equal(t, 3000000, user.Quota)
 	})
 
 	t.Run("package_count不匹配", func(t *testing.T) {
@@ -474,9 +474,9 @@ func TestWisemodelIntegrationFlow(t *testing.T) {
 	})
 	assert.Equal(t, 200, w.Code)
 
-	// 3. Verify quota: 2000000*0.5 + 5000000*0.5 = 1000000 + 2500000 = 3500000
+	// 3. Verify quota: 2000000 points + 5000000 tokens = 7000000 quota
 	user := model.GetUserByPhone("13800000070")
-	assert.Equal(t, 3500000, user.Quota)
+	assert.Equal(t, 7000000, user.Quota)
 
 	// 4. Check package usage
 	w = doWmRequest(router, "POST", "/api/wisemodel/user/package_usage", map[string]interface{}{
@@ -578,8 +578,8 @@ func TestCreateOrderMultiPackage(t *testing.T) {
 	assert.Equal(t, 200, w.Code)
 
 	user := model.GetUserByPhone("13800000090")
-	// 500000*0.5 + 500000*0.5 + 1000000*0.5 = 250000+250000+500000 = 1000000
-	assert.Equal(t, 1000000, user.Quota)
+	// 500000 points + 500000 points + 1000000 tokens = 2000000 quota
+	assert.Equal(t, 2000000, user.Quota)
 
 	pkgs, _ := model.GetWisemodelPackagesByUserId(user.Id)
 	assert.Len(t, pkgs, 3)
