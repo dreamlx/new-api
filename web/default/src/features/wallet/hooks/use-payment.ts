@@ -110,7 +110,9 @@ export function usePayment() {
             payment_method: 'stripe',
           })
           if (!isApiSuccess(response)) {
-            toast.error(extractPaymentError(response as Record<string, unknown>))
+            toast.error(
+              extractPaymentError(response as Record<string, unknown>)
+            )
             return { type: 'redirect', success: false }
           }
           if (response.data?.pay_link) {
@@ -123,13 +125,16 @@ export function usePayment() {
         }
 
         // ── PayPal ─────────────────────────────────────────────
-        if (isPayPalPayment(paymentType)) return processPayPalBranch(topupAmountInt)
+        if (isPayPalPayment(paymentType))
+          return processPayPalBranch(topupAmountInt)
 
         // ── Alipay (direct) ─────────────────────────────────────
-        if (isAlipayPayment(paymentType)) return processAlipayBranch(topupAmountInt)
+        if (isAlipayPayment(paymentType))
+          return processAlipayBranch(topupAmountInt)
 
         // ── Wxpay (direct) — returns QR code data ───────────────
-        if (isWxpayPayment(paymentType)) return processWxpayBranch(topupAmountInt)
+        if (isWxpayPayment(paymentType))
+          return processWxpayBranch(topupAmountInt)
 
         // ── Creem ───────────────────────────────────────────────
         if (paymentType === 'creem') return processCreemBranch()

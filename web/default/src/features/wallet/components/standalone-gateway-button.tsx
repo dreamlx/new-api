@@ -25,8 +25,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { getPaymentIcon } from '../lib'
 import { PAYMENT_TYPES } from '../constants'
+import { getPaymentIcon } from '../lib'
 import type { PaymentMethod } from '../types'
 
 interface StandaloneGatewayButtonProps {
@@ -69,12 +69,7 @@ export function StandaloneGatewayButton({
       {paymentLoading === paymentType ? (
         <Loader2 className='h-4 w-4 animate-spin' />
       ) : (
-        getPaymentIcon(
-          paymentType,
-          'h-4 w-4',
-          undefined,
-          label
-        )
+        getPaymentIcon(paymentType, 'h-4 w-4', undefined, label)
       )}
       <span className='truncate'>{label}</span>
     </Button>

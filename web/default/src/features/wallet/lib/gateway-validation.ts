@@ -39,7 +39,10 @@ export function validatePaymentGateway(
   if (methodType === 'wxpay' && !topupInfo?.enable_wxpay_topup) {
     return 'WeChat Pay top-up is not enabled by the administrator'
   }
-  if (methodType === 'waffo_pancake' && !topupInfo?.enable_waffo_pancake_topup) {
+  if (
+    methodType === 'waffo_pancake' &&
+    !topupInfo?.enable_waffo_pancake_topup
+  ) {
     return 'Waffo Pancake top-up is not enabled by the administrator'
   }
   if (methodType.startsWith('waffo:') && !topupInfo?.enable_waffo_topup) {

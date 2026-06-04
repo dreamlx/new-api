@@ -16,16 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { parseCurrencyDisplayType } from '@/lib/currency';
-
-import { PaymentSettingsSection } from '../integrations/payment-settings-section';
-import { CheckinSettingsSection } from '../general/checkin-settings-section';
-import { QuotaSettingsSection } from '../general/quota-settings-section';
-import { RatioSettingsCard } from '../models/ratio-settings-card';
-import { createSectionRegistry } from '../utils/section-registry';
-import { PricingSection } from '../general/pricing-section';
-import type { BillingSettings } from '../types';
-
+import { parseCurrencyDisplayType } from '@/lib/currency'
+import { CheckinSettingsSection } from '../general/checkin-settings-section'
+import { PricingSection } from '../general/pricing-section'
+import { QuotaSettingsSection } from '../general/quota-settings-section'
+import { PaymentSettingsSection } from '../integrations/payment-settings-section'
+import { RatioSettingsCard } from '../models/ratio-settings-card'
+import type { BillingSettings } from '../types'
+import { createSectionRegistry } from '../utils/section-registry'
 
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,

@@ -16,21 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage, } from '@/components/ui/form';
-import { Switch } from '@/components/ui/switch';
-import { Button } from '@/components/ui/button';
-import { useTranslation } from 'react-i18next';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { toast } from 'sonner';
-
-import { SettingsSection } from '../components/settings-section';
-import { useUpdateOption } from '../hooks/use-update-option';
-import { useQueryClient } from '@tanstack/react-query';
-import { isMaskedSecret } from './paypal-settings-section';
-
+import { useEffect, useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
+import { SettingsSection } from '../components/settings-section'
+import { useUpdateOption } from '../hooks/use-update-option'
+import { isMaskedSecret } from './paypal-settings-section'
 
 export interface AlipaySettingsValues {
   AlipayEnabled: boolean
@@ -78,7 +84,10 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
 
       // Sensitive fields — only push if not masked (i.e., actually edited)
       if (values.AlipayPrivateKey && !isMaskedSecret(values.AlipayPrivateKey)) {
-        options.push({ key: 'AlipayPrivateKey', value: values.AlipayPrivateKey })
+        options.push({
+          key: 'AlipayPrivateKey',
+          value: values.AlipayPrivateKey,
+        })
       }
       if (values.AlipayPublicKey && !isMaskedSecret(values.AlipayPublicKey)) {
         options.push({ key: 'AlipayPublicKey', value: values.AlipayPublicKey })
@@ -86,7 +95,10 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
 
       // SellerId — plain field, only push when changed
       if (values.AlipaySellerId !== defaultValues.AlipaySellerId) {
-        options.push({ key: 'AlipaySellerId', value: values.AlipaySellerId || '' })
+        options.push({
+          key: 'AlipaySellerId',
+          value: values.AlipaySellerId || '',
+        })
       }
 
       if (defaultValues.AlipayIsSandbox !== values.AlipayIsSandbox) {
@@ -185,7 +197,9 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
           {/* Amber warning box */}
           <div className='rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100'>
             <p>
-              {t('Private key / Public key are sensitive information. Only fill them when initially configuring or changing. Leave blank to use the saved value.')}
+              {t(
+                'Private key / Public key are sensitive information. Only fill them when initially configuring or changing. Leave blank to use the saved value.'
+              )}
             </p>
           </div>
 
@@ -198,7 +212,10 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
                 <FormItem>
                   <FormLabel>{t('Alipay App ID')}</FormLabel>
                   <FormControl>
-                    <Input placeholder={t('Alipay application AppId')} {...field} />
+                    <Input
+                      placeholder={t('Alipay application AppId')}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -212,7 +229,12 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
                 <FormItem>
                   <FormLabel>{t('Seller ID (optional)')}</FormLabel>
                   <FormControl>
-                    <Input placeholder={t('PID, leave blank to skip seller_id verification')} {...field} />
+                    <Input
+                      placeholder={t(
+                        'PID, leave blank to skip seller_id verification'
+                      )}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -231,7 +253,9 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
                       min={1}
                       placeholder={t('e.g., 1')}
                       {...field}
-                      onChange={(e) => field.onChange(Number(e.target.value) || 1)}
+                      onChange={(e) =>
+                        field.onChange(Number(e.target.value) || 1)
+                      }
                     />
                   </FormControl>
                   <FormMessage />
@@ -252,7 +276,9 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
                     <Textarea
                       rows={6}
                       className='font-mono text-xs'
-                      placeholder={t('Alipay private key PEM content, sensitive information, masked when saved')}
+                      placeholder={t(
+                        'Alipay private key PEM content, sensitive information, masked when saved'
+                      )}
                       {...field}
                     />
                   </FormControl>
@@ -271,7 +297,9 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
                     <Textarea
                       rows={6}
                       className='font-mono text-xs'
-                      placeholder={t('Alipay public key PEM content, sensitive information, masked when saved')}
+                      placeholder={t(
+                        'Alipay public key PEM content, sensitive information, masked when saved'
+                      )}
                       {...field}
                     />
                   </FormControl>
@@ -291,7 +319,9 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
                   <div className='space-y-0.5'>
                     <FormLabel>{t('Enable Alipay')}</FormLabel>
                     <FormDescription>
-                      {t('When enabled, the Alipay button will appear on the user top-up page')}
+                      {t(
+                        'When enabled, the Alipay button will appear on the user top-up page'
+                      )}
                     </FormDescription>
                   </div>
                   <FormControl>
@@ -312,7 +342,9 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
                   <div className='space-y-0.5'>
                     <FormLabel>{t('Sandbox Mode')}</FormLabel>
                     <FormDescription>
-                      {t('When enabled, the Alipay sandbox gateway will be used')}
+                      {t(
+                        'When enabled, the Alipay sandbox gateway will be used'
+                      )}
                     </FormDescription>
                   </div>
                   <FormControl>
@@ -326,11 +358,7 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
             />
           </div>
 
-          <Button
-            type='button'
-            onClick={handleSave}
-            disabled={loading}
-          >
+          <Button type='button' onClick={handleSave} disabled={loading}>
             {loading ? t('Saving...') : t('Save Alipay settings')}
           </Button>
         </form>

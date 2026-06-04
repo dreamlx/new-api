@@ -60,9 +60,7 @@ export type PaymentResult =
  * This function handles both: if `data` is a string it takes priority (case 1),
  * otherwise falls back to `message` (case 2), and finally to a generic i18n key.
  */
-export function extractPaymentError(
-  response: Record<string, unknown>
-): string {
+export function extractPaymentError(response: Record<string, unknown>): string {
   const data = response.data
   const message = typeof response.message === 'string' ? response.message : ''
   if (typeof data === 'string' && data) return data
@@ -103,7 +101,11 @@ export async function processAlipayBranch(
   })
   if (!isApiSuccess(response)) {
     toast.error(extractPaymentError(response as Record<string, unknown>))
-    return { type: 'alipay', success: false, data: { pay_link: '', trade_no: '' } }
+    return {
+      type: 'alipay',
+      success: false,
+      data: { pay_link: '', trade_no: '' },
+    }
   }
   if (response.data?.pay_link) {
     window.open(response.data.pay_link as string, '_blank')
@@ -118,7 +120,11 @@ export async function processAlipayBranch(
     }
   }
   toast.error(i18next.t('Payment failed'))
-  return { type: 'alipay', success: false, data: { pay_link: '', trade_no: '' } }
+  return {
+    type: 'alipay',
+    success: false,
+    data: { pay_link: '', trade_no: '' },
+  }
 }
 
 /** Process Wxpay (direct) — returns QR code data for scanning */
@@ -130,7 +136,11 @@ export async function processWxpayBranch(
   })
   if (!isApiSuccess(response)) {
     toast.error(extractPaymentError(response as Record<string, unknown>))
-    return { type: 'wxpay', success: false, data: { code_url: '', trade_no: '' } }
+    return {
+      type: 'wxpay',
+      success: false,
+      data: { code_url: '', trade_no: '' },
+    }
   }
   if (response.data?.code_url) {
     toast.success(i18next.t('Please scan QR code to pay'))
@@ -150,9 +160,7 @@ export async function processWxpayBranch(
 /** Process Creem — typically handled via separate UI path, fallback only */
 export async function processCreemBranch(): Promise<PaymentResult> {
   toast.error(
-    i18next.t(
-      'Please select a Creem product below to proceed with payment.'
-    )
+    i18next.t('Please select a Creem product below to proceed with payment.')
   )
   return { type: 'redirect', success: false }
 }

@@ -16,25 +16,48 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type SortingState, type VisibilityState, getCoreRowModel, getFacetedRowModel, getFacetedUniqueValues, getFilteredRowModel, getPaginationRowModel, getSortedRowModel, useReactTable, } from '@tanstack/react-table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DISABLED_ROW_DESKTOP, DISABLED_ROW_MOBILE, DataTablePage, } from '@/components/data-table';
-import { useTableUrlState } from '@/hooks/use-table-url-state';
-import { getRouteApi } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
-import { useTranslation } from 'react-i18next';
-import { useIsAdmin } from '@/hooks/use-admin';
-import { useEffect, useState } from 'react';
-import { useMediaQuery } from '@/hooks';
-import { toast } from 'sonner';
-
-import { USER_STATUS, getUserStatusOptions, getUserRoleOptions, isUserDeleted, } from '../constants';
-import { DataTableBulkActions } from './data-table-bulk-actions';
-import { useUsersColumns } from './users-columns';
-import { getUsers, searchUsers } from '../api';
-import { useUsers } from './users-provider';
-import type { User } from '../types';
-
+import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { getRouteApi } from '@tanstack/react-router'
+import {
+  type SortingState,
+  type VisibilityState,
+  getCoreRowModel,
+  getFacetedRowModel,
+  getFacetedUniqueValues,
+  getFilteredRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from '@tanstack/react-table'
+import { useMediaQuery } from '@/hooks'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { useIsAdmin } from '@/hooks/use-admin'
+import { useTableUrlState } from '@/hooks/use-table-url-state'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  DISABLED_ROW_DESKTOP,
+  DISABLED_ROW_MOBILE,
+  DataTablePage,
+} from '@/components/data-table'
+import { getUsers, searchUsers } from '../api'
+import {
+  USER_STATUS,
+  getUserStatusOptions,
+  getUserRoleOptions,
+  isUserDeleted,
+} from '../constants'
+import type { User } from '../types'
+import { DataTableBulkActions } from './data-table-bulk-actions'
+import { useUsersColumns } from './users-columns'
+import { useUsers } from './users-provider'
 
 const route = getRouteApi('/_authenticated/users/')
 
@@ -92,9 +115,10 @@ export function UsersTable() {
       }
 
       // When downstream filter is active, always use searchUsers
-      const result = hasFilter || hasDownstream
-        ? await searchUsers({ ...params, keyword: globalFilter, downstream })
-        : await getUsers(params)
+      const result =
+        hasFilter || hasDownstream
+          ? await searchUsers({ ...params, keyword: globalFilter, downstream })
+          : await getUsers(params)
 
       if (!result.success) {
         toast.error(
@@ -187,9 +211,18 @@ export function UsersTable() {
           },
         ],
         additionalSearch: isAdmin ? (
-          <Select value={downstream || undefined} onValueChange={(value) => setDownstream(value === '__all__' || value === null ? '' : value)}>
+          <Select
+            value={downstream || undefined}
+            onValueChange={(value) =>
+              setDownstream(value === '__all__' || value === null ? '' : value)
+            }
+          >
             <SelectTrigger className='h-8 w-[140px]'>
-              <SelectValue placeholder={t('Select downstream platform', { ns: 'wisemodel' })} />
+              <SelectValue
+                placeholder={t('select_downstream_platform', {
+                  ns: 'wisemodel',
+                })}
+              />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value='__all__'>{t('All')}</SelectItem>

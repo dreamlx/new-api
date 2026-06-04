@@ -16,19 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { StaggerContainer, StaggerItem } from '@/components/page-transition';
-import { useQuery } from '@tanstack/react-query';
-import { useTranslation } from 'react-i18next';
-import { useIsAdmin } from '@/hooks/use-admin';
-import { computeTimeRange } from '@/lib/time';
-import { formatNumber } from '@/lib/format';
-import { formatQuota } from '@/lib/format';
-import { Coins, Send } from 'lucide-react';
-import { useMemo } from 'react';
-import { api } from '@/lib/api';
-
-import { StatCard } from '../ui/stat-card';
-
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Coins, Send } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { api } from '@/lib/api'
+import { formatNumber } from '@/lib/format'
+import { formatQuota } from '@/lib/format'
+import { computeTimeRange } from '@/lib/time'
+import { useIsAdmin } from '@/hooks/use-admin'
+import { StaggerContainer, StaggerItem } from '@/components/page-transition'
+import { StatCard } from '../ui/stat-card'
 
 // ---------------------------------------------------------------------------
 // API
@@ -95,7 +93,7 @@ export function WiseModelStatsPanel() {
       key: 'wisemodel-quota',
       title: t('quota_consumed', { ns: 'wisemodel' }),
       value: formatQuota(quota),
-      description: t('WiseModel quota consumed in the selected period'),
+      description: t('quota_consumed_description', { ns: 'wisemodel' }),
       icon: Coins,
       tone: 'teal' as const,
     },
@@ -103,7 +101,7 @@ export function WiseModelStatsPanel() {
       key: 'wisemodel-requests',
       title: t('request_count', { ns: 'wisemodel' }),
       value: formatNumber(count),
-      description: t('WiseModel request count in the selected period'),
+      description: t('request_count_description', { ns: 'wisemodel' }),
       icon: Send,
       tone: 'teal' as const,
     },
@@ -114,10 +112,10 @@ export function WiseModelStatsPanel() {
       <div className='flex flex-col gap-3 p-4 sm:p-5'>
         <div className='flex flex-col gap-1'>
           <h3 className='text-base font-semibold'>
-            {t('External Platform Integration')}
+            {t('external_platform_integration', { ns: 'wisemodel' })}
           </h3>
           <p className='text-muted-foreground text-sm'>
-            {t('WiseModel usage statistics')}
+            {t('usage_statistics', { ns: 'wisemodel' })}
           </p>
         </div>
         <StaggerContainer className='grid gap-3 md:grid-cols-2'>

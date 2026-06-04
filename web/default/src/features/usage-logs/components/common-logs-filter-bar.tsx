@@ -16,28 +16,37 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useCallback } from 'react';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue, } from '@/components/ui/select';
-import { Tooltip, TooltipContent, TooltipTrigger, } from '@/components/ui/tooltip';
-import { useQueryClient, useIsFetching } from '@tanstack/react-query';
-import { useNavigate, getRouteApi } from '@tanstack/react-router';
-import { DataTableToolbar } from '@/components/data-table';
-import { Checkbox } from '@/components/ui/checkbox';
-import { type Table } from '@tanstack/react-table';
-import { Button } from '@/components/ui/button';
-import { useTranslation } from 'react-i18next';
-import { useIsAdmin } from '@/hooks/use-admin';
-import { Input } from '@/components/ui/input';
-import { Eye, EyeOff } from 'lucide-react';
-
-import { CompactDateTimeRangePicker } from './compact-date-time-range-picker';
-import { useUsageLogsContext } from './usage-logs-provider';
-import { CommonLogsStats } from './common-logs-stats';
-import { getDefaultTimeRange } from '../lib/utils';
-import { buildSearchParams } from '../lib/filter';
-import type { CommonLogFilters } from '../types';
-import { LOG_TYPES } from '../constants';
-
+import { useState, useEffect, useCallback } from 'react'
+import { useQueryClient, useIsFetching } from '@tanstack/react-query'
+import { useNavigate, getRouteApi } from '@tanstack/react-router'
+import { type Table } from '@tanstack/react-table'
+import { Eye, EyeOff } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { useIsAdmin } from '@/hooks/use-admin'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { DataTableToolbar } from '@/components/data-table'
+import { LOG_TYPES } from '../constants'
+import { buildSearchParams } from '../lib/filter'
+import { getDefaultTimeRange } from '../lib/utils'
+import type { CommonLogFilters } from '../types'
+import { CommonLogsStats } from './common-logs-stats'
+import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
+import { useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
 const logTypeValues = ['0', '1', '2', '3', '4', '5', '6'] as const
@@ -105,7 +114,10 @@ export function CommonLogsFilterBar<TData>(
   ])
 
   const handleChange = useCallback(
-    (field: keyof CommonLogFilters, value: Date | string | boolean | undefined) => {
+    (
+      field: keyof CommonLogFilters,
+      value: Date | string | boolean | undefined
+    ) => {
       setFilters((prev) => ({ ...prev, [field]: value }))
     },
     []
@@ -292,7 +304,7 @@ export function CommonLogsFilterBar<TData>(
               />
               <label
                 htmlFor='wisemodel-filter'
-                className='text-muted-foreground text-sm leading-none cursor-pointer'
+                className='text-muted-foreground cursor-pointer text-sm leading-none'
               >
                 {t('only_users', { ns: 'wisemodel' })}
               </label>
@@ -319,9 +331,7 @@ export function CommonLogsFilterBar<TData>(
           <Input
             placeholder={t('Upstream Request ID')}
             value={filters.upstreamRequestId || ''}
-            onChange={(e) =>
-              handleChange('upstreamRequestId', e.target.value)
-            }
+            onChange={(e) => handleChange('upstreamRequestId', e.target.value)}
             onKeyDown={handleKeyDown}
             className={inputClass}
           />

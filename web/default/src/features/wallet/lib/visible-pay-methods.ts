@@ -46,10 +46,13 @@ export function filterVisiblePayMethods(
   return payMethods.filter((method) => {
     if (!method || !method.type) return false
     if (method.type === 'waffo') return false
-    if (method.type === PAYMENT_TYPES.ALIPAY && options.enableAlipayTopup) return false
-    if (method.type === PAYMENT_TYPES.WECHAT && options.enableWxpayTopup) return false
+    if (method.type === PAYMENT_TYPES.ALIPAY && options.enableAlipayTopup)
+      return false
+    if (method.type === PAYMENT_TYPES.WECHAT && options.enableWxpayTopup)
+      return false
     // When online topup (Epay) is disabled, only show standalone gateway methods
-    if (!options.enableOnlineTopUp && !isStandaloneGateway(method.type)) return false
+    if (!options.enableOnlineTopUp && !isStandaloneGateway(method.type))
+      return false
     return true
   })
 }

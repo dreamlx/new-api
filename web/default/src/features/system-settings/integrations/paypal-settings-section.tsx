@@ -16,19 +16,30 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, } from '@/components/ui/form';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from '@/components/ui/select';
-import { Button } from '@/components/ui/button';
-import { useTranslation } from 'react-i18next';
-import { Input } from '@/components/ui/input';
-import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { toast } from 'sonner';
-
-import { SettingsSection } from '../components/settings-section';
-import { useUpdateOption } from '../hooks/use-update-option';
-import { useQueryClient } from '@tanstack/react-query';
-
+import { useEffect, useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { SettingsSection } from '../components/settings-section'
+import { useUpdateOption } from '../hooks/use-update-option'
 
 /**
  * Heuristic to detect a masked secret returned from the server.
@@ -81,13 +92,19 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
 
       // Only push sensitive fields if they were actually edited
       // (i.e., not still masked from the server response)
-      if (values.PayPalClientSecret && !isMaskedSecret(values.PayPalClientSecret)) {
+      if (
+        values.PayPalClientSecret &&
+        !isMaskedSecret(values.PayPalClientSecret)
+      ) {
         options.push({
           key: 'PayPalClientSecret',
           value: values.PayPalClientSecret,
         })
       }
-      if (values.PayPalWebhookSecret && !isMaskedSecret(values.PayPalWebhookSecret)) {
+      if (
+        values.PayPalWebhookSecret &&
+        !isMaskedSecret(values.PayPalWebhookSecret)
+      ) {
         options.push({
           key: 'PayPalWebhookSecret',
           value: values.PayPalWebhookSecret,
@@ -131,7 +148,9 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
       <Form {...form}>
         <form className='space-y-4'>
           <div className='rounded-md bg-blue-50 p-4 text-sm text-blue-900 dark:bg-blue-950 dark:text-blue-100'>
-            <p className='mb-2 font-medium'>{t('PayPal Webhook Configuration:')}</p>
+            <p className='mb-2 font-medium'>
+              {t('PayPal Webhook Configuration:')}
+            </p>
             <ul className='list-inside list-disc space-y-1'>
               <li>
                 {t('PayPal credentials can be obtained from the')}{' '}
@@ -183,7 +202,9 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
                   <FormControl>
                     <Input
                       type='password'
-                      placeholder={t('PayPal application Client ID, sensitive information not displayed')}
+                      placeholder={t(
+                        'PayPal application Client ID, sensitive information not displayed'
+                      )}
                       {...field}
                     />
                   </FormControl>
@@ -201,7 +222,9 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
                   <FormControl>
                     <Input
                       type='password'
-                      placeholder={t('PayPal application Client Secret, sensitive information not displayed')}
+                      placeholder={t(
+                        'PayPal application Client Secret, sensitive information not displayed'
+                      )}
                       {...field}
                     />
                   </FormControl>
@@ -221,7 +244,9 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
                   <FormControl>
                     <Input
                       type='password'
-                      placeholder={t('PayPal Webhook signing secret, sensitive information not displayed')}
+                      placeholder={t(
+                        'PayPal Webhook signing secret, sensitive information not displayed'
+                      )}
                       {...field}
                     />
                   </FormControl>
@@ -247,8 +272,12 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value='sandbox'>{t('Sandbox (Test Environment)')}</SelectItem>
-                      <SelectItem value='live'>{t('Live (Production Environment)')}</SelectItem>
+                      <SelectItem value='sandbox'>
+                        {t('Sandbox (Test Environment)')}
+                      </SelectItem>
+                      <SelectItem value='live'>
+                        {t('Live (Production Environment)')}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                   <FormMessage />
@@ -269,7 +298,9 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
                     min={1}
                     placeholder={t('Unit: USD')}
                     {...field}
-                    onChange={(e) => field.onChange(Number(e.target.value) || 1)}
+                    onChange={(e) =>
+                      field.onChange(Number(e.target.value) || 1)
+                    }
                   />
                 </FormControl>
                 <FormMessage />
@@ -277,11 +308,7 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
             )}
           />
 
-          <Button
-            type='button'
-            onClick={handleSave}
-            disabled={loading}
-          >
+          <Button type='button' onClick={handleSave} disabled={loading}>
             {loading ? t('Saving...') : t('Save PayPal settings')}
           </Button>
         </form>

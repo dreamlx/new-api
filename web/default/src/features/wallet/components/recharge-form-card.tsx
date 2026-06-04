@@ -34,6 +34,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { PAYMENT_TYPES } from '../constants'
 import {
   formatCurrency,
   getDiscountLabel,
@@ -41,8 +42,10 @@ import {
   getMinTopupAmount,
   calculatePresetPricing,
 } from '../lib'
-import { filterVisiblePayMethods, hasAnyConfigurableTopup } from '../lib/visible-pay-methods'
-import { PAYMENT_TYPES } from '../constants'
+import {
+  filterVisiblePayMethods,
+  hasAnyConfigurableTopup,
+} from '../lib/visible-pay-methods'
 import type {
   PaymentMethod,
   PresetAmount,
@@ -280,11 +283,16 @@ export function RechargeFormCard({
                             )}
                           </div>
                           <div className='text-muted-foreground mt-1.5 w-full text-xs sm:mt-2'>
-                            {t('Pay {{amount}}', { amount: formatCurrency(actualPrice) })}
+                            {t('Pay {{amount}}', {
+                              amount: formatCurrency(actualPrice),
+                            })}
                             {hasDiscount && savedAmount > 0 && (
                               <span className='text-green-600'>
                                 {' '}
-                                • {t('Save {{amount}}', { amount: formatCurrency(savedAmount) })}
+                                •{' '}
+                                {t('Save {{amount}}', {
+                                  amount: formatCurrency(savedAmount),
+                                })}
                               </span>
                             )}
                           </div>
@@ -331,16 +339,22 @@ export function RechargeFormCard({
                 <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
                   {t('Payment Method')}
                 </Label>
-                {hasStandardPaymentMethods || enableAlipayTopup || enableWxpayTopup || enableWaffoPancakeTopup ? (
+                {hasStandardPaymentMethods ||
+                enableAlipayTopup ||
+                enableWxpayTopup ||
+                enableWaffoPancakeTopup ? (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
                     {visiblePayMethods.map((method) => {
                       const methodMinTopup = method.min_topup || 0
                       // Disable button if the gateway is not enabled (matching classic's
                       // disabled logic on each payment method button)
                       const isGatewayDisabled =
-                        (method.type === PAYMENT_TYPES.PAYPAL && !enablePayPalTopup) ||
-                        (method.type === PAYMENT_TYPES.STRIPE && !enableStripeTopup)
-                      const disabled = isGatewayDisabled || methodMinTopup > topupAmount
+                        (method.type === PAYMENT_TYPES.PAYPAL &&
+                          !enablePayPalTopup) ||
+                        (method.type === PAYMENT_TYPES.STRIPE &&
+                          !enableStripeTopup)
+                      const disabled =
+                        isGatewayDisabled || methodMinTopup > topupAmount
 
                       const button = (
                         <Button
@@ -409,7 +423,9 @@ export function RechargeFormCard({
                       <StandaloneGatewayButton
                         paymentType={PAYMENT_TYPES.WAFFO_PANCAKE}
                         label={t('Waffo Pancake')}
-                        minTopup={topupInfo?.waffo_pancake_min_topup || minTopup}
+                        minTopup={
+                          topupInfo?.waffo_pancake_min_topup || minTopup
+                        }
                         topupAmount={topupAmount}
                         paymentLoading={paymentLoading}
                         onSelect={onPaymentMethodSelect}

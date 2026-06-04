@@ -18,8 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api } from '@/lib/api'
 import { toast } from 'sonner'
+import { api } from '@/lib/api'
 
 // Maximum number of Alipay polling attempts before giving up
 const ALIPAY_MAX_POLLS = 100 // ~5 minutes at 3-second intervals
@@ -85,7 +85,11 @@ export function useAlipayPolling(
         if (cancelled) return
         if (attempt >= ALIPAY_MAX_POLLS) {
           setAlipayPolling(false)
-          toast.warning(t('Payment status check timed out. Please refresh the page to verify.'))
+          toast.warning(
+            t(
+              'Payment status check timed out. Please refresh the page to verify.'
+            )
+          )
           return
         }
         alipayPollTimerRef.current = setTimeout(tick, 3000)

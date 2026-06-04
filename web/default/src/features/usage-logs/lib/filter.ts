@@ -19,9 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 /**
  * Utility functions for usage logs filters
  */
-import type { LogCategory, LogFilters, CommonLogFilters, DrawingLogFilters, TaskLogFilters, } from '../types';
-import { LOG_CATEGORY_LABELS } from '../constants';
-
+import { LOG_CATEGORY_LABELS } from '../constants'
+import type {
+  LogCategory,
+  LogFilters,
+  CommonLogFilters,
+  DrawingLogFilters,
+  TaskLogFilters,
+} from '../types'
 
 // ============================================================================
 // Filter Building Functions

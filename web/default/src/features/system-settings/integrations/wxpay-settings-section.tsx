@@ -16,21 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage, } from '@/components/ui/form';
-import { Switch } from '@/components/ui/switch';
-import { Button } from '@/components/ui/button';
-import { useTranslation } from 'react-i18next';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { toast } from 'sonner';
-
-import { SettingsSection } from '../components/settings-section';
-import { useUpdateOption } from '../hooks/use-update-option';
-import { useQueryClient } from '@tanstack/react-query';
-import { isMaskedSecret } from './paypal-settings-section';
-
+import { useEffect, useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
+import { SettingsSection } from '../components/settings-section'
+import { useUpdateOption } from '../hooks/use-update-option'
+import { isMaskedSecret } from './paypal-settings-section'
 
 export interface WxpaySettingsValues {
   WxpayEnabled: boolean
@@ -176,7 +182,9 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
           {/* Amber warning box */}
           <div className='rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950'>
             <p className='text-sm text-amber-900 dark:text-amber-100'>
-              {t('API v3 Key, Merchant Private Key and WeChat Pay Public Key are sensitive information. Only fill them when initially configuring or changing. Leave blank to use the saved value.')}
+              {t(
+                'API v3 Key, Merchant Private Key and WeChat Pay Public Key are sensitive information. Only fill them when initially configuring or changing. Leave blank to use the saved value.'
+              )}
             </p>
           </div>
 
@@ -189,7 +197,12 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
                 <FormItem>
                   <FormLabel>{t('WeChat Pay App ID')}</FormLabel>
                   <FormControl>
-                    <Input placeholder={t('Official account / Mini program / Mobile app AppId')} {...field} />
+                    <Input
+                      placeholder={t(
+                        'Official account / Mini program / Mobile app AppId'
+                      )}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -240,10 +253,7 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
                 <FormItem>
                   <FormLabel>{t('WeChat Pay Public Key ID')}</FormLabel>
                   <FormControl>
-                    <Input
-                      placeholder='PUB_KEY_ID_...'
-                      {...field}
-                    />
+                    <Input placeholder='PUB_KEY_ID_...' {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -260,7 +270,9 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
                     <Textarea
                       rows={4}
                       className='font-mono text-xs'
-                      placeholder={t('Full contents of pub_key.pem, must include BEGIN/END PUBLIC KEY')}
+                      placeholder={t(
+                        'Full contents of pub_key.pem, must include BEGIN/END PUBLIC KEY'
+                      )}
                       {...field}
                     />
                   </FormControl>
@@ -282,7 +294,9 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
                     <Textarea
                       rows={4}
                       className='font-mono text-xs'
-                      placeholder={t('API v3 key (32-character string), sensitive information, masked when saved')}
+                      placeholder={t(
+                        'API v3 key (32-character string), sensitive information, masked when saved'
+                      )}
                       {...field}
                     />
                   </FormControl>
@@ -301,7 +315,9 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
                     <Textarea
                       rows={4}
                       className='font-mono text-xs'
-                      placeholder={t('Merchant apiclient_key.pem content, sensitive information, masked when saved')}
+                      placeholder={t(
+                        'Merchant apiclient_key.pem content, sensitive information, masked when saved'
+                      )}
                       {...field}
                     />
                   </FormControl>
@@ -325,7 +341,9 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
                       min={1}
                       placeholder={t('e.g., 1')}
                       {...field}
-                      onChange={(e) => field.onChange(Number(e.target.value) || 1)}
+                      onChange={(e) =>
+                        field.onChange(Number(e.target.value) || 1)
+                      }
                     />
                   </FormControl>
                   <FormMessage />
@@ -341,7 +359,9 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
                   <div className='space-y-0.5'>
                     <FormLabel>{t('Enable WeChat Pay')}</FormLabel>
                     <FormDescription>
-                      {t('When enabled, the WeChat Pay QR code button will appear on the user top-up page')}
+                      {t(
+                        'When enabled, the WeChat Pay QR code button will appear on the user top-up page'
+                      )}
                     </FormDescription>
                   </div>
                   <FormControl>
@@ -355,11 +375,7 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
             />
           </div>
 
-          <Button
-            type='button'
-            onClick={handleSave}
-            disabled={loading}
-          >
+          <Button type='button' onClick={handleSave} disabled={loading}>
             {loading ? t('Saving...') : t('Save WeChat Pay settings')}
           </Button>
         </form>

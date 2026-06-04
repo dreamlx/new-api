@@ -1,7 +1,11 @@
 {
-  "quota_consumed": "WiseModel hạn mức tiêu thụ",
-  "request_count": "WiseModel số yêu cầu",
+  "external_platform_integration": "Tích hợp nền tảng bên ngoài",
   "only_users": "Chỉ người dùng WiseModel",
   "package_id_placeholder": "ID gói WiseModel",
-  "select_downstream_platform": "Chọn nền tảng hạ nguồn"
+  "quota_consumed": "WiseModel hạn mức tiêu thụ",
+  "quota_consumed_description": "Hạn mức WiseModel tiêu thụ trong khoảng thời gian đã chọn",
+  "request_count": "WiseModel số yêu cầu",
+  "request_count_description": "Số yêu cầu WiseModel trong khoảng thời gian đã chọn",
+  "select_downstream_platform": "Chọn nền tảng hạ nguồn",
+  "usage_statistics": "Thống kê sử dụng WiseModel"
 }

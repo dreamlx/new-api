@@ -64,7 +64,6 @@ import { SummaryCards } from './summary-cards'
 import { UptimePanel } from './uptime-panel'
 import { WiseModelStatsPanel } from './wisemodel-stats-panel'
 
-
 const SETUP_GUIDE_VISIBILITY_STORAGE_KEY =
   'dashboard_overview_setup_guide_expanded'
 

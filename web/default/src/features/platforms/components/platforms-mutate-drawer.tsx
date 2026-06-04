@@ -9,7 +9,6 @@ License, or (at your option) any later version.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,7 +27,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-
 import { createPlatform, updatePlatform } from '../api'
 import { PLATFORM_STATUS, type Platform, type PlatformStatus } from '../types'
 import { usePlatforms } from './platforms-provider'
@@ -42,7 +40,11 @@ type Props = {
   currentRow?: Platform | null
 }
 
-export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props) {
+export function PlatformsMutateDrawer({
+  open,
+  onOpenChange,
+  currentRow,
+}: Props) {
   const { t } = useTranslation()
   const { setSkReveal, setOpen: setDialog, triggerRefresh } = usePlatforms()
   const isUpdate = Boolean(currentRow)
@@ -82,9 +84,7 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
 
   const validate = () => {
     if (!isUpdate && !PLATFORM_ID_PATTERN.test(platformId)) {
-      toast.error(
-        t('platform_id must match ^[a-z0-9_-]{1,80}$')
-      )
+      toast.error(t('platform_id must match ^[a-z0-9_-]{1,80}$'))
       return false
     }
     return true
@@ -143,8 +143,12 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
           </SheetTitle>
           <SheetDescription>
             {isUpdate
-              ? t('Update the platform name, status, or shadow user. platform_id and sk cannot be changed here.')
-              : t('Provision a new downstream platform credential. The plaintext sk is returned exactly once.')}
+              ? t(
+                  'Update the platform name, status, or shadow user. platform_id and sk cannot be changed here.'
+                )
+              : t(
+                  'Provision a new downstream platform credential. The plaintext sk is returned exactly once.'
+                )}
           </SheetDescription>
         </SheetHeader>
 
@@ -158,7 +162,7 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
               onChange={(e) => setPlatformId(e.target.value)}
               placeholder='e.g. acme_corp'
             />
-            <p className='text-xs text-muted-foreground'>
+            <p className='text-muted-foreground text-xs'>
               {t('Lowercase letters, digits, underscore, hyphen; 1–80 chars.')}
             </p>
           </div>
@@ -182,7 +186,7 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
               onChange={(e) => setShadowUserId(e.target.value)}
               placeholder={t('Leave empty to auto-create a shadow user')}
             />
-            <p className='text-xs text-muted-foreground'>
+            <p className='text-muted-foreground text-xs'>
               {t('When provided, this must be an existing user ID.')}
             </p>
           </div>
@@ -206,8 +210,10 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
                   </SelectItem>
                 </SelectContent>
               </Select>
-              <p className='text-xs text-muted-foreground'>
-                {t('Disabling will reject all token operations from this platform.')}
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Disabling will reject all token operations from this platform.'
+                )}
               </p>
             </div>
           )}
@@ -218,7 +224,11 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
             {t('Cancel')}
           </Button>
           <Button onClick={onSubmit} disabled={submitting}>
-            {submitting ? t('Saving...') : isUpdate ? t('Save Changes') : t('Create')}
+            {submitting
+              ? t('Saving...')
+              : isUpdate
+                ? t('Save Changes')
+                : t('Create')}
           </Button>
         </SheetFooter>
       </SheetContent>

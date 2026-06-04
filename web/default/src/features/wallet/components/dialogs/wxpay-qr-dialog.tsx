@@ -17,8 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useRef, useState } from 'react'
+import {
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  Clock,
+  Loader2,
+} from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
-import { CheckCircle, XCircle, AlertTriangle, Clock, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/lib/api'
 import {
@@ -175,10 +181,10 @@ export function WxpayQRDialog({
             <QRCodeSVG value={codeUrl} size={200} includeMargin={false} />
           </div>
         ) : (
-          <Loader2 className='h-8 w-8 animate-spin text-muted-foreground' />
+          <Loader2 className='text-muted-foreground h-8 w-8 animate-spin' />
         )}
         <div className='mt-3 flex items-center gap-2'>
-          <Loader2 className='h-4 w-4 animate-spin text-muted-foreground' />
+          <Loader2 className='text-muted-foreground h-4 w-4 animate-spin' />
           <span className='text-muted-foreground text-sm'>
             {t('Waiting for payment...')}
           </span>

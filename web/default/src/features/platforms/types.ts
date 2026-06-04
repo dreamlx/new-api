@@ -18,7 +18,8 @@ export const PLATFORM_STATUS = {
   DISABLED: 2,
 } as const
 
-export type PlatformStatus = (typeof PLATFORM_STATUS)[keyof typeof PLATFORM_STATUS]
+export type PlatformStatus =
+  (typeof PLATFORM_STATUS)[keyof typeof PLATFORM_STATUS]
 
 export const platformSchema = z.object({
   id: z.number(),
@@ -38,11 +39,7 @@ export const platformCreatedSchema = platformSchema.extend({
 })
 export type PlatformCreated = z.infer<typeof platformCreatedSchema>
 
-export type PlatformsDialogType =
-  | 'create'
-  | 'update'
-  | 'delete'
-  | 'sk-reveal'
+export type PlatformsDialogType = 'create' | 'update' | 'delete' | 'sk-reveal'
 
 export interface ApiEnvelope<T> {
   success: boolean
