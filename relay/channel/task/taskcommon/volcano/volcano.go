@@ -103,6 +103,20 @@ const (
 	StatusFailed     = "failed"
 )
 
+// TokenPriority defines which token field to use for billing
+type TokenPriority int
+
+const (
+	// TokenPriorityCompletionFirst uses completion_tokens if available, else total_tokens.
+	// This is the Seedance 2.0 official strategy per their documentation:
+	// "准确 token 用量以接口返回的 completion tokens 为准"
+	TokenPriorityCompletionFirst TokenPriority = iota
+
+	// TokenPriorityBothFields sets both CompletionTokens and TotalTokens independently.
+	// This preserves the original doubao behavior before volcano extraction.
+	TokenPriorityBothFields
+)
+
 // ============================
 // Shared adaptor helpers
 // ============================
@@ -146,9 +160,9 @@ func FetchTask(baseURL, apiKey string, body map[string]any, proxy string) (*http
 	return client.Do(req)
 }
 
-// ParseSubmitResponse parses the upstream submit response and returns the upstream task ID
-// plus the raw response body. It also writes the OpenAIVideo response to the gin context.
-func ParseSubmitResponse(c interface{ JSON(int, any) }, resp *http.Response, publicTaskID string, modelName string) (upstreamTaskID string, taskData []byte, taskErr *dto.TaskError) {
+// ParseSubmitResponse parses the upstream submit response and returns the upstream task ID.
+// The caller is responsible for writing the response to the gin context.
+func ParseSubmitResponse(resp *http.Response) (upstreamTaskID string, taskData []byte, taskErr *dto.TaskError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		taskErr = service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
@@ -172,7 +186,10 @@ func ParseSubmitResponse(c interface{ JSON(int, any) }, resp *http.Response, pub
 }
 
 // ParseTaskResult maps the upstream Volcano task response to the internal TaskInfo.
-func ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
+// tokenPriority controls how usage tokens are extracted for billing:
+//   - TokenPriorityCompletionFirst (Seedance): prefer completion_tokens, fallback to total_tokens
+//   - TokenPriorityBothFields (Doubao): set both fields independently from upstream
+func ParseTaskResult(respBody []byte, tokenPriority TokenPriority) (*relaycommon.TaskInfo, error) {
 	var resTask ResponseTask
 	if err := common.Unmarshal(respBody, &resTask); err != nil {
 		return nil, fmt.Errorf("unmarshal task result failed: %w", err)
@@ -191,10 +208,20 @@ func ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
 		taskResult.Status = model.TaskStatusSuccess
 		taskResult.Progress = "100%"
 		taskResult.Url = resTask.Content.VideoURL
-		if resTask.Usage.CompletionTokens > 0 {
+
+		// Apply token priority strategy
+		switch tokenPriority {
+		case TokenPriorityCompletionFirst:
+			// Seedance strategy: prefer completion_tokens for billing accuracy
+			if resTask.Usage.CompletionTokens > 0 {
+				taskResult.CompletionTokens = resTask.Usage.CompletionTokens
+				taskResult.TotalTokens = resTask.Usage.CompletionTokens
+			} else if resTask.Usage.TotalTokens > 0 {
+				taskResult.TotalTokens = resTask.Usage.TotalTokens
+			}
+		case TokenPriorityBothFields:
+			// Doubao strategy: preserve both fields independently (original behavior)
 			taskResult.CompletionTokens = resTask.Usage.CompletionTokens
-			taskResult.TotalTokens = resTask.Usage.CompletionTokens
-		} else if resTask.Usage.TotalTokens > 0 {
 			taskResult.TotalTokens = resTask.Usage.TotalTokens
 		}
 	case StatusFailed:

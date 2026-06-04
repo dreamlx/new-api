@@ -90,6 +90,17 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		return &dto.TaskError{Code: "invalid_request", Message: "prompt is required", StatusCode: http.StatusBadRequest, LocalError: true, Error: errors.New("prompt is required")}
 	}
 
+	// Reject fast model + 1080p (fast models only support 480p/720p)
+	if IsFastModel(req.Model) && normalizeResolution(req.Size) == Resolution1080P {
+		return &dto.TaskError{
+			Code:        "invalid_resolution",
+			Message:     "Fast models do not support 1080p resolution. Please use 480p or 720p.",
+			StatusCode:  http.StatusBadRequest,
+			LocalError:  true,
+			Error:       errors.New("fast model does not support 1080p"),
+		}
+	}
+
 	// Compat: single image
 	if len(req.Images) == 0 && strings.TrimSpace(req.Image) != "" {
 		req.Images = []string{req.Image}

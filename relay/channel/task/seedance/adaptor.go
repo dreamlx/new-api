@@ -154,7 +154,7 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 
 // DoResponse handles upstream response, returns taskID etc.
 func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *dto.TaskError) {
-	upstreamTaskID, responseBody, taskErr := volcano.ParseSubmitResponse(c, resp, info.PublicTaskID, info.OriginModelName)
+	upstreamTaskID, responseBody, taskErr := volcano.ParseSubmitResponse(resp)
 	if taskErr != nil {
 		return
 	}
@@ -266,7 +266,9 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq) (*
 
 // ParseTaskResult parses upstream task response and converts to TaskInfo
 func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
-	return volcano.ParseTaskResult(respBody)
+	// Use TokenPriorityCompletionFirst per Seedance 2.0 official documentation:
+	// "准确 token 用量以接口返回的 completion tokens 为准"
+	return volcano.ParseTaskResult(respBody, volcano.TokenPriorityCompletionFirst)
 }
 
 // ConvertToOpenAIVideo converts internal task to OpenAI Video format response

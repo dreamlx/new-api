@@ -98,7 +98,7 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 
 // DoResponse handles upstream response, returns taskID etc.
 func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *dto.TaskError) {
-	upstreamTaskID, responseBody, taskErr := volcano.ParseSubmitResponse(c, resp, info.PublicTaskID, info.OriginModelName)
+	upstreamTaskID, responseBody, taskErr := volcano.ParseSubmitResponse(resp)
 	if taskErr != nil {
 		return
 	}
@@ -162,7 +162,9 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq) (*
 }
 
 func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
-	return volcano.ParseTaskResult(respBody)
+	// Use TokenPriorityBothFields to preserve original doubao behavior:
+	// set CompletionTokens and TotalTokens independently from upstream
+	return volcano.ParseTaskResult(respBody, volcano.TokenPriorityBothFields)
 }
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error) {
