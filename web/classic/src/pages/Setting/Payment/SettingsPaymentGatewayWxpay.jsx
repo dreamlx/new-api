@@ -44,6 +44,7 @@ const isMaskedSecret = (value) =>
 
 export default function SettingsPaymentGatewayWxpay(props) {
   const { t } = useTranslation();
+  const sectionTitle = props.hideSectionTitle ? undefined : t('微信支付设置');
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState({
     WxpayEnabled: false,
@@ -213,7 +214,7 @@ export default function SettingsPaymentGatewayWxpay(props) {
         onValueChange={handleFormChange}
         getFormApi={(api) => (formApiRef.current = api)}
       >
-        <Form.Section text={t('微信支付设置')}>
+        <Form.Section text={sectionTitle}>
           <Text>
             {t('微信支付商户凭证请前往')}
             <a

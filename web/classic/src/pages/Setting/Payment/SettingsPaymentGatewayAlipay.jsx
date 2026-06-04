@@ -46,6 +46,7 @@ const isMaskedSecret = (value) =>
 
 export default function SettingsPaymentGatewayAlipay(props) {
   const { t } = useTranslation();
+  const sectionTitle = props.hideSectionTitle ? undefined : t('支付宝设置');
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState({
     AlipayEnabled: false,
@@ -209,7 +210,7 @@ export default function SettingsPaymentGatewayAlipay(props) {
         onValueChange={handleFormChange}
         getFormApi={(api) => (formApiRef.current = api)}
       >
-        <Form.Section text={t('支付宝设置')}>
+        <Form.Section text={sectionTitle}>
           <Text>
             {t('支付宝应用凭证请前往')}
             <a

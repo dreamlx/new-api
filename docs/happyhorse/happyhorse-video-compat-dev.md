@@ -77,11 +77,11 @@ GET /happyhorse/api/status/{task_id}
 | `duration` | `parameters.duration` | 仅 T2V/I2V/R2V；缺省 5；显式 3-15 |
 | `metadata.resolution` / `size` | `parameters.resolution` | 默认 1080P |
 | `metadata.ratio` | `parameters.ratio` | 仅 T2V/R2V |
-| `image` / `images[0]` / `input_reference` | I2V `media[type=first_frame]` | I2V 最终必须正好 1 张首帧 |
-| `images[]` | R2V `media[type=reference_image]` | 1-9 张参考图 |
+| `image` / `images[0]` / `input_reference` | I2V `media[type=first_frame]` | I2V 最终必须正好 1 张首帧；支持公网 `http/https` URL 或图片 base64 data URL |
+| `images[]` | R2V `media[type=reference_image]` | 1-9 张参考图；支持公网 `http/https` URL 或图片 base64 data URL |
 | `metadata.media` | R2V 原生 media | 存在时优先用于 R2V，并校验只能是 `reference_image` |
-| `metadata.video_url` | Video Edit `media[type=video]` | 必填且正好 1 个 |
-| `metadata.reference_images` | Video Edit `media[type=reference_image]` | 0-5 张 |
+| `metadata.video_url` | Video Edit `media[type=video]` | 必填且正好 1 个；仅支持公网 `http/https` URL |
+| `metadata.reference_images` | Video Edit `media[type=reference_image]` | 0-5 张；支持公网 `http/https` URL 或图片 base64 data URL |
 
 首版不从宽高、`size=1280x720`、图片比例或视频比例自动推断分辨率和比例。
 
@@ -360,7 +360,7 @@ HappyHorse task adaptor 通过 `DisablePerCallBilling()` 显式声明禁用按�
 - I2V 正好 1 张首帧。
 - R2V 参考图 1-9。
 - Video Edit 正好 1 个视频，0-5 张参考图。
-- media URL 非空和 http/https 校验。
+- media 值非空；图片媒体支持公网 `http/https` URL 或图片 base64 data URL，视频媒体仅支持公网 `http/https` URL。
 - `quality` / `sound` 不进入上游请求体。
 - `usage.SR` 数字/字符串兼容。
 - Video Edit 输入秒数加输出秒数计费。

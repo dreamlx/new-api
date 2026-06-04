@@ -14,6 +14,18 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==================== Helpers ====================
+
+// maskExternalUserTokenKey hides the middle of a token Key, leaving the first
+// 8 chars and last 4 chars visible. Format: "sk-<first8>****<last4>". This is
+// the canonical V1 mask used by both GetExternalUserTokens and
+// GetExternalUserStats — do not return raw "sk-" + token.Key from V1 GETs.
+func maskExternalUserTokenKey(key string) string {
+	return fmt.Sprintf("sk-%s****%s",
+		key[:min(8, len(key))],
+		key[max(0, len(key)-4):])
+}
+
 // ==================== Request/Response Structs ====================
 
 type SyncExternalUserRequest struct {
@@ -528,7 +540,7 @@ func GetExternalUserTokens(c *gin.Context) {
 	tokenInfos := make([]gin.H, 0, len(tokens))
 
 	for _, token := range tokens {
-		maskedKey := fmt.Sprintf("sk-%s****%s", token.Key[:min(8, len(token.Key))], token.Key[max(0, len(token.Key)-4):])
+		maskedKey := maskExternalUserTokenKey(token.Key)
 
 		statusText := "启用"
 		switch token.Status {
@@ -800,10 +812,12 @@ func GetExternalUserStats(c *gin.Context) {
 
 	tokenInfos := make([]gin.H, 0, len(tokens))
 	for _, token := range tokens {
+		// Sk masked to match the V1 GetExternalUserTokens response shape;
+		// full sk is never returned by GET endpoints after this fix.
 		tokenInfos = append(tokenInfos, gin.H{
 			"id":           token.Id,
 			"name":         token.Name,
-			"key":          "sk-" + token.Key,
+			"key":          maskExternalUserTokenKey(token.Key),
 			"status":       token.Status,
 			"expired_time": token.ExpiredTime,
 		})

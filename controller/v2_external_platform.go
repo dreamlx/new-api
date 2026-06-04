@@ -8,27 +8,40 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
 
-// PlatformQuotaForNewUser is the default quota for auto-created platform users (~$1M).
-// This ensures Trust Quota Bypass works with upstream BillingSession.
-const PlatformQuotaForNewUser = 499999500000
-
 // ==================== Request Structs ====================
 
+// V2TokenAuthorizeRequest is the body schema for POST /api/v2/external/tokens/authorize.
+// platform_id is intentionally absent: caller identity is established by the
+// PlatformAuth middleware via X-Platform-Id / X-Platform-Sk headers. Any
+// platform_id sent in the body is ignored.
 type V2TokenAuthorizeRequest struct {
-	PlatformId string                 `json:"platform_id" binding:"required,min=1,max=100"`
-	TokenKey   string                 `json:"token_key" binding:"required,min=10,max=200"`
-	Metadata   map[string]interface{} `json:"metadata"`
+	TokenKey string                 `json:"token_key" binding:"required,min=10,max=200"`
+	Metadata map[string]interface{} `json:"metadata"`
 }
 
 // ==================== Handlers ====================
 
-// V2AuthorizeToken registers a platform-generated token in New API.
+// V2AuthorizeToken registers a platform-generated token key in New API and
+// returns the internal token_id. Idempotent: re-registering an existing key
+// (under the same platform) returns the same token_id with status="exists".
+//
 // POST /api/v2/external/tokens/authorize
+// Headers: X-Platform-Id, X-Platform-Sk (validated by middleware.PlatformAuth)
+// Body:    { token_key, metadata? }
 func V2AuthorizeToken(c *gin.Context) {
+	platform := middleware.PlatformFromContext(c)
+	shadowUserId := middleware.ShadowUserIdFromContext(c)
+	if platform == nil || shadowUserId <= 0 {
+		// Should never happen: middleware guarantees both. Fail closed.
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "platform context missing"})
+		return
+	}
+
 	var req V2TokenAuthorizeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求参数错误: " + err.Error()})
@@ -50,24 +63,16 @@ func V2AuthorizeToken(c *gin.Context) {
 		return
 	}
 
-	// Find or create platform user
-	platformUsername := "platform_" + req.PlatformId
-	user, err := getOrCreatePlatformUser(platformUsername, req.PlatformId)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "创建平台用户失败: " + err.Error()})
-		return
-	}
-
-	// Check if token already exists (idempotent)
+	// Idempotent path: token already registered? Verify it belongs to this platform.
 	existingToken, err := model.GetTokenByKey(tokenKeyBody, true)
 	if err == nil && existingToken != nil {
-		// Token exists — verify it belongs to this platform
-		if existingToken.UserId != user.Id {
+		if existingToken.UserId != shadowUserId {
 			c.JSON(http.StatusConflict, gin.H{"success": false, "message": "该密钥已被其他平台注册"})
 			return
 		}
 
-		// 幂等健康保证：若 token 被禁用或额度被修改，自动恢复为无限额度启用状态
+		// Self-healing: if the token was disabled or had a custom quota set
+		// externally, restore the V2 invariant (enabled + unlimited).
 		if existingToken.Status != common.TokenStatusEnabled || !existingToken.UnlimitedQuota {
 			model.DB.Model(existingToken).Updates(map[string]interface{}{
 				"status":          common.TokenStatusEnabled,
@@ -79,25 +84,25 @@ func V2AuthorizeToken(c *gin.Context) {
 			"success": true,
 			"message": "密钥已存在",
 			"data": gin.H{
-				"token_key":   req.TokenKey,
 				"token_id":    existingToken.Id,
 				"status":      "exists",
-				"platform_id": req.PlatformId,
+				"platform_id": platform.PlatformId,
 				"created_at":  time.Unix(existingToken.CreatedTime, 0).UTC().Format(time.RFC3339),
 			},
 		})
 		return
 	}
 
-	// Build metadata name
-	tokenName := fmt.Sprintf("v2_%s", req.PlatformId)
+	// Build a descriptive token name. Optional metadata.platform_user_id
+	// (caller's own user identifier) is appended to aid downstream reconciliation.
+	tokenName := fmt.Sprintf("v2_%s", platform.PlatformId)
 	if req.Metadata != nil {
 		if uid, ok := req.Metadata["platform_user_id"]; ok {
-			tokenName = fmt.Sprintf("v2_%s_%v", req.PlatformId, uid)
+			tokenName = fmt.Sprintf("v2_%s_%v", platform.PlatformId, uid)
 		}
 	}
 
-	// Store metadata as external_data JSON
+	// Audit metadata; best-effort, stored as JSON in the manage log line.
 	var metadataStr string
 	if req.Metadata != nil {
 		if bs, err := common.Marshal(req.Metadata); err == nil {
@@ -106,7 +111,7 @@ func V2AuthorizeToken(c *gin.Context) {
 	}
 
 	token := &model.Token{
-		UserId:         user.Id,
+		UserId:         shadowUserId,
 		Key:            tokenKeyBody,
 		Name:           tokenName,
 		CreatedTime:    common.GetTimestamp(),
@@ -126,14 +131,14 @@ func V2AuthorizeToken(c *gin.Context) {
 		return
 	}
 
-	// Store metadata in log for audit (best-effort)
+	// Best-effort audit log; non-fatal on failure.
 	if metadataStr != "" {
 		_ = model.LOG_DB.Create(&model.Log{
-			UserId:    user.Id,
-			Username:  user.Username,
+			UserId:    shadowUserId,
+			Username:  "platform_" + platform.PlatformId,
 			CreatedAt: common.GetTimestamp(),
 			Type:      model.LogTypeManage,
-			Content:   fmt.Sprintf("V2平台Token授权，platform: %s, metadata: %s", req.PlatformId, metadataStr),
+			Content:   fmt.Sprintf("V2平台Token授权，platform: %s, metadata: %s", platform.PlatformId, metadataStr),
 			TokenId:   token.Id,
 		}).Error
 	}
@@ -142,35 +147,33 @@ func V2AuthorizeToken(c *gin.Context) {
 		"success": true,
 		"message": "密钥授权成功",
 		"data": gin.H{
-			"token_key":   req.TokenKey,
 			"token_id":    token.Id,
 			"status":      "authorized",
-			"platform_id": req.PlatformId,
+			"platform_id": platform.PlatformId,
 			"created_at":  time.Unix(token.CreatedTime, 0).UTC().Format(time.RFC3339),
 		},
 	})
 }
 
-// V2GetPlatformLogs returns consumption logs for a platform.
-// GET /api/v2/external/platforms/:platform_id/logs
+// V2GetPlatformLogs returns consumption logs for the authenticated platform's
+// shadow user. The plaintext sk is never returned; logs reference tokens by
+// integer token_id (Token.Id), which is globally unique and safe to expose
+// once auth is enforced (the user_id filter prevents cross-platform reads).
+//
+// GET /api/v2/external/logs
+// Headers: X-Platform-Id, X-Platform-Sk
+// Query:   page, page_size, start_date, end_date, token_id (optional filter)
 func V2GetPlatformLogs(c *gin.Context) {
-	platformId := c.Param("platform_id")
-	if platformId == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "platform_id 不能为空"})
+	platform := middleware.PlatformFromContext(c)
+	shadowUserId := middleware.ShadowUserIdFromContext(c)
+	if platform == nil || shadowUserId <= 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "platform context missing"})
 		return
 	}
 
-	platformUsername := "platform_" + platformId
-	var user model.User
-	if err := model.DB.Where("username = ?", platformUsername).First(&user).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "平台不存在"})
-		return
-	}
-
-	// Parse query params
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
-	tokenKeyFilter := c.Query("token_key")
+	tokenIdFilter := c.Query("token_id")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
@@ -196,20 +199,24 @@ func V2GetPlatformLogs(c *gin.Context) {
 		}
 	}
 
-	// Build paginated query
-	tx := model.LOG_DB.Where("user_id = ? AND type = ?", user.Id, model.LogTypeConsume)
+	tx := model.LOG_DB.Where("user_id = ? AND type = ?", shadowUserId, model.LogTypeConsume)
 
-	// Optional token_key filter — hoist filterTokenId so aggregate can reuse it
+	// Optional token_id filter: validate the token belongs to this platform's
+	// shadow user. If the token id is malformed or unrelated, return empty
+	// results (consistent with the pre-rewrite semantics for token_key filter).
 	var filterTokenId int
-	if tokenKeyFilter != "" {
-		tokenKeyBody := strings.TrimPrefix(tokenKeyFilter, "sk-")
-		filterToken, err := model.GetTokenByKey(tokenKeyBody, true)
-		if err != nil || filterToken == nil || filterToken.UserId != user.Id {
-			// Token not found or doesn't belong to this platform — return empty results
+	if tokenIdFilter != "" {
+		tid, err := strconv.Atoi(tokenIdFilter)
+		if err != nil || tid <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "token_id 必须为正整数"})
+			return
+		}
+		var filterToken model.Token
+		if err := model.DB.Where("id = ? AND user_id = ?", tid, shadowUserId).First(&filterToken).Error; err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"data": gin.H{
-					"platform_id": platformId,
+					"platform_id": platform.PlatformId,
 					"logs":        []interface{}{},
 					"pagination":  gin.H{"page": page, "page_size": pageSize, "total": 0, "total_pages": 0},
 					"summary":     gin.H{"total_requests": 0, "total_tokens": 0, "total_quota_consumed": 0},
@@ -228,15 +235,14 @@ func V2GetPlatformLogs(c *gin.Context) {
 		tx = tx.Where("created_at <= ?", endTimestamp)
 	}
 
-	// Count
 	var total int64
 	if err := tx.Model(&model.Log{}).Count(&total).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "查询失败"})
 		return
 	}
 
-	// Global aggregate — independent chain from model.LOG_DB to avoid GORM statement state sharing
-	// 使用独立查询链（非 tx），保证聚合 SELECT 不污染后续分页 Find 的 Statement
+	// Aggregate on an independent query chain so the pagination SELECT below
+	// is not contaminated by GORM statement state from the aggregate SELECT.
 	var agg struct {
 		TotalQuota            int
 		TotalPromptTokens     int
@@ -244,7 +250,7 @@ func V2GetPlatformLogs(c *gin.Context) {
 		UniqueTokens          int
 	}
 	aggDB := model.LOG_DB.Model(&model.Log{}).
-		Where("user_id = ? AND type = ?", user.Id, model.LogTypeConsume)
+		Where("user_id = ? AND type = ?", shadowUserId, model.LogTypeConsume)
 	if filterTokenId > 0 {
 		aggDB = aggDB.Where("token_id = ?", filterTokenId)
 	}
@@ -261,7 +267,6 @@ func V2GetPlatformLogs(c *gin.Context) {
 			"COUNT(DISTINCT token_id) AS unique_tokens",
 	).Scan(&agg)
 
-	// Fetch logs (paginated)
 	var logs []*model.Log
 	offset := (page - 1) * pageSize
 	if err := tx.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&logs).Error; err != nil {
@@ -269,19 +274,14 @@ func V2GetPlatformLogs(c *gin.Context) {
 		return
 	}
 
-	// Build log items
+	// Build log items. token_id (integer) replaces the previous token_key (sk-..)
+	// — sk plaintext is never reconstructed or returned here.
 	logItems := make([]gin.H, 0, len(logs))
 	for _, log := range logs {
-		var tokenKey string
-		if log.TokenId > 0 {
-			if t, err := model.GetTokenById(log.TokenId); err == nil {
-				tokenKey = "sk-" + t.Key
-			}
-		}
 		logItems = append(logItems, gin.H{
 			"log_id":            log.Id,
 			"time":              time.Unix(log.CreatedAt, 0).UTC().Format(time.RFC3339),
-			"token_key":         tokenKey,
+			"token_id":          log.TokenId,
 			"model_name":        log.ModelName,
 			"prompt_tokens":     log.PromptTokens,
 			"completion_tokens": log.CompletionTokens,
@@ -295,7 +295,7 @@ func V2GetPlatformLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"platform_id": platformId,
+			"platform_id": platform.PlatformId,
 			"logs":        logItems,
 			"pagination": gin.H{
 				"page":        page,
@@ -313,40 +313,4 @@ func V2GetPlatformLogs(c *gin.Context) {
 			},
 		},
 	})
-}
-
-// ==================== Helpers ====================
-
-func getOrCreatePlatformUser(username, platformId string) (*model.User, error) {
-	var user model.User
-	if err := model.DB.Where("username = ?", username).First(&user).Error; err == nil {
-		return &user, nil
-	}
-
-	email := fmt.Sprintf("%s@platform.local", platformId)
-	user = model.User{
-		Username:    username,
-		DisplayName: "Platform: " + platformId,
-		Email:       email,
-		Password:    common.GetRandomString(32),
-		AffCode:     common.GetRandomString(16),
-		IsExternal:  true,
-		Role:        common.RoleCommonUser,
-		Status:      common.UserStatusEnabled,
-		Quota:       PlatformQuotaForNewUser,
-	}
-	user.SetExternalUserId("platform_" + platformId)
-
-	if err := model.DB.Create(&user).Error; err != nil {
-		// 并发场景：另一个 goroutine 已赢得竞争，重查即可
-		if strings.Contains(err.Error(), "Duplicate") ||
-			strings.Contains(err.Error(), "UNIQUE") ||
-			strings.Contains(err.Error(), "duplicate") {
-			if err2 := model.DB.Where("username = ?", username).First(&user).Error; err2 == nil {
-				return &user, nil
-			}
-		}
-		return nil, err
-	}
-	return &user, nil
 }
