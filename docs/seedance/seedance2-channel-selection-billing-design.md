@@ -1,6 +1,6 @@
 # Seedance 2.0 独立渠道与计费设计文档
 
-更新时间：2026-06-03
+更新时间：2026-06-04
 适用角色：管理员、运维、计费配置人员、后端开发人员
 
 ## 1. 设计目标
@@ -181,8 +181,8 @@ GET  /v1/video/generations/{task_id}
 | `model` | `model` |
 | `prompt` | `content[]` 中 `type=text` |
 | `images[]` | `content[]` 中 `type=image_url` |
-| `videos[]` | `content[]` 中 `type=video` |
-| `audios[]` | `content[]` 中 `type=audio` |
+| `videos[]` | `content[]` 中 `type=video`（上游格式 `video_url`） |
+| `audios[]` | `content[]` 中 `type=audio`（上游格式 `audio_url`） |
 | `duration` / `seconds` | `duration` |
 | `size` | `resolution` |
 | `seed` | `seed` |
@@ -282,9 +282,26 @@ modelRatio = 官方人民币元/百万 token / 14.6
 ```json
 {
   "dreamina-seedance-2-0-260128": 3.1507,
-  "dreamina-seedance-2-0-fast-260128": 2.5342
+  "dreamina-seedance-2-0-fast-260128": 2.5342,
+  "doubao-seedance-2-0-260128": 3.1507,
+  "doubao-seedance-2-0-fast-260128": 2.5342
 }
 ```
+
+如果通过前端“模型计费”可视化页面配置，注意输入框填写的是 `USD / 1M tokens`，不是 `model_ratio` 原始值。该页面保存时会按 new-api 规则换算：
+
+```text
+ModelRatio = 输入价格 / 2
+```
+
+因此前端页面应填写：
+
+| 模型 | 官方单价 | 前端输入价格 USD/1M tokens | 保存预览 ModelRatio |
+| --- | ---: | ---: | ---: |
+| `dreamina-seedance-2-0-260128` | 46 元/百万 token | `46 / 7.3 = 6.3014` | `3.1507` |
+| `dreamina-seedance-2-0-fast-260128` | 37 元/百万 token | `37 / 7.3 = 5.0685` | `2.5342` |
+
+也就是说，如果目标是 `ModelRatio = 3.1507`，前端输入框不能填 `3.1507`，而应填 `6.3014`。如果直接编辑 `ModelRatio` 原始 JSON，则填写 `3.1507`。
 
 如果部署方修改过 `USD2RMB`、`QuotaPerUnit` 或余额单位，上表需要按实际基准重新计算。
 
@@ -314,6 +331,17 @@ Seedance 2.0 token 单价受模型、输出分辨率、是否含输入视频影�
 
 Fast 版本不支持 1080P。第一阶段建议请求校验阶段拒绝 fast + 1080P；如果由上游拒绝，失败任务继续走现有退款逻辑。
 
+### 8.3 图片输入不影响价格
+
+官方定价中，**图片输入不影响 token 单价**。图生视频（只输入图片、不输入视频）与纯文生视频使用相同的基础价格。只有视频输入（`videos[]` 或 content[] 中 `type=video`）才会触发折扣。
+
+| 输入类型 | 是否影响价格 | 说明 |
+| --- | --- | --- |
+| 文本（prompt） | 否 | 基础价格 |
+| 图片（images[]） | 否 | 与文生视频同价 |
+| 视频（videos[]） | **是** | 触发 0.6087/0.5946 折扣 |
+| 音频（audios[]） | 否 | 不影响 token 单价 |
+
 ## 9. 扣费计算
 
 预扣阶段：
@@ -339,7 +367,7 @@ Token 选择：
 ```text
 model_ratio = 46 / 14.6 = 3.1507
 group_ratio = 1
-condition_ratio = 1
+seedance_condition_ratio = 1
 
 actual_quota = 108900 * 3.1507 * 1 * 1 = 343111
 ```
@@ -348,12 +376,43 @@ actual_quota = 108900 * 3.1507 * 1 * 1 = 343111
 
 ```text
 model_ratio = 3.1507
-condition_ratio = 28 / 46 = 0.6087
+seedance_condition_ratio = 28 / 46 = 0.6087
 
 actual_quota = 108900 * 3.1507 * 0.6087 = 208850
 ```
 
-## 10. 结算行为
+示例：主版本 1080P 文生视频（不含视频输入），`completion_tokens=108900`。
+
+```text
+model_ratio = 3.1507
+seedance_condition_ratio = 51 / 46 = 1.1087
+
+预扣 quota = 3.1507 / 2 × 500000 × 1 × 1.1087 = 874528
+实际 quota = 108900 × 3.1507 × 1 × 1.1087 = 380498
+退回 quota = 874528 - 380498 = 494030
+```
+
+示例：主版本 1080P 输入含视频，`completion_tokens=108900`。
+
+```text
+model_ratio = 3.1507
+seedance_condition_ratio = 31 / 46 = 0.6739
+
+预扣 quota = 3.1507 / 2 × 500000 × 1 × 0.6739 = 531345
+实际 quota = 108900 × 3.1507 × 1 × 0.6739 = 231245
+退回 quota = 531345 - 231245 = 300100
+```
+
+示例：Fast 版本 720P 输入含视频，`completion_tokens=108900`。
+
+```text
+model_ratio = 2.5342
+seedance_condition_ratio = 22 / 37 = 0.5946
+
+预扣 quota = 2.5342 / 2 × 500000 × 1 × 0.5946 = 377419
+实际 quota = 108900 × 2.5342 × 1 × 0.5946 = 164313
+退回 quota = 377419 - 164313 = 213106
+``` 结算行为
 
 seedance 渠道复用 new-api 统一任务计费链路：
 
@@ -438,7 +497,7 @@ seedance 渠道复用 new-api 统一任务计费链路：
 
 ### 是否符合 DRY
 
-基本符合。设计复用通用任务 relay、轮询、补差和 token 重算链路。由于最新约束不允许修改现有渠道，seedance adaptor 会参考 DoubaoVideo 的协议转换形态，但不抽取公共包，以免为了复用而触碰既有渠道行为。
+符合。设计复用通用任务 relay、轮询、补差和 token 重算链路。开发阶段从 doubao 和 seedance adaptor 中提取了共享 Volcano 兼容代码到 `relay/channel/task/taskcommon/volcano/` 包，避免了 DTO 结构和辅助方法的重复。
 
 ### 是否符合 SOLID
 
@@ -449,7 +508,8 @@ seedance 渠道复用 new-api 统一任务计费链路：
 - 不再推荐修改 `DoubaoVideo` / `VolcEngine`。
 - 不再把 OpenAI Video 风格入口等同于 `OpenAI` 渠道类型。
 - 明确双入口都进入 seedance 独立 task adaptor。
-- 明确“不维护完整视频规格价格表”不等于不支持条件倍率。
+- 明确”不维护完整视频规格价格表”不等于不支持条件倍率。
+- DRY 违规已修正：从 doubao 和 seedance adaptor 中提取了共享 `volcano` 包。
 
 ## 14. 常见问题
 
@@ -476,6 +536,10 @@ HappyHorse 官方原生是分辨率乘秒数计费。Seedance 2.0 官方准确�
 ### 如果上游不返回 usage 怎么办？
 
 第一阶段保持预扣额度，不做 token 补差。视频规格估算 fallback 可以作为后续独立需求，不进入本阶段。
+
+### 上游内容审核拒绝怎么办？
+
+上游可能因内容审核拒绝请求，返回错误码 `OutputVideoSensitiveContentDetected.PolicyViolation`。常见于受版权保护的图片输入（如知名卡通角色）。这不是代码 bug，任务会走正常失败退款逻辑。遇到此类错误时需更换输入素材。
 
 ### `completion_tokens` 和 `total_tokens` 用哪个？
 

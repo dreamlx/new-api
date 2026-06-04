@@ -2,7 +2,6 @@ package seedance
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -14,8 +13,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
+	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon/volcano"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -41,14 +40,12 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 
 // BuildRequestURL constructs the upstream Volcano-compatible URL.
 func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
-	return fmt.Sprintf("%s/api/v3/contents/generations/tasks", a.baseURL), nil
+	return volcano.BuildTaskURL(a.baseURL), nil
 }
 
 // BuildRequestHeader sets required headers.
 func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *relaycommon.RelayInfo) error {
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	volcano.SetCommonHeaders(req, a.apiKey)
 	return nil
 }
 
@@ -59,32 +56,18 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		return nil
 	}
 
-	otherRatios := make(map[string]float64)
 	modelName := info.OriginModelName
-
-	// Check if fast model tries to use 1080P (not supported)
-	if IsFastModel(modelName) {
-		resolution := strings.ToLower(req.Size)
-		if resolution == Resolution1080P || resolution == "1080" {
-			// Fast model + 1080P should be rejected by validation or upstream
-			// For now, don't apply any resolution ratio
-		}
-	}
-
-	// Check for video input from metadata
-	hasVideoInput := hasVideoInMetadata(req.Metadata) || hasVideoInArrays(req.Metadata)
-
-	// Check resolution
 	resolution := normalizeResolution(req.Size)
+	// 视频输入检测：Volcano content[] 中的 video/video_url 条目 + OpenAI Video 风格的 req.Videos 字段
+	hasVideoInput := volcano.HasVideoInMetadata(req.Metadata) || len(req.Videos) > 0
 
 	// Calculate combined ratio based on model, resolution, and video input
 	ratio := calculateCombinedRatio(modelName, resolution, hasVideoInput)
 
 	if ratio != 1.0 {
-		otherRatios["seedance_condition"] = ratio
+		return map[string]float64{"seedance_condition": ratio}
 	}
-
-	return otherRatios
+	return nil
 }
 
 // calculateCombinedRatio 根据模型、分辨率和是否输入视频计算组合倍率
@@ -141,48 +124,6 @@ func normalizeResolution(size string) string {
 	return Resolution720P // default
 }
 
-// hasVideoInArrays 检查 metadata 中是否包含视频 URL
-func hasVideoInArrays(metadata map[string]interface{}) bool {
-	if metadata == nil {
-		return false
-	}
-	// Check for videos in metadata
-	if videos, ok := metadata["videos"]; ok {
-		if videosSlice, ok := videos.([]interface{}); ok && len(videosSlice) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// hasVideoInMetadata 检查 metadata 的 content 数组是否包含 video_url 条目
-func hasVideoInMetadata(metadata map[string]interface{}) bool {
-	if metadata == nil {
-		return false
-	}
-	contentRaw, ok := metadata["content"]
-	if !ok {
-		return false
-	}
-	contentSlice, ok := contentRaw.([]interface{})
-	if !ok {
-		return false
-	}
-	for _, item := range contentSlice {
-		itemMap, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if itemMap["type"] == "video_url" || itemMap["type"] == "video" {
-			return true
-		}
-		if _, has := itemMap["video_url"]; has {
-			return true
-		}
-	}
-	return false
-}
-
 // BuildRequestBody converts request into Seedance/Volcano specific format.
 func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
 	req, err := relaycommon.GetTaskRequest(c)
@@ -213,25 +154,12 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 
 // DoResponse handles upstream response, returns taskID etc.
 func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *dto.TaskError) {
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		taskErr = service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
-		return
-	}
-	_ = resp.Body.Close()
-
-	// Parse Seedance/Volcano response
-	var sResp ResponsePayload
-	if err := common.Unmarshal(responseBody, &sResp); err != nil {
-		taskErr = service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError)
+	upstreamTaskID, responseBody, taskErr := volcano.ParseSubmitResponse(c, resp, info.PublicTaskID, info.OriginModelName)
+	if taskErr != nil {
 		return
 	}
 
-	if sResp.ID == "" {
-		taskErr = service.TaskErrorWrapper(fmt.Errorf("task_id is empty"), "invalid_response", http.StatusInternalServerError)
-		return
-	}
-
+	// Write OpenAI Video response to client
 	ov := dto.NewOpenAIVideo()
 	ov.ID = info.PublicTaskID
 	ov.TaskID = info.PublicTaskID
@@ -239,32 +167,12 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	ov.Model = info.OriginModelName
 
 	c.JSON(http.StatusOK, ov)
-	return sResp.ID, responseBody, nil
+	return upstreamTaskID, responseBody, nil
 }
 
 // FetchTask fetch task status
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
-	taskID, ok := body["task_id"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid task_id")
-	}
-
-	uri := fmt.Sprintf("%s/api/v3/contents/generations/tasks/%s", baseUrl, taskID)
-
-	req, err := http.NewRequest(http.MethodGet, uri, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+key)
-
-	client, err := service.GetHttpClientWithProxy(proxy)
-	if err != nil {
-		return nil, fmt.Errorf("new proxy http client failed: %w", err)
-	}
-	return client.Do(req)
+	return volcano.FetchTask(baseUrl, key, body, proxy)
 }
 
 func (a *TaskAdaptor) GetModelList() []string {
@@ -276,49 +184,57 @@ func (a *TaskAdaptor) GetChannelName() string {
 }
 
 // convertToRequestPayload 将 TaskSubmitReq 转换为上游 Volcano-compatible 请求
-func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq) (*RequestPayload, error) {
-	r := RequestPayload{
+func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq) (*volcano.RequestPayload, error) {
+	r := volcano.RequestPayload{
 		Model:   req.Model,
-		Content: []ContentItem{},
+		Content: []volcano.ContentItem{},
 	}
 
-	// Add images if present
-	if req.HasImage() {
-		for _, imgURL := range req.Images {
-			r.Content = append(r.Content, ContentItem{
-				Type: "image_url",
-				ImageURL: &MediaURL{
-					URL: imgURL,
-				},
-			})
+	// Check if Metadata contains structured content items (from Volcano content[] format).
+	// These preserve per-item fields like role that cannot be carried by the flat
+	// Images/Videos/Audios string arrays.
+	hasMetadataContent := false
+	if req.Metadata != nil {
+		if contentRaw, ok := req.Metadata["content"]; ok {
+			if contentSlice, ok := contentRaw.([]interface{}); ok && len(contentSlice) > 0 {
+				hasMetadataContent = true
+			}
 		}
 	}
 
-	// Add videos if present
-	if len(req.Videos) > 0 {
-		for _, videoURL := range req.Videos {
-			r.Content = append(r.Content, ContentItem{
-				Type: "video_url",
-				VideoURL: &MediaURL{
-					URL: videoURL,
-				},
-			})
+	if !hasMetadataContent {
+		// OpenAI Video format: build content items from flat URL arrays
+		if req.HasImage() {
+			for _, imgURL := range req.Images {
+				r.Content = append(r.Content, volcano.ContentItem{
+					Type:     "image_url",
+					ImageURL: &volcano.MediaURL{URL: imgURL},
+				})
+			}
+		}
+
+		if len(req.Videos) > 0 {
+			for _, videoURL := range req.Videos {
+				r.Content = append(r.Content, volcano.ContentItem{
+					Type:     "video_url",
+					VideoURL: &volcano.MediaURL{URL: videoURL},
+				})
+			}
+		}
+
+		if len(req.Audios) > 0 {
+			for _, audioURL := range req.Audios {
+				r.Content = append(r.Content, volcano.ContentItem{
+					Type:     "audio_url",
+					AudioURL: &volcano.MediaURL{URL: audioURL},
+				})
+			}
 		}
 	}
 
-	// Add audios if present
-	if len(req.Audios) > 0 {
-		for _, audioURL := range req.Audios {
-			r.Content = append(r.Content, ContentItem{
-				Type: "audio_url",
-				AudioURL: &MediaURL{
-					URL: audioURL,
-				},
-			})
-		}
-	}
-
-	// Unmarshal metadata into request payload (may override fields)
+	// Unmarshal metadata into request payload (may override fields).
+	// For Volcano content[] format, Metadata["content"] contains structured content
+	// items with per-item fields like role preserved (e.g. "first_frame").
 	metadata := req.Metadata
 	if err := taskcommon.UnmarshalMetadata(metadata, &r); err != nil {
 		return nil, errors.Wrap(err, "unmarshal metadata failed")
@@ -339,8 +255,8 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq) (*
 	}
 
 	// Remove existing text items and add prompt as text
-	r.Content = lo.Reject(r.Content, func(c ContentItem, _ int) bool { return c.Type == "text" })
-	r.Content = append(r.Content, ContentItem{
+	r.Content = lo.Reject(r.Content, func(c volcano.ContentItem, _ int) bool { return c.Type == "text" })
+	r.Content = append(r.Content, volcano.ContentItem{
 		Type: "text",
 		Text: req.Prompt,
 	})
@@ -350,51 +266,12 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq) (*
 
 // ParseTaskResult parses upstream task response and converts to TaskInfo
 func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
-	resTask := ResponseTask{}
-	if err := common.Unmarshal(respBody, &resTask); err != nil {
-		return nil, errors.Wrap(err, "unmarshal task result failed")
-	}
-
-	taskResult := relaycommon.TaskInfo{
-		Code: 0,
-	}
-
-	// Map Seedance/Volcano status to internal status
-	switch resTask.Status {
-	case StatusPending, StatusQueued:
-		taskResult.Status = model.TaskStatusQueued
-		taskResult.Progress = "10%"
-	case StatusProcessing, StatusRunning:
-		taskResult.Status = model.TaskStatusInProgress
-		taskResult.Progress = "50%"
-	case StatusSucceeded:
-		taskResult.Status = model.TaskStatusSuccess
-		taskResult.Progress = "100%"
-		taskResult.Url = resTask.Content.VideoURL
-		// 解析 usage 信息用于按 token 计费
-		// 优先使用 completion_tokens，fallback 到 total_tokens
-		if resTask.Usage.CompletionTokens > 0 {
-			taskResult.CompletionTokens = resTask.Usage.CompletionTokens
-			taskResult.TotalTokens = resTask.Usage.CompletionTokens
-		} else if resTask.Usage.TotalTokens > 0 {
-			taskResult.TotalTokens = resTask.Usage.TotalTokens
-		}
-	case StatusFailed:
-		taskResult.Status = model.TaskStatusFailure
-		taskResult.Progress = "100%"
-		taskResult.Reason = resTask.Error.Message
-	default:
-		// Unknown status, treat as processing
-		taskResult.Status = model.TaskStatusInProgress
-		taskResult.Progress = "30%"
-	}
-
-	return &taskResult, nil
+	return volcano.ParseTaskResult(respBody)
 }
 
 // ConvertToOpenAIVideo converts internal task to OpenAI Video format response
 func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error) {
-	var sResp ResponseTask
+	var sResp volcano.ResponseTask
 	if err := common.Unmarshal(originTask.Data, &sResp); err != nil {
 		return nil, errors.Wrap(err, "unmarshal seedance task data failed")
 	}
@@ -409,7 +286,24 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 	openAIVideo.CompletedAt = originTask.UpdatedAt
 	openAIVideo.Model = originTask.Properties.OriginModelName
 
-	if sResp.Status == StatusFailed {
+	// Usage & metadata from upstream response
+	if sResp.Usage.CompletionTokens > 0 || sResp.Usage.TotalTokens > 0 {
+		openAIVideo.SetMetadata("usage", map[string]int{
+			"completion_tokens": sResp.Usage.CompletionTokens,
+			"total_tokens":      sResp.Usage.TotalTokens,
+		})
+	}
+	if sResp.Duration > 0 {
+		openAIVideo.SetMetadata("duration", sResp.Duration)
+	}
+	if sResp.Resolution != "" {
+		openAIVideo.SetMetadata("resolution", sResp.Resolution)
+	}
+	if sResp.FramesPerSecond > 0 {
+		openAIVideo.SetMetadata("framespersecond", sResp.FramesPerSecond)
+	}
+
+	if sResp.Status == volcano.StatusFailed {
 		openAIVideo.Error = &dto.OpenAIVideoError{
 			Message: sResp.Error.Message,
 			Code:    sResp.Error.Code,

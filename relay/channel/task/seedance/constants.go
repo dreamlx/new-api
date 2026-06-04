@@ -1,28 +1,32 @@
 package seedance
 
+import "github.com/QuantumNous/new-api/relay/channel/task/taskcommon/volcano"
+
 const (
 	ChannelName = "seedance"
 
 	// Model names - dreamina prefix
-	ModelDreamina20      = "dreamina-seedance-2-0-260128"
-	ModelDreamina20Fast  = "dreamina-seedance-2-0-fast-260128"
+	ModelDreamina20     = "dreamina-seedance-2-0-260128"
+	ModelDreamina20Fast = "dreamina-seedance-2-0-fast-260128"
 
 	// Model names - doubao prefix (compatible aliases)
-	ModelDoubao20      = "doubao-seedance-2-0-260128"
-	ModelDoubao20Fast  = "doubao-seedance-2-0-fast-260128"
+	ModelDoubao20     = "doubao-seedance-2-0-260128"
+	ModelDoubao20Fast = "doubao-seedance-2-0-fast-260128"
 
-	// Status constants
-	StatusPending    = "pending"
-	StatusQueued     = "queued"
-	StatusProcessing = "processing"
-	StatusRunning    = "running"
-	StatusSucceeded  = "succeeded"
-	StatusFailed     = "failed"
-
-	// Resolution constants
+	// Resolution constants (status constants live in volcano package)
 	Resolution480P  = "480p"
 	Resolution720P  = "720p"
 	Resolution1080P = "1080p"
+)
+
+// Status constants re-exported from volcano package for convenience within seedance
+const (
+	StatusPending    = volcano.StatusPending
+	StatusQueued     = volcano.StatusQueued
+	StatusProcessing = volcano.StatusProcessing
+	StatusRunning    = volcano.StatusRunning
+	StatusSucceeded  = volcano.StatusSucceeded
+	StatusFailed     = volcano.StatusFailed
 )
 
 var ModelList = []string{
