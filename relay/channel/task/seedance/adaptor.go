@@ -2,7 +2,9 @@ package seedance
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon/volcano"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -36,6 +39,55 @@ func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	a.ChannelType = info.ChannelType
 	a.baseURL = info.ChannelBaseUrl
 	a.apiKey = info.ApiKey
+
+	// Validate ModelRatio configuration for billing accuracy
+	a.validateModelRatioConfig(info.OriginModelName)
+}
+
+// validateModelRatioConfig checks if the configured ModelRatio matches the expected base ratio.
+// Base ratio assumes 480p/720p without video input. Logs a warning if misconfigured.
+func (a *TaskAdaptor) validateModelRatioConfig(modelName string) {
+	// Expected base ratios (480p/720p without video input)
+	// Formula: ratio = official_price_cny / (2 * USD2RMB) = official_price_cny / 14.6
+	expectedBaseRatios := map[string]float64{
+		ModelDreamina20:     3.1507, // 46 元/百万token ÷ 14.6
+		ModelDreamina20Fast: 2.5342, // 37 元/百万token ÷ 14.6
+		ModelDoubao20:       3.1507,
+		ModelDoubao20Fast:   2.5342,
+	}
+
+	expectedRatio, ok := expectedBaseRatios[modelName]
+	if !ok {
+		return // Unknown model, skip validation
+	}
+
+	// Get actual configured ratio from database
+	actualRatio, exists, _ := ratio_setting.GetModelRatio(modelName)
+	if !exists || actualRatio == 0 {
+		common.SysError(fmt.Sprintf(
+			"[Seedance] Model %s has no ModelRatio configured. "+
+				"Expected base ratio: %.4f (for 480p/720p without video input). "+
+				"Billing will fail until configured. "+
+				"Please configure in System Settings → Model Pricing.",
+			modelName, expectedRatio,
+		))
+		return
+	}
+
+	// Check if within ±5% tolerance
+	const tolerance = 0.05
+	lowerBound := expectedRatio * (1 - tolerance)
+	upperBound := expectedRatio * (1 + tolerance)
+
+	if actualRatio < lowerBound || actualRatio > upperBound {
+		common.SysError(fmt.Sprintf(
+			"[Seedance] Model %s ModelRatio (%.4f) differs from expected base ratio (%.4f, %.1f%% off). "+
+				"This may cause incorrect billing. Base ratio assumes 480p/720p without video input. "+
+				"Conditional ratios (video input, 1080p) are applied on top of this base. "+
+				"Please verify configuration in System Settings → Model Pricing.",
+			modelName, actualRatio, expectedRatio, math.Abs(actualRatio-expectedRatio)/expectedRatio*100,
+		))
+	}
 }
 
 // BuildRequestURL constructs the upstream Volcano-compatible URL.
