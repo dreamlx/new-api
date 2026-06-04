@@ -83,20 +83,6 @@ export function isPayPalPayment(paymentType: string): boolean {
 }
 
 /**
- * Check if payment method is direct Alipay (not via Epay)
- */
-export function isAlipayPayment(paymentType: string): boolean {
-  return paymentType === PAYMENT_TYPES.ALIPAY
-}
-
-/**
- * Check if payment method is direct Wxpay (not via Epay)
- */
-export function isWxpayPayment(paymentType: string): boolean {
-  return paymentType === PAYMENT_TYPES.WECHAT
-}
-
-/**
  * Check if payment method is Waffo Pancake
  *
  * Pancake is a metered-style payment that goes through a dedicated checkout

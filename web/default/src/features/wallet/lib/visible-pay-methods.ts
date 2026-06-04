@@ -31,6 +31,7 @@ export function isStandaloneGateway(type: string): boolean {
 /**
  * Filter payment methods from the pay_methods list (matching classic logic):
  * - Remove 'waffo' (handled by dedicated Waffo section)
+ * - Remove 'waffo_pancake' (handled by dedicated Waffo Pancake flow via handlePaymentConfirm)
  * - Remove 'alipay' when direct Alipay is enabled (replaced by dedicated button)
  * - Remove 'wxpay' when direct Wxpay is enabled (replaced by dedicated button)
  * - When enableOnlineTopUp is false, only keep standalone gateways (stripe, paypal)
@@ -45,7 +46,8 @@ export function filterVisiblePayMethods(
 ): PaymentMethod[] {
   return payMethods.filter((method) => {
     if (!method || !method.type) return false
-    if (method.type === 'waffo') return false
+    if (method.type === PAYMENT_TYPES.WAFFO) return false
+    if (method.type === PAYMENT_TYPES.WAFFO_PANCAKE) return false
     if (method.type === PAYMENT_TYPES.ALIPAY && options.enableAlipayTopup)
       return false
     if (method.type === PAYMENT_TYPES.WECHAT && options.enableWxpayTopup)

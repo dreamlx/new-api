@@ -273,6 +273,8 @@ export interface GetLogsParams {
   group?: string
   request_id?: string
   upstream_request_id?: string
+  is_wisemodel?: boolean
+  wisemodel_package_id?: string
 }
 
 export interface GetLogsResponse {
@@ -297,6 +299,8 @@ export interface GetLogStatsParams {
   group?: string
   request_id?: string
   upstream_request_id?: string
+  is_wisemodel?: boolean
+  wisemodel_package_id?: string
 }
 
 export interface GetLogStatsResponse {

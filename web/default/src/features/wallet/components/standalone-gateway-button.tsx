@@ -25,7 +25,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { PAYMENT_TYPES } from '../constants'
 import { getPaymentIcon } from '../lib'
 import type { PaymentMethod } from '../types'
 

@@ -103,12 +103,12 @@ export function Wallet(props: WalletProps) {
     }
   }, [])
 
-  const fetchUserRef = useRef<() => Promise<void>>()
+  const fetchUserRef = useRef<(() => Promise<void>) | null>(null)
   fetchUserRef.current = fetchUser
 
   // Alipay polling — after opening pay_link, poll topup/status until
   // the async Alipay notify confirms payment, then auto-refresh the balance.
-  const { alipayPolling, pollAlipayStatus } = useAlipayPolling(fetchUserRef)
+  const { pollAlipayStatus } = useAlipayPolling(fetchUserRef)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()

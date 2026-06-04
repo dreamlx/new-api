@@ -27,11 +27,10 @@ import {
   requestStripePayment,
   isApiSuccess,
 } from '../api'
+import { PAYMENT_TYPES } from '../constants'
 import {
   isStripePayment,
   isPayPalPayment,
-  isAlipayPayment,
-  isWxpayPayment,
   isWaffoPancakePayment,
   submitPaymentForm,
 } from '../lib'
@@ -128,19 +127,19 @@ export function usePayment() {
         if (isPayPalPayment(paymentType))
           return processPayPalBranch(topupAmountInt)
 
-        // ── Alipay (direct) ─────────────────────────────────────
-        if (isAlipayPayment(paymentType))
+        // ── Alipay (direct) — only for the direct-alipay standalone button ──
+        if (paymentType === PAYMENT_TYPES.DIRECT_ALIPAY)
           return processAlipayBranch(topupAmountInt)
 
-        // ── Wxpay (direct) — returns QR code data ───────────────
-        if (isWxpayPayment(paymentType))
+        // ── Wxpay (direct) — only for the direct-wxpay standalone button ──
+        if (paymentType === PAYMENT_TYPES.DIRECT_WECHAT)
           return processWxpayBranch(topupAmountInt)
 
         // ── Creem ───────────────────────────────────────────────
-        if (paymentType === 'creem') return processCreemBranch()
+        if (paymentType === PAYMENT_TYPES.CREEM) return processCreemBranch()
 
         // ── Waffo (legacy) ─────────────────────────────────────
-        if (paymentType === 'waffo') return processWaffoBranch(topupAmountInt)
+        if (paymentType === PAYMENT_TYPES.WAFFO) return processWaffoBranch(topupAmountInt)
 
         // ── Epay (generic) — form submission ────────────────────
         const response = await requestPayment({

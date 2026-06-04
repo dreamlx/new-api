@@ -31,7 +31,7 @@ const ALIPAY_MAX_POLLS = 100 // ~5 minutes at 3-second intervals
  * until a terminal state is reached, then auto-refreshes the balance.
  */
 export function useAlipayPolling(
-  fetchUserRef: React.MutableRefObject<(() => Promise<void>) | undefined>
+  fetchUserRef: React.RefObject<(() => Promise<void>) | null>
 ) {
   const { t } = useTranslation()
   const [alipayPolling, setAlipayPolling] = useState(false)

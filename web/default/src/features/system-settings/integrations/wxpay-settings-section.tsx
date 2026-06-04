@@ -88,7 +88,7 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
       ]
       for (const key of plainFields) {
         if (values[key] !== defaultValues[key]) {
-          options.push({ key, value: values[key] || '' })
+          options.push({ key, value: String(values[key] || '') })
         }
       }
 

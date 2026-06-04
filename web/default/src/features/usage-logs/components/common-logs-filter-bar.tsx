@@ -91,6 +91,9 @@ export function CommonLogsFilterBar<TData>(
     if (searchParams.requestId) next.requestId = searchParams.requestId
     if (searchParams.upstreamRequestId)
       next.upstreamRequestId = searchParams.upstreamRequestId
+    if (searchParams.isWisemodel) next.isWisemodel = searchParams.isWisemodel
+    if (searchParams.wisemodelPackageId)
+      next.wisemodelPackageId = searchParams.wisemodelPackageId
 
     if (Object.keys(next).length > 0) {
       setFilters((prev) => ({ ...prev, ...next }))
@@ -110,6 +113,8 @@ export function CommonLogsFilterBar<TData>(
     searchParams.username,
     searchParams.requestId,
     searchParams.upstreamRequestId,
+    searchParams.isWisemodel,
+    searchParams.wisemodelPackageId,
     searchParams.type,
   ])
 

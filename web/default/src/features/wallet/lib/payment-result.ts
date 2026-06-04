@@ -22,7 +22,6 @@ import {
   requestPayPalPayment,
   requestAlipayPayment,
   requestWxpayPayment,
-  requestCreemPayment,
   requestWaffoPayment,
   isApiSuccess,
 } from '../api'

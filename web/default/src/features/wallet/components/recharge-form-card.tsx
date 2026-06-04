@@ -397,7 +397,7 @@ export function RechargeFormCard({
                     {/* Direct Alipay button — shown when enable_alipay_topup is true */}
                     {enableAlipayTopup && (
                       <StandaloneGatewayButton
-                        paymentType={PAYMENT_TYPES.ALIPAY}
+                        paymentType={PAYMENT_TYPES.DIRECT_ALIPAY}
                         label={t('Alipay')}
                         minTopup={topupInfo?.alipay_min_topup || minTopup}
                         topupAmount={topupAmount}
@@ -409,23 +409,9 @@ export function RechargeFormCard({
                     {/* Direct Wxpay button — shown when enable_wxpay_topup is true */}
                     {enableWxpayTopup && (
                       <StandaloneGatewayButton
-                        paymentType={PAYMENT_TYPES.WECHAT}
+                        paymentType={PAYMENT_TYPES.DIRECT_WECHAT}
                         label={t('WeChat Pay')}
                         minTopup={topupInfo?.wxpay_min_topup || minTopup}
-                        topupAmount={topupAmount}
-                        paymentLoading={paymentLoading}
-                        onSelect={onPaymentMethodSelect}
-                      />
-                    )}
-
-                    {/* Waffo Pancake button — shown when enable_waffo_pancake_topup is true */}
-                    {enableWaffoPancakeTopup && (
-                      <StandaloneGatewayButton
-                        paymentType={PAYMENT_TYPES.WAFFO_PANCAKE}
-                        label={t('Waffo Pancake')}
-                        minTopup={
-                          topupInfo?.waffo_pancake_min_topup || minTopup
-                        }
                         topupAmount={topupAmount}
                         paymentLoading={paymentLoading}
                         onSelect={onPaymentMethodSelect}
