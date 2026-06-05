@@ -108,7 +108,9 @@ export function Wallet(props: WalletProps) {
 
   // Alipay polling — after opening pay_link, poll topup/status until
   // the async Alipay notify confirms payment, then auto-refresh the balance.
+  // Store cleanup ref so a second poll cancels the first (prevents concurrent loops).
   const { pollAlipayStatus } = useAlipayPolling(fetchUserRef)
+  const alipayPollCleanupRef = useRef<(() => void) | null>(null)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -238,7 +240,9 @@ export function Wallet(props: WalletProps) {
         // Alipay — start polling topup/status so balance auto-refreshes
         // when the async Alipay notify confirms payment (matching classic)
         if (result.data.trade_no) {
-          pollAlipayStatus(result.data.trade_no)
+          // Cancel any previous poll before starting a new one
+          alipayPollCleanupRef.current?.()
+          alipayPollCleanupRef.current = pollAlipayStatus(result.data.trade_no)
         }
       } else {
         await fetchUser()

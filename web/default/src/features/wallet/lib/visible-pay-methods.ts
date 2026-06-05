@@ -31,10 +31,13 @@ export function isStandaloneGateway(type: string): boolean {
 /**
  * Filter payment methods from the pay_methods list (matching classic logic):
  * - Remove 'waffo' (handled by dedicated Waffo section)
- * - Remove 'waffo_pancake' (handled by dedicated Waffo Pancake flow via handlePaymentConfirm)
  * - Remove 'alipay' when direct Alipay is enabled (replaced by dedicated button)
  * - Remove 'wxpay' when direct Wxpay is enabled (replaced by dedicated button)
  * - When enableOnlineTopUp is false, only keep standalone gateways (stripe, paypal)
+ *   and non-Epay-mediated methods (waffo_pancake)
+ *
+ * Note: waffo_pancake is NOT filtered out here — it renders through the pay_methods
+ * list just like in classic (RechargeCard.jsx does not exclude it from visiblePayMethods).
  */
 export function filterVisiblePayMethods(
   payMethods: PaymentMethod[],
@@ -47,13 +50,13 @@ export function filterVisiblePayMethods(
   return payMethods.filter((method) => {
     if (!method || !method.type) return false
     if (method.type === PAYMENT_TYPES.WAFFO) return false
-    if (method.type === PAYMENT_TYPES.WAFFO_PANCAKE) return false
     if (method.type === PAYMENT_TYPES.ALIPAY && options.enableAlipayTopup)
       return false
     if (method.type === PAYMENT_TYPES.WECHAT && options.enableWxpayTopup)
       return false
-    // When online topup (Epay) is disabled, only show standalone gateway methods
-    if (!options.enableOnlineTopUp && !isStandaloneGateway(method.type))
+    // When online topup (Epay) is disabled, only show standalone/non-Epay gateway methods
+    // waffo_pancake is not Epay-mediated (uses dedicated checkout URL), so it passes
+    if (!options.enableOnlineTopUp && !isStandaloneGateway(method.type) && method.type !== PAYMENT_TYPES.WAFFO_PANCAKE)
       return false
     return true
   })

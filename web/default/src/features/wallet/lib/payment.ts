@@ -142,11 +142,11 @@ export function getMinTopupAmount(topupInfo: TopupInfo | null): number {
   }
 
   if (topupInfo.enable_online_topup) {
-    return topupInfo.min_topup
+    return topupInfo.min_topup || DEFAULT_MIN_TOPUP
   }
 
   if (topupInfo.enable_stripe_topup) {
-    return topupInfo.stripe_min_topup
+    return topupInfo.stripe_min_topup || DEFAULT_MIN_TOPUP
   }
 
   if (topupInfo.enable_paypal_topup && topupInfo.paypal_min_topup) {

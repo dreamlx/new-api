@@ -352,7 +352,9 @@ export function RechargeFormCard({
                         (method.type === PAYMENT_TYPES.PAYPAL &&
                           !enablePayPalTopup) ||
                         (method.type === PAYMENT_TYPES.STRIPE &&
-                          !enableStripeTopup)
+                          !enableStripeTopup) ||
+                        (method.type === PAYMENT_TYPES.WAFFO_PANCAKE &&
+                          !enableWaffoPancakeTopup)
                       const disabled =
                         isGatewayDisabled || methodMinTopup > topupAmount
 
