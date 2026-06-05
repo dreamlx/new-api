@@ -633,6 +633,16 @@ func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, res
 			}
 		}
 	}
+
+	// Some OpenAI-compatible upstreams (e.g. exchangetoken) report completion_tokens
+	// EXCLUDING reasoning_tokens, with total = prompt + completion + reasoning —
+	// diverging from the OpenAI convention where completion includes reasoning. Fold
+	// the uncounted output (reasoning) into completion so it gets billed.
+	// No-op for standard upstreams (total == prompt+completion) and when total is
+	// unset/0. Invariant: billable output = total - prompt.
+	if usage.TotalTokens > usage.PromptTokens+usage.CompletionTokens {
+		usage.CompletionTokens = usage.TotalTokens - usage.PromptTokens
+	}
 }
 
 func extractCachedTokensFromBody(body []byte) (int, bool) {
