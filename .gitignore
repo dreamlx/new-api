@@ -26,6 +26,7 @@ plans
 .serena
 .pid
 new-api-test
+new-api.log
 
 electron/node_modules
 electron/dist
