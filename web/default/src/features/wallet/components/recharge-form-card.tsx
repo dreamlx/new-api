@@ -34,6 +34,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { PAYMENT_TYPES } from '../constants'
 import {
   formatCurrency,
   getDiscountLabel,
@@ -41,6 +42,10 @@ import {
   getMinTopupAmount,
   calculatePresetPricing,
 } from '../lib'
+import {
+  filterVisiblePayMethods,
+  hasAnyConfigurableTopup,
+} from '../lib/visible-pay-methods'
 import type {
   PaymentMethod,
   PresetAmount,
@@ -49,6 +54,7 @@ import type {
   WaffoPayMethod,
 } from '../types'
 import { CreemProductsSection } from './creem-products-section'
+import { StandaloneGatewayButton } from './standalone-gateway-button'
 
 interface RechargeFormCardProps {
   topupInfo: TopupInfo | null
@@ -78,6 +84,10 @@ interface RechargeFormCardProps {
   waffoMinTopup?: number
   onWaffoMethodSelect?: (method: WaffoPayMethod, index: number) => void
   enableWaffoPancakeTopup?: boolean
+  enablePayPalTopup?: boolean
+  enableAlipayTopup?: boolean
+  enableWxpayTopup?: boolean
+  enableStripeTopup?: boolean
 }
 
 export function RechargeFormCard({
@@ -108,6 +118,10 @@ export function RechargeFormCard({
   waffoMinTopup,
   onWaffoMethodSelect,
   enableWaffoPancakeTopup,
+  enablePayPalTopup,
+  enableAlipayTopup,
+  enableWxpayTopup,
+  enableStripeTopup,
 }: RechargeFormCardProps) {
   const { t } = useTranslation()
   const [localAmount, setLocalAmount] = useState(topupAmount.toString())
@@ -124,14 +138,27 @@ export function RechargeFormCard({
     }
   }
 
-  const hasConfigurableTopup =
-    topupInfo?.enable_online_topup ||
-    topupInfo?.enable_stripe_topup ||
-    enableWaffoTopup ||
-    enableWaffoPancakeTopup
+  const hasConfigurableTopup = hasAnyConfigurableTopup(topupInfo, {
+    enableWaffoTopup,
+    enableWaffoPancakeTopup,
+    enablePayPalTopup,
+    enableAlipayTopup,
+    enableWxpayTopup,
+  })
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
-  const hasStandardPaymentMethods =
-    Array.isArray(topupInfo?.pay_methods) && topupInfo.pay_methods.length > 0
+
+  // Filter payment methods from the pay_methods list (matching classic logic):
+  // - Remove 'waffo' (handled by dedicated Waffo section)
+  // - Remove 'alipay' when direct Alipay is enabled (replaced by dedicated button)
+  // - Remove 'wxpay' when direct Wxpay is enabled (replaced by dedicated button)
+  // - When enableOnlineTopUp is false, only keep standalone gateways (stripe, paypal)
+  const enableOnlineTopUp = topupInfo?.enable_online_topup ?? false
+  const visiblePayMethods = filterVisiblePayMethods(
+    topupInfo?.pay_methods || [],
+    { enableAlipayTopup, enableWxpayTopup, enableOnlineTopUp }
+  )
+
+  const hasStandardPaymentMethods = visiblePayMethods.length > 0
   const hasWaffoPaymentMethods =
     Array.isArray(waffoPayMethods) && waffoPayMethods.length > 0
   const minTopup = getMinTopupAmount(topupInfo)
@@ -256,11 +283,16 @@ export function RechargeFormCard({
                             )}
                           </div>
                           <div className='text-muted-foreground mt-1.5 w-full text-xs sm:mt-2'>
-                            Pay {formatCurrency(actualPrice)}
+                            {t('Pay {{amount}}', {
+                              amount: formatCurrency(actualPrice),
+                            })}
                             {hasDiscount && savedAmount > 0 && (
                               <span className='text-green-600'>
                                 {' '}
-                                • Save {formatCurrency(savedAmount)}
+                                •{' '}
+                                {t('Save {{amount}}', {
+                                  amount: formatCurrency(savedAmount),
+                                })}
                               </span>
                             )}
                           </div>
@@ -307,11 +339,24 @@ export function RechargeFormCard({
                 <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
                   {t('Payment Method')}
                 </Label>
-                {hasStandardPaymentMethods ? (
+                {hasStandardPaymentMethods ||
+                enableAlipayTopup ||
+                enableWxpayTopup ||
+                enableWaffoPancakeTopup ? (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    {topupInfo?.pay_methods?.map((method) => {
-                      const minTopup = method.min_topup || 0
-                      const disabled = minTopup > topupAmount
+                    {visiblePayMethods.map((method) => {
+                      const methodMinTopup = method.min_topup || 0
+                      // Disable button if the gateway is not enabled (matching classic's
+                      // disabled logic on each payment method button)
+                      const isGatewayDisabled =
+                        (method.type === PAYMENT_TYPES.PAYPAL &&
+                          !enablePayPalTopup) ||
+                        (method.type === PAYMENT_TYPES.STRIPE &&
+                          !enableStripeTopup) ||
+                        (method.type === PAYMENT_TYPES.WAFFO_PANCAKE &&
+                          !enableWaffoPancakeTopup)
+                      const disabled =
+                        isGatewayDisabled || methodMinTopup > topupAmount
 
                       const button = (
                         <Button
@@ -341,7 +386,7 @@ export function RechargeFormCard({
                             <TooltipTrigger render={button}></TooltipTrigger>
                             <TooltipContent>
                               {t('Minimum topup amount: {{amount}}', {
-                                amount: minTopup,
+                                amount: methodMinTopup,
                               })}
                             </TooltipContent>
                           </Tooltip>
@@ -350,6 +395,30 @@ export function RechargeFormCard({
                         button
                       )
                     })}
+
+                    {/* Direct Alipay button — shown when enable_alipay_topup is true */}
+                    {enableAlipayTopup && (
+                      <StandaloneGatewayButton
+                        paymentType={PAYMENT_TYPES.DIRECT_ALIPAY}
+                        label={t('Alipay')}
+                        minTopup={topupInfo?.alipay_min_topup || minTopup}
+                        topupAmount={topupAmount}
+                        paymentLoading={paymentLoading}
+                        onSelect={onPaymentMethodSelect}
+                      />
+                    )}
+
+                    {/* Direct Wxpay button — shown when enable_wxpay_topup is true */}
+                    {enableWxpayTopup && (
+                      <StandaloneGatewayButton
+                        paymentType={PAYMENT_TYPES.DIRECT_WECHAT}
+                        label={t('WeChat Pay')}
+                        minTopup={topupInfo?.wxpay_min_topup || minTopup}
+                        topupAmount={topupAmount}
+                        paymentLoading={paymentLoading}
+                        onSelect={onPaymentMethodSelect}
+                      />
+                    )}
                   </div>
                 ) : hasWaffoPaymentMethods ? null : (
                   <Alert>

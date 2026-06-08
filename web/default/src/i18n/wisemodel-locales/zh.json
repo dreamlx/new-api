@@ -1,0 +1,11 @@
+{
+  "external_platform_integration": "外部对接平台",
+  "only_users": "仅 WiseModel 用户",
+  "package_id_placeholder": "WiseModel 资源包 ID",
+  "quota_consumed": "WiseModel 消耗额度",
+  "quota_consumed_description": "所选时间段内 WiseModel 消耗的额度",
+  "request_count": "WiseModel 请求数",
+  "request_count_description": "所选时间段内 WiseModel 的请求数",
+  "select_downstream_platform": "选择下游平台",
+  "usage_statistics": "WiseModel 使用统计"
+}

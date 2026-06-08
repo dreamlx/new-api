@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -71,15 +72,141 @@ func seedPayPalTopUp(t *testing.T, db *gorm.DB, tradeNo string) {
 
 func postPayPalWebhook(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	return postPayPalWebhookWithVerifier(t, body, func(_, _, _ string, _ []byte, _ string) bool {
+		return true
+	})
+}
+
+func postPayPalWebhookWithVerifier(
+	t *testing.T,
+	body string,
+	verifier func(transmissionID, transmissionTime, certURL string, payload []byte, signature string) bool,
+) *httptest.ResponseRecorder {
+	t.Helper()
+
+	originalVerifier := payPalVerifyWebhookSignature
+	payPalVerifyWebhookSignature = verifier
+	t.Cleanup(func() { payPalVerifyWebhookSignature = originalVerifier })
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/paypal/webhook", bytes.NewBufferString(body))
 	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Request.Header.Set("Paypal-Transmission-Id", "transmission-id")
+	ctx.Request.Header.Set("Paypal-Transmission-Time", "2026-06-08T00:00:00Z")
+	ctx.Request.Header.Set("Paypal-Cert-Url", "https://api-m.sandbox.paypal.com/certs/test")
+	ctx.Request.Header.Set("Paypal-Transmission-Sig", "signature")
 
 	PayPalWebhook(ctx)
 
 	return recorder
+}
+
+func requestPayPalTopUpForTest(t *testing.T, userID int, body string) (int, string) {
+	t.Helper()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", userID)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/user/paypal/pay", bytes.NewBufferString(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	RequestPayPalTopUp(ctx)
+	return recorder.Code, recorder.Body.String()
+}
+
+func TestRequestPayPalTopUpRejectsBelowPayPalMinimum(t *testing.T) {
+	db := setupPayPalControllerTestDB(t)
+	user := &model.User{
+		Id:       1,
+		Username: "paypal_min_user",
+		Password: "password",
+		Status:   common.UserStatusEnabled,
+		Group:    "default",
+	}
+	require.NoError(t, db.Create(user).Error)
+
+	originalClientID := setting.PayPalClientId
+	originalClientSecret := setting.PayPalClientSecret
+	originalWebhookSecret := setting.PayPalWebhookSecret
+	originalMinTopUp := setting.PayPalMinTopUp
+	originalCreateOrder := payPalCreateOrder
+	setting.PayPalClientId = "client_id"
+	setting.PayPalClientSecret = "client_secret"
+	setting.PayPalWebhookSecret = "webhook_secret"
+	setting.PayPalMinTopUp = 50
+	payPalCreateOrder = func(_, _, _, _, _ string) (string, error) {
+		t.Fatal("PayPal order should not be created below PayPalMinTopUp")
+		return "", nil
+	}
+	t.Cleanup(func() {
+		setting.PayPalClientId = originalClientID
+		setting.PayPalClientSecret = originalClientSecret
+		setting.PayPalWebhookSecret = originalWebhookSecret
+		setting.PayPalMinTopUp = originalMinTopUp
+		payPalCreateOrder = originalCreateOrder
+	})
+
+	code, body := requestPayPalTopUpForTest(t, user.Id, `{"amount":10}`)
+
+	require.Equal(t, http.StatusOK, code)
+	require.Contains(t, body, "充值数量不能小于 50")
+}
+
+func TestPayPalWebhookRejectsInvalidSignature(t *testing.T) {
+	db := setupPayPalControllerTestDB(t)
+	seedPayPalTopUp(t, db, "paypal_ref_bad_sig")
+
+	body := `{
+		"event_type": "PAYMENT.CAPTURE.COMPLETED",
+		"resource": {
+			"id": "CAPTURE_BAD_SIG",
+			"invoice_id": "paypal_ref_bad_sig",
+			"amount": {
+				"currency_code": "USD",
+				"value": "2.00"
+			}
+		}
+	}`
+
+	recorder := postPayPalWebhookWithVerifier(t, body, func(_, _, _ string, _ []byte, _ string) bool {
+		return false
+	})
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+
+	var topUp model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", "paypal_ref_bad_sig").First(&topUp).Error)
+	require.Equal(t, common.TopUpStatusPending, topUp.Status)
+}
+
+func TestPayPalCaptureCompletedWebhookRejectsAmountMismatch(t *testing.T) {
+	db := setupPayPalControllerTestDB(t)
+	seedPayPalTopUp(t, db, "paypal_ref_amount_mismatch")
+
+	body := `{
+		"event_type": "PAYMENT.CAPTURE.COMPLETED",
+		"resource": {
+			"id": "CAPTURE_MISMATCH",
+			"invoice_id": "paypal_ref_amount_mismatch",
+			"amount": {
+				"currency_code": "USD",
+				"value": "1.00"
+			}
+		}
+	}`
+
+	recorder := postPayPalWebhook(t, body)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+
+	var topUp model.TopUp
+	require.NoError(t, db.Where("trade_no = ?", "paypal_ref_amount_mismatch").First(&topUp).Error)
+	require.Equal(t, common.TopUpStatusPending, topUp.Status)
+
+	var user model.User
+	require.NoError(t, db.First(&user, 1).Error)
+	require.Equal(t, 100, user.Quota)
 }
 
 func TestPayPalApprovedWebhookCapturesOrderAndCompletesTopUp(t *testing.T) {

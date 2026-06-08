@@ -58,6 +58,12 @@ export function buildSearchParams(
         ...(commonFilters.upstreamRequestId && {
           upstreamRequestId: commonFilters.upstreamRequestId,
         }),
+        ...(commonFilters.isWisemodel && {
+          isWisemodel: commonFilters.isWisemodel,
+        }),
+        ...(commonFilters.wisemodelPackageId && {
+          wisemodelPackageId: commonFilters.wisemodelPackageId,
+        }),
       }
     }
     case 'drawing': {

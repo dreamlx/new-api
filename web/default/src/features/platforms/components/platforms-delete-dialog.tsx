@@ -9,7 +9,6 @@ License, or (at your option) any later version.
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,7 +19,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-
 import { deletePlatform } from '../api'
 import { usePlatforms } from './platforms-provider'
 
@@ -37,7 +35,9 @@ export function PlatformsDeleteDialog() {
       if (result.success) {
         const disabled = result.data?.tokens_disabled ?? 0
         toast.success(
-          t('Platform deleted. {{count}} token(s) disabled.', { count: disabled })
+          t('Platform deleted. {{count}} token(s) disabled.', {
+            count: disabled,
+          })
         )
         setOpen(null)
         triggerRefresh()
@@ -62,7 +62,9 @@ export function PlatformsDeleteDialog() {
             <span className='font-mono font-semibold'>
               {currentRow?.platform_id}
             </span>
-            {t(' and reject all subsequent API calls from it. All tokens registered under this platform will be disabled as well. This action cannot be undone.')}
+            {t(
+              ' and reject all subsequent API calls from it. All tokens registered under this platform will be disabled as well. This action cannot be undone.'
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

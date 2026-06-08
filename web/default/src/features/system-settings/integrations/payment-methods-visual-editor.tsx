@@ -46,12 +46,12 @@ type PaymentMethodsVisualEditorProps = {
   onChange: (value: string) => void
 }
 
-const PAYMENT_TEMPLATES = [
+const PAYMENT_TEMPLATES: { name: string; template: PaymentMethodData }[] = [
   {
     name: 'Alipay',
     template: {
       color: 'rgba(var(--semi-blue-5), 1)',
-      name: '支付宝',
+      name: 'Alipay',
       type: 'alipay',
     },
   },
@@ -59,7 +59,7 @@ const PAYMENT_TEMPLATES = [
     name: 'WeChat Pay',
     template: {
       color: 'rgba(var(--semi-green-5), 1)',
-      name: '微信',
+      name: 'WeChat Pay',
       type: 'wxpay',
     },
   },
@@ -76,7 +76,7 @@ const PAYMENT_TEMPLATES = [
     template: {
       color: 'black',
       min_topup: '50',
-      name: '自定义1',
+      name: 'Custom',
       type: 'custom1',
     },
   },
@@ -254,11 +254,14 @@ export function PaymentMethodsVisualEditor({
                       onClick={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
-                        handleInsertTemplate(item.template)
+                        handleInsertTemplate({
+                          ...item.template,
+                          name: t(item.name),
+                        })
                       }}
                     >
                       <Plus className='mr-2 h-3 w-3' />
-                      {item.name}
+                      {t(item.name)}
                     </Button>
                   ))}
                 </div>

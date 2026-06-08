@@ -10,7 +10,6 @@ import { useQuery } from '@tanstack/react-query'
 import { Pencil, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,7 +20,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-
 import { listPlatforms } from '../api'
 import { PLATFORM_STATUS, type Platform } from '../types'
 import { usePlatforms } from './platforms-provider'
@@ -60,14 +58,20 @@ export function PlatformsTable() {
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell colSpan={6} className='text-center text-muted-foreground'>
+              <TableCell
+                colSpan={6}
+                className='text-muted-foreground text-center'
+              >
                 {t('Loading...')}
               </TableCell>
             </TableRow>
           )}
           {!isLoading && items.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6} className='text-center text-muted-foreground'>
+              <TableCell
+                colSpan={6}
+                className='text-muted-foreground text-center'
+              >
                 {t('No platforms yet. Click "Create Platform" to add one.')}
               </TableCell>
             </TableRow>
@@ -108,7 +112,7 @@ export function PlatformsTable() {
                     setOpen('delete')
                   }}
                 >
-                  <Trash2 className='h-4 w-4 text-destructive' />
+                  <Trash2 className='text-destructive h-4 w-4' />
                 </Button>
               </TableCell>
             </TableRow>

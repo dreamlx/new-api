@@ -25,14 +25,22 @@ import ja from './locales/ja.json'
 import ru from './locales/ru.json'
 import vi from './locales/vi.json'
 import zh from './locales/zh.json'
+// WiseModel extension namespace. Living in its own namespace so future
+// upstream syncs cannot conflict on these UI strings.
+import wisemodelEn from './wisemodel-locales/en.json'
+import wisemodelFr from './wisemodel-locales/fr.json'
+import wisemodelJa from './wisemodel-locales/ja.json'
+import wisemodelRu from './wisemodel-locales/ru.json'
+import wisemodelVi from './wisemodel-locales/vi.json'
+import wisemodelZh from './wisemodel-locales/zh.json'
 
 export const resources = {
-  en,
-  zh,
-  fr,
-  ru,
-  ja,
-  vi,
+  en: { ...en, wisemodel: wisemodelEn },
+  zh: { ...zh, wisemodel: wisemodelZh },
+  fr: { ...fr, wisemodel: wisemodelFr },
+  ru: { ...ru, wisemodel: wisemodelRu },
+  ja: { ...ja, wisemodel: wisemodelJa },
+  vi: { ...vi, wisemodel: wisemodelVi },
 } as const
 
 i18n
@@ -42,6 +50,9 @@ i18n
     resources,
     fallbackLng: 'en',
     supportedLngs: ['en', 'zh', 'fr', 'ru', 'ja', 'vi'],
+    ns: ['translation', 'wisemodel'],
+    defaultNS: 'translation',
+    fallbackNS: 'translation',
     load: 'languageOnly', // Convert zh-CN -> zh
     nsSeparator: false, // Allow literal colons in keys (e.g., URLs, labels)
     debug: import.meta.env.DEV,

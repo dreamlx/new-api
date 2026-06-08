@@ -49,10 +49,18 @@ import { RiskAcknowledgementDialog } from '@/components/risk-acknowledgement-dia
 import { confirmPaymentCompliance } from '../api'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import {
+  AlipaySettingsSection,
+  type AlipaySettingsValues,
+} from './alipay-settings-section'
 import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
 import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
 import { CreemProductsVisualEditor } from './creem-products-visual-editor'
 import { PaymentMethodsVisualEditor } from './payment-methods-visual-editor'
+import {
+  PayPalSettingsSection,
+  type PayPalSettingsValues,
+} from './paypal-settings-section'
 import {
   formatJsonForEditor,
   getJsonError,
@@ -67,6 +75,10 @@ import {
   WaffoSettingsSection,
   type WaffoSettingsValues,
 } from './waffo-settings-section'
+import {
+  WxpaySettingsSection,
+  type WxpaySettingsValues,
+} from './wxpay-settings-section'
 
 const paymentSchema = z.object({
   PayAddress: z.string().refine((value) => {
@@ -152,6 +164,10 @@ type PaymentSettingsSectionProps = {
   waffoPancakeProvisionedStoreID?: string
   waffoPancakeProvisionedProductID?: string
   complianceDefaults: PaymentComplianceDefaults
+  paypalDefaultValues: PayPalSettingsValues
+  alipayDefaultValues: AlipaySettingsValues
+  wxpayDefaultValues: WxpaySettingsValues
+  serverAddress?: string
 }
 
 export function PaymentSettingsSection({
@@ -161,6 +177,10 @@ export function PaymentSettingsSection({
   waffoPancakeProvisionedStoreID,
   waffoPancakeProvisionedProductID,
   complianceDefaults,
+  paypalDefaultValues,
+  alipayDefaultValues,
+  wxpayDefaultValues,
+  serverAddress,
 }: PaymentSettingsSectionProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -1481,6 +1501,27 @@ export function PaymentSettingsSection({
       <Separator />
 
       <WaffoSettingsSection defaultValues={waffoDefaultValues} />
+
+      <Separator />
+
+      <PayPalSettingsSection
+        defaultValues={paypalDefaultValues}
+        serverAddress={serverAddress}
+      />
+
+      <Separator />
+
+      <AlipaySettingsSection
+        defaultValues={alipayDefaultValues}
+        serverAddress={serverAddress}
+      />
+
+      <Separator />
+
+      <WxpaySettingsSection
+        defaultValues={wxpayDefaultValues}
+        serverAddress={serverAddress}
+      />
       {/* eslint-enable react-hooks/refs */}
     </SettingsSection>
   )

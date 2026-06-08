@@ -207,6 +207,12 @@ export function buildApiParams(config: {
     ...(searchParams.upstreamRequestId
       ? { upstream_request_id: String(searchParams.upstreamRequestId) }
       : {}),
+    ...(searchParams.isWisemodel
+      ? { is_wisemodel: true }
+      : {}),
+    ...(searchParams.wisemodelPackageId
+      ? { wisemodel_package_id: String(searchParams.wisemodelPackageId) }
+      : {}),
     ...buildTimeRangeParams(searchParams, false),
   }
 
@@ -233,6 +239,12 @@ export function buildApiParams(config: {
           break
         case 'username':
           if (isAdmin) params.username = String(value)
+          break
+        case 'isWisemodel':
+          if (isAdmin) params.is_wisemodel = value === true
+          break
+        case 'wisemodelPackageId':
+          if (isAdmin) params.wisemodel_package_id = String(value)
           break
       }
     })
