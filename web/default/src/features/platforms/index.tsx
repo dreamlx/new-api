@@ -8,11 +8,13 @@ License, or (at your option) any later version.
 */
 import { useTranslation } from 'react-i18next'
 import { SectionPageLayout } from '@/components/layout'
-
 import { PlatformsDeleteDialog } from './components/platforms-delete-dialog'
 import { PlatformsMutateDrawer } from './components/platforms-mutate-drawer'
 import { PlatformsPrimaryButtons } from './components/platforms-primary-buttons'
-import { PlatformsProvider, usePlatforms } from './components/platforms-provider'
+import {
+  PlatformsProvider,
+  usePlatforms,
+} from './components/platforms-provider'
 import { PlatformsSkRevealDialog } from './components/platforms-sk-reveal-dialog'
 import { PlatformsTable } from './components/platforms-table'
 

@@ -1,0 +1,11 @@
+{
+  "external_platform_integration": "Intégration de plateforme externe",
+  "only_users": "Utilisateurs WiseModel uniquement",
+  "package_id_placeholder": "ID de package WiseModel",
+  "quota_consumed": "Quota WiseModel consommé",
+  "quota_consumed_description": "Quota WiseModel consommé sur la période sélectionnée",
+  "request_count": "Requêtes WiseModel",
+  "request_count_description": "Nombre de requêtes WiseModel sur la période sélectionnée",
+  "select_downstream_platform": "Sélectionner la plateforme en aval",
+  "usage_statistics": "Statistiques d'utilisation WiseModel"
+}

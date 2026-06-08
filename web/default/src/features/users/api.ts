@@ -49,9 +49,16 @@ export async function getUsers(
 export async function searchUsers(
   params: SearchUsersParams
 ): Promise<GetUsersResponse> {
-  const { keyword = '', group = '', p = 1, page_size = 10 } = params
+  const {
+    keyword = '',
+    group = '',
+    downstream = '',
+    p = 1,
+    page_size = 10,
+  } = params
+  const downstreamParam = downstream ? `&downstream=${downstream}` : ''
   const res = await api.get(
-    `/api/user/search?keyword=${keyword}&group=${group}&p=${p}&page_size=${page_size}`
+    `/api/user/search?keyword=${keyword}&group=${group}${downstreamParam}&p=${p}&page_size=${page_size}`
   )
   return res.data
 }

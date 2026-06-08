@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { getSelf } from '@/lib/api'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
@@ -27,6 +28,7 @@ import { BillingHistoryDialog } from './components/dialogs/billing-history-dialo
 import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
 import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialog'
 import { TransferDialog } from './components/dialogs/transfer-dialog'
+import { WxpayQRDialog } from './components/dialogs/wxpay-qr-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
@@ -40,16 +42,19 @@ import {
   useWaffoPayment,
   useWaffoPancakePayment,
 } from './hooks'
+import { useAlipayPolling } from './hooks/use-alipay-polling'
 import {
   getDefaultPaymentType,
   getMinTopupAmount,
   isWaffoPancakePayment,
 } from './lib'
+import { validatePaymentGateway } from './lib/gateway-validation'
 import type {
   UserWalletData,
   PaymentMethod,
   PresetAmount,
   CreemProduct,
+  WxpayResult,
 } from './types'
 
 interface WalletProps {
@@ -73,6 +78,47 @@ export function Wallet(props: WalletProps) {
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
+
+  // Wxpay QR dialog state
+  const [wxpayDialogOpen, setWxpayDialogOpen] = useState(false)
+  const [wxpayQRData, setWxpayQRData] = useState<WxpayResult>({
+    code_url: '',
+    trade_no: '',
+  })
+
+  // Keep fetchUserRef in sync so pollAlipayStatus always calls the latest version
+  // without needing fetchUser in its dependency array (avoids stale-closure issues).
+  const fetchUser = useCallback(async () => {
+    try {
+      setUserLoading(true)
+      const response = await getSelf()
+      if (response.success && response.data) {
+        setUser(response.data as UserWalletData)
+      }
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to fetch user data:', error)
+    } finally {
+      setUserLoading(false)
+    }
+  }, [])
+
+  const fetchUserRef = useRef<(() => Promise<void>) | null>(null)
+  fetchUserRef.current = fetchUser
+
+  // Alipay polling — after opening pay_link, poll topup/status until
+  // the async Alipay notify confirms payment, then auto-refresh the balance.
+  // Store cleanup ref so a second poll cancels the first (prevents concurrent loops).
+  const { pollAlipayStatus } = useAlipayPolling(fetchUserRef)
+  const alipayPollCleanupRef = useRef<(() => void) | null>(null)
+
+  // Cancel any in-flight Alipay poll when the wallet unmounts, so a late
+  // /topup/status response can't fire a toast / setState on an unmounted page.
+  useEffect(() => {
+    return () => {
+      alipayPollCleanupRef.current?.()
+    }
+  }, [])
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -102,22 +148,6 @@ export function Wallet(props: WalletProps) {
   const { processWaffoPayment } = useWaffoPayment()
   const { processing: pancakeProcessing, processWaffoPancakePayment } =
     useWaffoPancakePayment()
-
-  // Fetch and refresh user data
-  const fetchUser = useCallback(async () => {
-    try {
-      setUserLoading(true)
-      const response = await getSelf()
-      if (response.success && response.data) {
-        setUser(response.data as UserWalletData)
-      }
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to fetch user data:', error)
-    } finally {
-      setUserLoading(false)
-    }
-  }, [])
 
   useEffect(() => {
     fetchUser()
@@ -163,13 +193,23 @@ export function Wallet(props: WalletProps) {
 
   // Handle payment method selection
   const handlePaymentMethodSelect = async (method: PaymentMethod) => {
+    // Gateway-enable validation (matching classic's preTopUp checks)
+    const validationError = validatePaymentGateway(method.type, topupInfo)
+    if (validationError) {
+      toast.error(t(validationError))
+      return
+    }
+
     setSelectedPaymentMethod(method)
     setPaymentLoading(method.type)
 
     try {
-      // Validate minimum topup
-      const minTopup = getMinTopupAmount(topupInfo)
+      // Validate minimum topup against the clicked gateway's own minimum
+      // (method.min_topup), not a global one — otherwise a high-min gateway
+      // (e.g. Stripe) could block an otherwise-enabled low-min gateway button.
+      const minTopup = method.min_topup ?? getMinTopupAmount(topupInfo)
       if (topupAmount < minTopup) {
+        toast.error(t('Minimum topup amount: {{amount}}', { amount: minTopup }))
         return
       }
 
@@ -185,14 +225,39 @@ export function Wallet(props: WalletProps) {
   const handlePaymentConfirm = async () => {
     if (!selectedPaymentMethod) return
 
-    const isPancake = isWaffoPancakePayment(selectedPaymentMethod.type)
-    const success = isPancake
-      ? await processWaffoPancakePayment(topupAmount)
-      : await processPayment(topupAmount, selectedPaymentMethod.type)
+    const paymentType = selectedPaymentMethod.type
 
-    if (success) {
+    // Waffo Pancake has its own dedicated flow
+    if (isWaffoPancakePayment(paymentType)) {
+      const success = await processWaffoPancakePayment(topupAmount)
+      if (success) {
+        setConfirmDialogOpen(false)
+        await fetchUser()
+      }
+      return
+    }
+
+    // All other types go through processPayment which dispatches correctly
+    const result = await processPayment(topupAmount, paymentType)
+
+    if (result.success) {
       setConfirmDialogOpen(false)
-      await fetchUser()
+
+      // Wxpay needs QR dialog
+      if (result.type === 'wxpay') {
+        setWxpayQRData(result.data)
+        setWxpayDialogOpen(true)
+      } else if (result.type === 'alipay') {
+        // Alipay — start polling topup/status so balance auto-refreshes
+        // when the async Alipay notify confirms payment (matching classic)
+        if (result.data.trade_no) {
+          // Cancel any previous poll before starting a new one
+          alipayPollCleanupRef.current?.()
+          alipayPollCleanupRef.current = pollAlipayStatus(result.data.trade_no)
+        }
+      } else {
+        await fetchUser()
+      }
     }
   }
 
@@ -257,6 +322,17 @@ export function Wallet(props: WalletProps) {
     []
   )
 
+  // Handle Wxpay QR dialog close — refresh user data
+  const handleWxpayDialogClose = useCallback(
+    (open: boolean) => {
+      setWxpayDialogOpen(open)
+      if (!open) {
+        fetchUser()
+      }
+    },
+    [fetchUser]
+  )
+
   return (
     <>
       <SectionPageLayout>
@@ -306,6 +382,10 @@ export function Wallet(props: WalletProps) {
                   enableWaffoPancakeTopup={
                     topupInfo?.enable_waffo_pancake_topup
                   }
+                  enablePayPalTopup={topupInfo?.enable_paypal_topup}
+                  enableAlipayTopup={topupInfo?.enable_alipay_topup}
+                  enableWxpayTopup={topupInfo?.enable_wxpay_topup}
+                  enableStripeTopup={topupInfo?.enable_stripe_topup}
                 />
               </div>
 
@@ -360,6 +440,14 @@ export function Wallet(props: WalletProps) {
         onConfirm={handleCreemConfirm}
         product={selectedCreemProduct}
         processing={creemProcessing}
+      />
+
+      <WxpayQRDialog
+        open={wxpayDialogOpen}
+        onOpenChange={handleWxpayDialogClose}
+        codeUrl={wxpayQRData.code_url}
+        tradeNo={wxpayQRData.trade_no}
+        onSuccess={fetchUser}
       />
     </>
   )

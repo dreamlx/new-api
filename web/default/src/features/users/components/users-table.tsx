@@ -33,7 +33,15 @@ import {
 import { useMediaQuery } from '@/hooks'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { useIsAdmin } from '@/hooks/use-admin'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   DISABLED_ROW_DESKTOP,
   DISABLED_ROW_MOBILE,
@@ -62,9 +70,11 @@ export function UsersTable() {
   const columns = useUsersColumns()
   const { refreshTrigger } = useUsers()
   const isMobile = useMediaQuery('(max-width: 640px)')
+  const isAdmin = useIsAdmin()
   const [rowSelection, setRowSelection] = useState({})
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
+  const [downstream, setDownstream] = useState<string>('')
 
   const {
     globalFilter,
@@ -93,18 +103,22 @@ export function UsersTable() {
       pagination.pageIndex + 1,
       pagination.pageSize,
       globalFilter,
+      downstream,
       refreshTrigger,
     ],
     queryFn: async () => {
       const hasFilter = globalFilter?.trim()
+      const hasDownstream = downstream?.trim()
       const params = {
         p: pagination.pageIndex + 1,
         page_size: pagination.pageSize,
       }
 
-      const result = hasFilter
-        ? await searchUsers({ ...params, keyword: globalFilter })
-        : await getUsers(params)
+      // When downstream filter is active, always use searchUsers
+      const result =
+        hasFilter || hasDownstream
+          ? await searchUsers({ ...params, keyword: globalFilter, downstream })
+          : await getUsers(params)
 
       if (!result.success) {
         toast.error(
@@ -196,6 +210,30 @@ export function UsersTable() {
             singleSelect: true,
           },
         ],
+        additionalSearch: isAdmin ? (
+          <Select
+            value={downstream || undefined}
+            onValueChange={(value) =>
+              setDownstream(value === '__all__' || value === null ? '' : value)
+            }
+          >
+            <SelectTrigger className='h-8 w-[140px]'>
+              <SelectValue
+                placeholder={t('select_downstream_platform', {
+                  ns: 'wisemodel',
+                })}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='__all__'>{t('All')}</SelectItem>
+              <SelectItem value='wisemodel'>WiseModel</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : undefined,
+        hasAdditionalFilters: !!downstream,
+        onReset: () => {
+          setDownstream('')
+        },
       }}
       getRowClassName={(row, { isMobile }) =>
         isDisabledUserRow(row.original)
