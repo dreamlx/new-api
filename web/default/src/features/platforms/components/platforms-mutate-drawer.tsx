@@ -28,6 +28,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { createPlatform, updatePlatform } from '../api'
+import { buildCreatePlatformPayload } from '../lib/platform-form'
 import { PLATFORM_STATUS, type Platform, type PlatformStatus } from '../types'
 import { usePlatforms } from './platforms-provider'
 
@@ -113,11 +114,14 @@ export function PlatformsMutateDrawer({
         return
       }
 
-      const res = await createPlatform({
-        platform_id: platformId,
-        name,
-        ...(parsedShadowUserId ? { shadow_user_id: parsedShadowUserId } : {}),
-      })
+      const res = await createPlatform(
+        buildCreatePlatformPayload({
+          platformId,
+          name,
+          status,
+          shadowUserId: parsedShadowUserId,
+        })
+      )
       if (!res.success || !res.data) {
         toast.error(res.message || t('Failed to create platform'))
         return
@@ -191,32 +195,30 @@ export function PlatformsMutateDrawer({
             </p>
           </div>
 
-          {isUpdate && (
-            <div className='flex flex-col gap-2'>
-              <Label>{t('Status')}</Label>
-              <Select
-                value={String(status)}
-                onValueChange={(v) => setStatus(Number(v) as PlatformStatus)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={String(PLATFORM_STATUS.ENABLED)}>
-                    {t('Enabled')}
-                  </SelectItem>
-                  <SelectItem value={String(PLATFORM_STATUS.DISABLED)}>
-                    {t('Disabled')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <p className='text-muted-foreground text-xs'>
-                {t(
-                  'Disabling will reject all token operations from this platform.'
-                )}
-              </p>
-            </div>
-          )}
+          <div className='flex flex-col gap-2'>
+            <Label>{t('Status')}</Label>
+            <Select
+              value={String(status)}
+              onValueChange={(v) => setStatus(Number(v) as PlatformStatus)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={String(PLATFORM_STATUS.ENABLED)}>
+                  {t('Enabled')}
+                </SelectItem>
+                <SelectItem value={String(PLATFORM_STATUS.DISABLED)}>
+                  {t('Disabled')}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Disabling will reject all token operations from this platform.'
+              )}
+            </p>
+          </div>
         </div>
 
         <SheetFooter>

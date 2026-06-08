@@ -263,6 +263,8 @@ export interface WaffoPancakePaymentRequest {
 export interface AmountRequest {
   /** Topup amount to calculate */
   amount: number
+  /** Payment method identifier for payment-specific minimum validation */
+  payment_method?: string
 }
 
 /**

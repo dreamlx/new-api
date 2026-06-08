@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/select'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { buildDisablePayPalOptions } from './paypal-options'
 
 /**
  * Heuristic to detect a masked secret returned from the server.
@@ -131,6 +132,27 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
       toast.success(t('Updated successfully'))
     } catch {
       toast.error(t('Update failed'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDisable = async () => {
+    setLoading(true)
+    try {
+      for (const opt of buildDisablePayPalOptions()) {
+        await updateOption.mutateAsync(opt)
+      }
+      form.reset({
+        ...form.getValues(),
+        PayPalClientId: '',
+        PayPalClientSecret: '',
+        PayPalWebhookSecret: '',
+      })
+      await queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      toast.success(t('PayPal disabled'))
+    } catch {
+      toast.error(t('Failed to disable PayPal'))
     } finally {
       setLoading(false)
     }
@@ -308,9 +330,19 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
             )}
           />
 
-          <Button type='button' onClick={handleSave} disabled={loading}>
-            {loading ? t('Saving...') : t('Save PayPal settings')}
-          </Button>
+          <div className='flex flex-wrap gap-2'>
+            <Button type='button' onClick={handleSave} disabled={loading}>
+              {loading ? t('Saving...') : t('Save PayPal settings')}
+            </Button>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={handleDisable}
+              disabled={loading}
+            >
+              {t('Disable PayPal')}
+            </Button>
+          </div>
         </form>
       </Form>
     </SettingsSection>

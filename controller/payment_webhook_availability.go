@@ -114,7 +114,8 @@ func isPayPalTopUpEnabled() bool {
 		return false
 	}
 	return strings.TrimSpace(setting.PayPalClientId) != "" &&
-		strings.TrimSpace(setting.PayPalClientSecret) != ""
+		strings.TrimSpace(setting.PayPalClientSecret) != "" &&
+		strings.TrimSpace(setting.PayPalWebhookSecret) != ""
 }
 
 func isAlipayTopUpEnabled() bool {

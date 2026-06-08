@@ -59,10 +59,10 @@ export function buildSearchParams(
           upstreamRequestId: commonFilters.upstreamRequestId,
         }),
         ...(commonFilters.isWisemodel && {
-          is_wisemodel: commonFilters.isWisemodel,
+          isWisemodel: commonFilters.isWisemodel,
         }),
         ...(commonFilters.wisemodelPackageId && {
-          wisemodel_package_id: commonFilters.wisemodelPackageId,
+          wisemodelPackageId: commonFilters.wisemodelPackageId,
         }),
       }
     }

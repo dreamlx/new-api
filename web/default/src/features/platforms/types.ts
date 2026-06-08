@@ -58,6 +58,7 @@ export interface ListPlatformsResponse {
 export interface CreatePlatformPayload {
   platform_id: string
   name?: string
+  status?: PlatformStatus
   shadow_user_id?: number
 }
 

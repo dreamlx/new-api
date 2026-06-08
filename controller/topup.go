@@ -160,7 +160,8 @@ type EpayRequest struct {
 }
 
 type AmountRequest struct {
-	Amount int64 `json:"amount"`
+	Amount        int64  `json:"amount"`
+	PaymentMethod string `json:"payment_method"`
 }
 
 func GetEpayClient() *epay.Client {
@@ -215,6 +216,26 @@ func getMinTopup() int64 {
 		minTopup = int(dMinTopup.Mul(dQuotaPerUnit).IntPart())
 	}
 	return int64(minTopup)
+}
+
+func getMinTopupForPayment(paymentMethod string) int64 {
+	minTopup := getMinTopup()
+	switch paymentMethod {
+	case "direct-alipay":
+		minTopup = int64(setting.AlipayMinTopUp)
+	case "direct-wxpay":
+		minTopup = int64(setting.WxpayMinTopUp)
+	case PaymentMethodPayPal:
+		minTopup = int64(setting.PayPalMinTopUp)
+	default:
+		return minTopup
+	}
+	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
+		dMinTopup := decimal.NewFromInt(minTopup)
+		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+		minTopup = dMinTopup.Mul(dQuotaPerUnit).IntPart()
+	}
+	return minTopup
 }
 
 func RequestEpay(c *gin.Context) {
@@ -649,6 +670,7 @@ func activeQueryWxpay(ctx context.Context, topUp *model.TopUp) bool {
 // GetTopUpStatus. It performs (in one DB transaction):
 //  1. CompleteTopUpByCondition (multi-replica safe; only flips pending->success)
 //  2. user quota increment (gorm.Expr("quota + ?"))
+//
 // then, post-commit:
 //  3. RecordLog
 //
@@ -702,8 +724,9 @@ func RequestAmount(c *gin.Context) {
 		return
 	}
 
-	if req.Amount < getMinTopup() {
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", getMinTopup())})
+	minTopup := getMinTopupForPayment(req.PaymentMethod)
+	if req.Amount < minTopup {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("充值数量不能小于 %d", minTopup)})
 		return
 	}
 	id := c.GetInt("id")

@@ -33,6 +33,7 @@ import {
   isPayPalPayment,
   isWaffoPancakePayment,
   submitPaymentForm,
+  buildAmountRequest,
 } from '../lib'
 import {
   type PaymentResult,
@@ -68,7 +69,9 @@ export function usePayment() {
           ? await calculateStripeAmount({ amount: topupAmount })
           : isPancake
             ? await calculateWaffoPancakeAmount({ amount: topupAmount })
-            : await calculateAmount({ amount: topupAmount })
+            : await calculateAmount(
+                buildAmountRequest(topupAmount, paymentType)
+              )
 
         if (isApiSuccess(response) && response.data) {
           const calculatedAmount = parseFloat(response.data)
