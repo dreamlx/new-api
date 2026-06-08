@@ -55,6 +55,7 @@ export function StandaloneGatewayButton({
   const method: PaymentMethod = {
     name: label,
     type: paymentType,
+    min_topup: minTopup,
   }
 
   const button = (

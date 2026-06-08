@@ -137,7 +137,7 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
   }
 
   const webhookUrl = serverAddress
-    ? `${serverAddress}/api/paypal/webhook`
+    ? `${serverAddress.replace(/\/+$/, '')}/api/paypal/webhook`
     : '<ServerAddress>/api/paypal/webhook'
 
   return (

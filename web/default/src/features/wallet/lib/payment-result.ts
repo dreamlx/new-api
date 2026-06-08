@@ -22,7 +22,6 @@ import {
   requestPayPalPayment,
   requestAlipayPayment,
   requestWxpayPayment,
-  requestWaffoPayment,
   isApiSuccess,
 } from '../api'
 import type { WxpayResult } from '../types'
@@ -49,15 +48,16 @@ export type PaymentResult =
 // ============================================================================
 
 /**
- * Extract a human-readable error message from a payment API response,
- * matching Classic's `typeof data === 'string' ? data : message || t('支付失败')`.
+ * Extract a human-readable error message from a payment API response.
  *
  * The backend returns two incompatible error schemas:
  *   1. { message: "error", data: "<plain string>" }  — Alipay/Wxpay/some PayPal
  *   2. { success: false, message: "<actual error>" } — PayPal via ApiErrorMsg
  *
- * This function handles both: if `data` is a string it takes priority (case 1),
- * otherwise falls back to `message` (case 2), and finally to a generic i18n key.
+ * Resolution order: a string `data` takes priority (case 1), otherwise a
+ * meaningful `message` (case 2), otherwise a localized fallback. Unlike classic,
+ * the bare sentinel `message === 'error'` is treated as "no detail" and replaced
+ * by the localized fallback, since surfacing the literal "error" is unhelpful.
  */
 export function extractPaymentError(response: Record<string, unknown>): string {
   const data = response.data
@@ -161,31 +161,5 @@ export async function processCreemBranch(): Promise<PaymentResult> {
   toast.error(
     i18next.t('Please select a Creem product below to proceed with payment.')
   )
-  return { type: 'redirect', success: false }
-}
-
-/** Process Waffo (legacy) — typically handled via dedicated Waffo buttons, fallback only */
-export async function processWaffoBranch(
-  topupAmountInt: number
-): Promise<PaymentResult> {
-  const response = await requestWaffoPayment({
-    amount: topupAmountInt,
-  })
-  if (!isApiSuccess(response)) {
-    toast.error(extractPaymentError(response as Record<string, unknown>))
-    return { type: 'redirect', success: false }
-  }
-  const paymentUrl =
-    response.data &&
-    typeof response.data === 'object' &&
-    'payment_url' in response.data
-      ? (response.data as { payment_url: string }).payment_url
-      : null
-  if (paymentUrl) {
-    window.open(paymentUrl, '_blank')
-    toast.success(i18next.t('Redirecting to payment page...'))
-    return { type: 'redirect', success: true }
-  }
-  toast.error(i18next.t('Payment failed'))
   return { type: 'redirect', success: false }
 }

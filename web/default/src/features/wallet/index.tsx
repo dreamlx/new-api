@@ -112,6 +112,14 @@ export function Wallet(props: WalletProps) {
   const { pollAlipayStatus } = useAlipayPolling(fetchUserRef)
   const alipayPollCleanupRef = useRef<(() => void) | null>(null)
 
+  // Cancel any in-flight Alipay poll when the wallet unmounts, so a late
+  // /topup/status response can't fire a toast / setState on an unmounted page.
+  useEffect(() => {
+    return () => {
+      alipayPollCleanupRef.current?.()
+    }
+  }, [])
+
   const { status } = useStatus()
   const { currency } = useSystemConfig()
   const { topupInfo, presetAmounts, loading: topupLoading } = useTopupInfo()
@@ -196,9 +204,12 @@ export function Wallet(props: WalletProps) {
     setPaymentLoading(method.type)
 
     try {
-      // Validate minimum topup
-      const minTopup = getMinTopupAmount(topupInfo)
+      // Validate minimum topup against the clicked gateway's own minimum
+      // (method.min_topup), not a global one — otherwise a high-min gateway
+      // (e.g. Stripe) could block an otherwise-enabled low-min gateway button.
+      const minTopup = method.min_topup ?? getMinTopupAmount(topupInfo)
       if (topupAmount < minTopup) {
+        toast.error(t('Minimum topup amount: {{amount}}', { amount: minTopup }))
         return
       }
 

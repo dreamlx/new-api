@@ -149,16 +149,16 @@ export function getMinTopupAmount(topupInfo: TopupInfo | null): number {
     return topupInfo.stripe_min_topup || DEFAULT_MIN_TOPUP
   }
 
-  if (topupInfo.enable_paypal_topup && topupInfo.paypal_min_topup) {
-    return topupInfo.paypal_min_topup
+  if (topupInfo.enable_paypal_topup) {
+    return topupInfo.paypal_min_topup || DEFAULT_MIN_TOPUP
   }
 
-  if (topupInfo.enable_alipay_topup && topupInfo.alipay_min_topup) {
-    return topupInfo.alipay_min_topup
+  if (topupInfo.enable_alipay_topup) {
+    return topupInfo.alipay_min_topup || DEFAULT_MIN_TOPUP
   }
 
-  if (topupInfo.enable_wxpay_topup && topupInfo.wxpay_min_topup) {
-    return topupInfo.wxpay_min_topup
+  if (topupInfo.enable_wxpay_topup) {
+    return topupInfo.wxpay_min_topup || DEFAULT_MIN_TOPUP
   }
 
   if (topupInfo.enable_waffo_topup) {

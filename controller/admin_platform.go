@@ -19,6 +19,7 @@ import (
 type CreatePlatformRequest struct {
 	PlatformId   string `json:"platform_id" binding:"required,min=1,max=80"`
 	Name         string `json:"name" binding:"max=200"`
+	Status       *int   `json:"status"` // 1=enabled (default), 2=disabled
 	ShadowUserId *int   `json:"shadow_user_id"`
 }
 
@@ -86,6 +87,14 @@ func CreatePlatform(c *gin.Context) {
 		common.ApiErrorMsg(c, "platform_id 格式错误：仅允许小写字母、数字、下划线、短横线，长度 1-80")
 		return
 	}
+	if req.Status != nil && *req.Status != common.UserStatusEnabled && *req.Status != common.UserStatusDisabled {
+		common.ApiErrorMsg(c, "status 仅允许 1 (enabled) 或 2 (disabled)")
+		return
+	}
+	status := common.UserStatusEnabled
+	if req.Status != nil {
+		status = *req.Status
+	}
 
 	shadowUserId, err := resolvePlatformShadowUserId(req.PlatformId, req.ShadowUserId)
 	if err != nil {
@@ -102,7 +111,7 @@ func CreatePlatform(c *gin.Context) {
 		Name:           req.Name,
 		PlatformSkHash: model.HashPlatformSk(plaintextSk),
 		ShadowUserId:   shadowUserId,
-		Status:         common.UserStatusEnabled,
+		Status:         status,
 	}
 
 	if err := platform.Insert(); err != nil {

@@ -40,7 +40,6 @@ import {
   processAlipayBranch,
   processWxpayBranch,
   processCreemBranch,
-  processWaffoBranch,
   extractPaymentError,
 } from '../lib/payment-result'
 
@@ -137,9 +136,6 @@ export function usePayment() {
 
         // ── Creem ───────────────────────────────────────────────
         if (paymentType === PAYMENT_TYPES.CREEM) return processCreemBranch()
-
-        // ── Waffo (legacy) ─────────────────────────────────────
-        if (paymentType === PAYMENT_TYPES.WAFFO) return processWaffoBranch(topupAmountInt)
 
         // ── Epay (generic) — form submission ────────────────────
         const response = await requestPayment({

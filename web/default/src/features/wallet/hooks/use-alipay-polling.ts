@@ -39,8 +39,8 @@ export function useAlipayPolling(
 
   // Poll /api/user/topup/status for an Alipay trade_no until terminal state
   const pollAlipayStatus = useCallback(
-    (tradeNo: string) => {
-      if (!tradeNo) return
+    (tradeNo: string): (() => void) => {
+      if (!tradeNo) return () => {}
       setAlipayPolling(true)
       let cancelled = false
       let attempt = 0
