@@ -30,7 +30,6 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/palm"
 	"github.com/QuantumNous/new-api/relay/channel/perplexity"
 	"github.com/QuantumNous/new-api/relay/channel/replicate"
-	"github.com/QuantumNous/new-api/relay/channel/seedance"
 	"github.com/QuantumNous/new-api/relay/channel/siliconflow"
 	"github.com/QuantumNous/new-api/relay/channel/submodel"
 	taskali "github.com/QuantumNous/new-api/relay/channel/task/ali"
@@ -40,7 +39,6 @@ import (
 	taskhappyhorse "github.com/QuantumNous/new-api/relay/channel/task/happyhorse"
 	taskjimeng "github.com/QuantumNous/new-api/relay/channel/task/jimeng"
 	"github.com/QuantumNous/new-api/relay/channel/task/kling"
-	taskseedance "github.com/QuantumNous/new-api/relay/channel/task/seedance"
 	tasksora "github.com/QuantumNous/new-api/relay/channel/task/sora"
 	"github.com/QuantumNous/new-api/relay/channel/task/suno"
 	taskvertex "github.com/QuantumNous/new-api/relay/channel/task/vertex"
@@ -129,8 +127,6 @@ func GetAdaptor(apiType int) channel.Adaptor {
 		return &ospreyai.Adaptor{}
 	case constant.APITypeHappyHorse:
 		return &happyhorse.Adaptor{}
-	case constant.APITypeSeedance:
-		return &seedance.Adaptor{}
 	}
 	return nil
 }
@@ -172,8 +168,6 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 			return &hailuo.TaskAdaptor{}
 		case constant.ChannelTypeHappyHorse:
 			return &taskhappyhorse.TaskAdaptor{}
-		case constant.ChannelTypeSeedance:
-			return &taskseedance.TaskAdaptor{}
 		}
 	}
 	return nil
