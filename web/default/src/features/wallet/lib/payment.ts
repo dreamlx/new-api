@@ -22,7 +22,7 @@ import {
   DEFAULT_PAYMENT_TYPE,
   DEFAULT_MIN_TOPUP,
 } from '../constants'
-import type { PresetAmount, TopupInfo } from '../types'
+import type { AmountRequest, PresetAmount, TopupInfo } from '../types'
 
 // ============================================================================
 // Payment Processing Functions
@@ -76,6 +76,13 @@ export function isStripePayment(paymentType: string): boolean {
 }
 
 /**
+ * Check if payment method is PayPal
+ */
+export function isPayPalPayment(paymentType: string): boolean {
+  return paymentType === PAYMENT_TYPES.PAYPAL
+}
+
+/**
  * Check if payment method is Waffo Pancake
  *
  * Pancake is a metered-style payment that goes through a dedicated checkout
@@ -86,6 +93,16 @@ export function isWaffoPancakePayment(paymentType: string): boolean {
   return paymentType === PAYMENT_TYPES.WAFFO_PANCAKE
 }
 
+export function buildAmountRequest(
+  amount: number,
+  paymentType: string
+): AmountRequest {
+  return {
+    amount,
+    payment_method: paymentType,
+  }
+}
+
 /**
  * Get default payment type from topup info
  */
@@ -94,13 +111,35 @@ export function getDefaultPaymentType(topupInfo: TopupInfo | null): string {
     return DEFAULT_PAYMENT_TYPE
   }
 
-  // Return first available payment method or default
-  if (topupInfo.pay_methods?.length > 0) {
-    return topupInfo.pay_methods[0].type
+  // Return the first visible pay method; direct integrations replace the
+  // same-named Epay methods in the wallet UI.
+  const firstVisiblePayMethod = topupInfo.pay_methods?.find((method) => {
+    if (method.type === PAYMENT_TYPES.ALIPAY && topupInfo.enable_alipay_topup) {
+      return false
+    }
+    if (method.type === PAYMENT_TYPES.WECHAT && topupInfo.enable_wxpay_topup) {
+      return false
+    }
+    return true
+  })
+  if (firstVisiblePayMethod) {
+    return firstVisiblePayMethod.type
   }
 
   if (topupInfo.enable_stripe_topup) {
     return PAYMENT_TYPES.STRIPE
+  }
+
+  if (topupInfo.enable_paypal_topup) {
+    return PAYMENT_TYPES.PAYPAL
+  }
+
+  if (topupInfo.enable_alipay_topup) {
+    return PAYMENT_TYPES.DIRECT_ALIPAY
+  }
+
+  if (topupInfo.enable_wxpay_topup) {
+    return PAYMENT_TYPES.DIRECT_WECHAT
   }
 
   if (topupInfo.enable_waffo_topup) {
@@ -122,20 +161,40 @@ export function getMinTopupAmount(topupInfo: TopupInfo | null): number {
     return DEFAULT_MIN_TOPUP
   }
 
-  if (topupInfo.enable_online_topup) {
-    return topupInfo.min_topup
+  const defaultPaymentType = getDefaultPaymentType(topupInfo)
+  const defaultPayMethod = topupInfo.pay_methods?.find(
+    (method) => method.type === defaultPaymentType
+  )
+  if (defaultPayMethod?.min_topup) {
+    return defaultPayMethod.min_topup
   }
 
-  if (topupInfo.enable_stripe_topup) {
-    return topupInfo.stripe_min_topup
+  if (defaultPaymentType === PAYMENT_TYPES.STRIPE) {
+    return topupInfo.stripe_min_topup || DEFAULT_MIN_TOPUP
   }
 
-  if (topupInfo.enable_waffo_topup) {
+  if (defaultPaymentType === PAYMENT_TYPES.PAYPAL) {
+    return topupInfo.paypal_min_topup || DEFAULT_MIN_TOPUP
+  }
+
+  if (defaultPaymentType === PAYMENT_TYPES.DIRECT_ALIPAY) {
+    return topupInfo.alipay_min_topup || DEFAULT_MIN_TOPUP
+  }
+
+  if (defaultPaymentType === PAYMENT_TYPES.DIRECT_WECHAT) {
+    return topupInfo.wxpay_min_topup || DEFAULT_MIN_TOPUP
+  }
+
+  if (defaultPaymentType === PAYMENT_TYPES.WAFFO) {
     return topupInfo.waffo_min_topup || DEFAULT_MIN_TOPUP
   }
 
-  if (topupInfo.enable_waffo_pancake_topup) {
+  if (defaultPaymentType === PAYMENT_TYPES.WAFFO_PANCAKE) {
     return topupInfo.waffo_pancake_min_topup || DEFAULT_MIN_TOPUP
+  }
+
+  if (topupInfo.enable_online_topup) {
+    return topupInfo.min_topup || DEFAULT_MIN_TOPUP
   }
 
   return DEFAULT_MIN_TOPUP

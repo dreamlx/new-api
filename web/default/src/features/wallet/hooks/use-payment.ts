@@ -27,11 +27,26 @@ import {
   requestStripePayment,
   isApiSuccess,
 } from '../api'
+import { PAYMENT_TYPES } from '../constants'
 import {
   isStripePayment,
+  isPayPalPayment,
   isWaffoPancakePayment,
   submitPaymentForm,
+  buildAmountRequest,
 } from '../lib'
+import {
+  type PaymentResult,
+  processPayPalBranch,
+  processAlipayBranch,
+  processWxpayBranch,
+  processCreemBranch,
+  extractPaymentError,
+} from '../lib/payment-result'
+
+// Re-export types for backward compatibility — consumers import from this hook
+export type { AlipayResult } from '../lib/payment-result'
+export type { PaymentResult } from '../lib/payment-result'
 
 // ============================================================================
 // Payment Hook
@@ -54,7 +69,9 @@ export function usePayment() {
           ? await calculateStripeAmount({ amount: topupAmount })
           : isPancake
             ? await calculateWaffoPancakeAmount({ amount: topupAmount })
-            : await calculateAmount({ amount: topupAmount })
+            : await calculateAmount(
+                buildAmountRequest(topupAmount, paymentType)
+              )
 
         if (isApiSuccess(response) && response.data) {
           const calculatedAmount = parseFloat(response.data)
@@ -75,51 +92,77 @@ export function usePayment() {
     []
   )
 
-  // Process payment
+  // Process payment — dispatches to the correct API endpoint per payment type,
+  // matching the routing in classic's onlineTopUp function.
   const processPayment = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (
+      topupAmount: number,
+      paymentType: string
+    ): Promise<PaymentResult> => {
       try {
         setProcessing(true)
 
-        const isStripe = isStripePayment(paymentType)
-        const amount = Math.floor(topupAmount)
+        const topupAmountInt = Math.floor(topupAmount)
 
-        const response = isStripe
-          ? await requestStripePayment({
-              amount,
-              payment_method: 'stripe',
-            })
-          : await requestPayment({
-              amount,
-              payment_method: paymentType,
-            })
+        // ── Stripe ──────────────────────────────────────────────
+        if (isStripePayment(paymentType)) {
+          const response = await requestStripePayment({
+            amount: topupAmountInt,
+            payment_method: 'stripe',
+          })
+          if (!isApiSuccess(response)) {
+            toast.error(
+              extractPaymentError(response as Record<string, unknown>)
+            )
+            return { type: 'redirect', success: false }
+          }
+          if (response.data?.pay_link) {
+            window.open(response.data.pay_link as string, '_blank')
+            toast.success(i18next.t('Redirecting to payment page...'))
+            return { type: 'redirect', success: true }
+          }
+          toast.error(i18next.t('Payment failed'))
+          return { type: 'redirect', success: false }
+        }
+
+        // ── PayPal ─────────────────────────────────────────────
+        if (isPayPalPayment(paymentType))
+          return processPayPalBranch(topupAmountInt)
+
+        // ── Alipay (direct) — only for the direct-alipay standalone button ──
+        if (paymentType === PAYMENT_TYPES.DIRECT_ALIPAY)
+          return processAlipayBranch(topupAmountInt)
+
+        // ── Wxpay (direct) — only for the direct-wxpay standalone button ──
+        if (paymentType === PAYMENT_TYPES.DIRECT_WECHAT)
+          return processWxpayBranch(topupAmountInt)
+
+        // ── Creem ───────────────────────────────────────────────
+        if (paymentType === PAYMENT_TYPES.CREEM) return processCreemBranch()
+
+        // ── Epay (generic) — form submission ────────────────────
+        const response = await requestPayment({
+          amount: topupAmountInt,
+          payment_method: paymentType,
+        })
 
         if (!isApiSuccess(response)) {
-          toast.error(response.message || i18next.t('Payment request failed'))
-          return false
+          toast.error(extractPaymentError(response as Record<string, unknown>))
+          return { type: 'form', success: false }
         }
 
-        // Handle Stripe payment
-        if (isStripe && response.data?.pay_link) {
-          window.open(response.data.pay_link as string, '_blank')
+        // Handle Epay form submission
+        const url = (response as unknown as { url?: string }).url
+        if (url && response.data) {
+          submitPaymentForm(url, response.data)
           toast.success(i18next.t('Redirecting to payment page...'))
-          return true
+          return { type: 'form', success: true }
         }
 
-        // Handle non-Stripe payment
-        if (!isStripe && response.data) {
-          const url = (response as unknown as { url?: string }).url
-          if (url) {
-            submitPaymentForm(url, response.data)
-            toast.success(i18next.t('Redirecting to payment page...'))
-            return true
-          }
-        }
-
-        return false
+        return { type: 'form', success: false }
       } catch (_error) {
         toast.error(i18next.t('Payment request failed'))
-        return false
+        return { type: 'form', success: false }
       } finally {
         setProcessing(false)
       }

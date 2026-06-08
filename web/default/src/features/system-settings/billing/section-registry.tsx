@@ -183,6 +183,33 @@ const BILLING_SECTIONS = [
         }}
         waffoPancakeProvisionedStoreID={settings.WaffoPancakeStoreID ?? ''}
         waffoPancakeProvisionedProductID={settings.WaffoPancakeProductID ?? ''}
+        paypalDefaultValues={{
+          PayPalClientId: settings.PayPalClientId ?? '',
+          PayPalClientSecret: settings.PayPalClientSecret ?? '',
+          PayPalWebhookSecret: settings.PayPalWebhookSecret ?? '',
+          PayPalMode: settings.PayPalMode ?? 'sandbox',
+          PayPalMinTopUp: settings.PayPalMinTopUp ?? 1,
+        }}
+        alipayDefaultValues={{
+          AlipayEnabled: settings.AlipayEnabled ?? false,
+          AlipayAppId: settings.AlipayAppId ?? '',
+          AlipayPrivateKey: settings.AlipayPrivateKey ?? '',
+          AlipayPublicKey: settings.AlipayPublicKey ?? '',
+          AlipaySellerId: settings.AlipaySellerId ?? '',
+          AlipayIsSandbox: settings.AlipayIsSandbox ?? false,
+          AlipayMinTopUp: settings.AlipayMinTopUp ?? 1,
+        }}
+        wxpayDefaultValues={{
+          WxpayEnabled: settings.WxpayEnabled ?? false,
+          WxpayAppId: settings.WxpayAppId ?? '',
+          WxpayMchId: settings.WxpayMchId ?? '',
+          WxpayMchSerialNo: settings.WxpayMchSerialNo ?? '',
+          WxpayApiV3Key: settings.WxpayApiV3Key ?? '',
+          WxpayPrivateKey: settings.WxpayPrivateKey ?? '',
+          WxpayPublicKeyId: settings.WxpayPublicKeyId ?? '',
+          WxpayPublicKey: settings.WxpayPublicKey ?? '',
+          WxpayMinTopUp: settings.WxpayMinTopUp ?? 1,
+        }}
         complianceDefaults={{
           confirmed: settings['payment_setting.compliance_confirmed'] ?? false,
           termsVersion:
@@ -190,6 +217,7 @@ const BILLING_SECTIONS = [
           confirmedAt: settings['payment_setting.compliance_confirmed_at'] ?? 0,
           confirmedBy: settings['payment_setting.compliance_confirmed_by'] ?? 0,
         }}
+        serverAddress={settings.ServerAddress}
       />
     ),
   },

@@ -102,6 +102,11 @@ export function getChannelTypeIcon(type: number): string {
     54: 'Doubao', // DoubaoVideo
     56: 'Replicate', // Replicate
 
+    // OAuth / Platform
+    57: 'OpenAI', // Codex (OpenAI OAuth)
+    58: 'OpenAI', // OspreyAI
+    59: 'OpenAI', // HappyHorse
+
     // Tools & Platforms
     37: 'Dify', // Dify
     38: 'Jina', // Jina

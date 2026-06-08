@@ -92,6 +92,8 @@ export interface GetUsersResponse {
 export interface SearchUsersParams {
   keyword?: string
   group?: string
+  /** Filter by downstream platform (e.g. 'wisemodel') */
+  downstream?: string
   p?: number
   page_size?: number
 }

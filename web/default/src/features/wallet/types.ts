@@ -39,6 +39,23 @@ export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
   url?: string
 }
 export type StripePaymentResponse = ApiResponse<{ pay_link: string }>
+export type PayPalPaymentResponse = ApiResponse<{ pay_link: string }>
+export type AlipayPaymentResponse = ApiResponse<{
+  pay_link: string
+  trade_no: string
+}>
+export type WxpayPaymentResponse = ApiResponse<{
+  code_url: string
+  trade_no: string
+}>
+
+/**
+ * Wxpay QR code data returned by processPayment for caller to display
+ */
+export interface WxpayResult {
+  code_url: string
+  trade_no: string
+}
 export type AffiliateCodeResponse = ApiResponse<string>
 export type AffiliateTransferResponse = ApiResponse
 export type CreemPaymentResponse = ApiResponse<{ checkout_url: string }>
@@ -150,6 +167,18 @@ export interface TopupInfo {
   enable_waffo_pancake_topup?: boolean
   /** Minimum topup amount for Waffo Pancake */
   waffo_pancake_min_topup?: number
+  /** Whether PayPal topup is enabled */
+  enable_paypal_topup?: boolean
+  /** Minimum topup amount for PayPal */
+  paypal_min_topup?: number
+  /** Whether direct Alipay topup is enabled */
+  enable_alipay_topup?: boolean
+  /** Minimum topup amount for direct Alipay */
+  alipay_min_topup?: number
+  /** Whether direct WeChat Pay topup is enabled */
+  enable_wxpay_topup?: boolean
+  /** Minimum topup amount for direct WeChat Pay */
+  wxpay_min_topup?: number
   /** Whether redemption code usage is enabled */
   enable_redemption?: boolean
   /** Whether compliance confirmation has been completed */
@@ -187,6 +216,30 @@ export interface PaymentRequest {
 }
 
 /**
+ * PayPal payment request parameters
+ */
+export interface PayPalPaymentRequest {
+  /** Topup amount */
+  amount: number
+}
+
+/**
+ * Alipay (direct) payment request parameters
+ */
+export interface AlipayPaymentRequest {
+  /** Topup amount */
+  amount: number
+}
+
+/**
+ * Wxpay (direct) payment request parameters
+ */
+export interface WxpayPaymentRequest {
+  /** Topup amount */
+  amount: number
+}
+
+/**
  * Waffo payment request parameters
  */
 export interface WaffoPaymentRequest {
@@ -210,6 +263,8 @@ export interface WaffoPancakePaymentRequest {
 export interface AmountRequest {
   /** Topup amount to calculate */
   amount: number
+  /** Payment method identifier for payment-specific minimum validation */
+  payment_method?: string
 }
 
 /**

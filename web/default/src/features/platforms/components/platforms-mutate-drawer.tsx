@@ -9,7 +9,6 @@ License, or (at your option) any later version.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,8 +27,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-
 import { createPlatform, updatePlatform } from '../api'
+import { buildCreatePlatformPayload } from '../lib/platform-form'
 import { PLATFORM_STATUS, type Platform, type PlatformStatus } from '../types'
 import { usePlatforms } from './platforms-provider'
 
@@ -42,7 +41,11 @@ type Props = {
   currentRow?: Platform | null
 }
 
-export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props) {
+export function PlatformsMutateDrawer({
+  open,
+  onOpenChange,
+  currentRow,
+}: Props) {
   const { t } = useTranslation()
   const { setSkReveal, setOpen: setDialog, triggerRefresh } = usePlatforms()
   const isUpdate = Boolean(currentRow)
@@ -82,9 +85,7 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
 
   const validate = () => {
     if (!isUpdate && !PLATFORM_ID_PATTERN.test(platformId)) {
-      toast.error(
-        t('platform_id must match ^[a-z0-9_-]{1,80}$')
-      )
+      toast.error(t('platform_id must match ^[a-z0-9_-]{1,80}$'))
       return false
     }
     return true
@@ -113,11 +114,14 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
         return
       }
 
-      const res = await createPlatform({
-        platform_id: platformId,
-        name,
-        ...(parsedShadowUserId ? { shadow_user_id: parsedShadowUserId } : {}),
-      })
+      const res = await createPlatform(
+        buildCreatePlatformPayload({
+          platformId,
+          name,
+          status,
+          shadowUserId: parsedShadowUserId,
+        })
+      )
       if (!res.success || !res.data) {
         toast.error(res.message || t('Failed to create platform'))
         return
@@ -143,8 +147,12 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
           </SheetTitle>
           <SheetDescription>
             {isUpdate
-              ? t('Update the platform name, status, or shadow user. platform_id and sk cannot be changed here.')
-              : t('Provision a new downstream platform credential. The plaintext sk is returned exactly once.')}
+              ? t(
+                  'Update the platform name, status, or shadow user. platform_id and sk cannot be changed here.'
+                )
+              : t(
+                  'Provision a new downstream platform credential. The plaintext sk is returned exactly once.'
+                )}
           </SheetDescription>
         </SheetHeader>
 
@@ -158,7 +166,7 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
               onChange={(e) => setPlatformId(e.target.value)}
               placeholder='e.g. acme_corp'
             />
-            <p className='text-xs text-muted-foreground'>
+            <p className='text-muted-foreground text-xs'>
               {t('Lowercase letters, digits, underscore, hyphen; 1–80 chars.')}
             </p>
           </div>
@@ -182,35 +190,35 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
               onChange={(e) => setShadowUserId(e.target.value)}
               placeholder={t('Leave empty to auto-create a shadow user')}
             />
-            <p className='text-xs text-muted-foreground'>
+            <p className='text-muted-foreground text-xs'>
               {t('When provided, this must be an existing user ID.')}
             </p>
           </div>
 
-          {isUpdate && (
-            <div className='flex flex-col gap-2'>
-              <Label>{t('Status')}</Label>
-              <Select
-                value={String(status)}
-                onValueChange={(v) => setStatus(Number(v) as PlatformStatus)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={String(PLATFORM_STATUS.ENABLED)}>
-                    {t('Enabled')}
-                  </SelectItem>
-                  <SelectItem value={String(PLATFORM_STATUS.DISABLED)}>
-                    {t('Disabled')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <p className='text-xs text-muted-foreground'>
-                {t('Disabling will reject all token operations from this platform.')}
-              </p>
-            </div>
-          )}
+          <div className='flex flex-col gap-2'>
+            <Label>{t('Status')}</Label>
+            <Select
+              value={String(status)}
+              onValueChange={(v) => setStatus(Number(v) as PlatformStatus)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={String(PLATFORM_STATUS.ENABLED)}>
+                  {t('Enabled')}
+                </SelectItem>
+                <SelectItem value={String(PLATFORM_STATUS.DISABLED)}>
+                  {t('Disabled')}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Disabling will reject all token operations from this platform.'
+              )}
+            </p>
+          </div>
         </div>
 
         <SheetFooter>
@@ -218,7 +226,11 @@ export function PlatformsMutateDrawer({ open, onOpenChange, currentRow }: Props)
             {t('Cancel')}
           </Button>
           <Button onClick={onSubmit} disabled={submitting}>
-            {submitting ? t('Saving...') : isUpdate ? t('Save Changes') : t('Create')}
+            {submitting
+              ? t('Saving...')
+              : isUpdate
+                ? t('Save Changes')
+                : t('Create')}
           </Button>
         </SheetFooter>
       </SheetContent>
