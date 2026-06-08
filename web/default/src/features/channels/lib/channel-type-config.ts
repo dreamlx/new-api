@@ -134,16 +134,6 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       baseUrl: 'Default: https://api.replicate.com',
     },
   },
-  60: {
-    id: 60,
-    name: CHANNEL_TYPES[60],
-    icon: 'openai',
-    hints: {
-      key: 'Third-party Seedance gateway API key',
-      models: 'dreamina-seedance-2-0-260128,dreamina-seedance-2-0-fast-260128',
-      baseUrl: 'Third-party Seedance gateway URL (leave empty)',
-    },
-  },
 }
 
 /**
