@@ -119,8 +119,12 @@ const RechargeCard = ({
     if (!method || method.type === 'waffo') {
       return false;
     }
+    // stripe / paypal / waffo_pancake use their own checkout endpoints (not Epay),
+    // so they stay visible regardless of the Epay (enableOnlineTopUp) toggle.
     const isStandaloneGateway =
-      method.type === 'stripe' || method.type === 'paypal';
+      method.type === 'stripe' ||
+      method.type === 'paypal' ||
+      method.type === 'waffo_pancake';
     if (!enableOnlineTopUp && !isStandaloneGateway) {
       return false;
     }

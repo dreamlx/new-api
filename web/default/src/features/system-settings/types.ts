@@ -263,9 +263,34 @@ export type BillingSettings = {
   // section (saved via /api/option/waffo-pancake/save).
   WaffoPancakeStoreID: string
   WaffoPancakeProductID: string
+  // PayPal gateway
+  PayPalClientId: string
+  PayPalClientSecret: string
+  PayPalWebhookSecret: string
+  PayPalMode: string
+  PayPalMinTopUp: number
+  // Alipay gateway
+  AlipayEnabled: boolean
+  AlipayAppId: string
+  AlipayPrivateKey: string
+  AlipayPublicKey: string
+  AlipaySellerId: string
+  AlipayIsSandbox: boolean
+  AlipayMinTopUp: number
+  // WeChat Pay gateway
+  WxpayEnabled: boolean
+  WxpayAppId: string
+  WxpayMchId: string
+  WxpayMchSerialNo: string
+  WxpayApiV3Key: string
+  WxpayPrivateKey: string
+  WxpayPublicKeyId: string
+  WxpayPublicKey: string
+  WxpayMinTopUp: number
   'checkin_setting.enabled': boolean
   'checkin_setting.min_quota': number
   'checkin_setting.max_quota': number
+  ServerAddress: string
 }
 
 export type OperationsSettings = {

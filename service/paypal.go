@@ -2,9 +2,8 @@ package service
 
 import (
 	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,7 +19,13 @@ const (
 	PayPalLiveURL    = "https://api-m.paypal.com"
 )
 
+var payPalBaseURLOverride string
+var payPalHTTPClient = &http.Client{}
+
 func getPayPalURL() string {
+	if payPalBaseURLOverride != "" {
+		return strings.TrimRight(payPalBaseURLOverride, "/")
+	}
 	if setting.PayPalMode == "live" {
 		return PayPalLiveURL
 	}
@@ -141,8 +146,7 @@ func CreatePayPalOrder(referenceId, amount, currency, returnUrl, cancelUrl strin
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 
-	client := &http.Client{}
-	httpResp, err := client.Do(httpReq)
+	httpResp, err := payPalHTTPClient.Do(httpReq)
 	if err != nil {
 		return "", fmt.Errorf("发送请求失败: %w", err)
 	}
@@ -195,8 +199,7 @@ func getPayPalAccessToken() (string, error) {
 	httpReq.Header.Set("Authorization", fmt.Sprintf("Basic %s", encodedAuth))
 	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{}
-	httpResp, err := client.Do(httpReq)
+	httpResp, err := payPalHTTPClient.Do(httpReq)
 	if err != nil {
 		return "", fmt.Errorf("请求失败: %w", err)
 	}
@@ -265,8 +268,7 @@ func CapturePayPalOrder(orderID string) (*PayPalCaptureResponse, error) {
 	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	httpReq.Header.Set("Prefer", "return=representation")
 
-	client := &http.Client{}
-	httpResp, err := client.Do(httpReq)
+	httpResp, err := payPalHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}
@@ -317,8 +319,7 @@ func GetPayPalOrder(orderID string) (*PayPalCaptureResponse, error) {
 	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	httpResp, err := client.Do(httpReq)
+	httpResp, err := payPalHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}
@@ -342,29 +343,73 @@ func GetPayPalOrder(orderID string) (*PayPalCaptureResponse, error) {
 	return &resp, nil
 }
 
-// VerifyPayPalWebhookSignature 验证 PayPal Webhook 签名
-// 注：PayPal 官方使用 RSA-SHA256 证书验证，但 WebhookSecret 方式已过时
-// 建议改用官方的 verify-webhook-signature 端点或本地 RSA 验证
-// 参考：https://developer.paypal.com/api/rest/webhooks/rest/
+// VerifyPayPalWebhookSignature verifies PayPal webhook signatures through
+// PayPal's official verify-webhook-signature endpoint. PayPalWebhookSecret is
+// used as the configured webhook ID for that API.
 func VerifyPayPalWebhookSignature(transmissionID, transmissionTime, certURL string, payload []byte, signature string) bool {
-	if setting.PayPalWebhookSecret == "" {
+	if setting.PayPalWebhookSecret == "" ||
+		transmissionID == "" ||
+		transmissionTime == "" ||
+		certURL == "" ||
+		signature == "" ||
+		len(payload) == 0 {
 		return false
 	}
 
-	// 临时实现：使用简化的 HMAC 验证
-	// TODO: 替换为官方推荐的方法
-	// 1. POST 到 PayPal verify-webhook-signature 端点，或
-	// 2. 使用 certURL 进行本地 RSA-SHA256 验证
-	expectedSignature := computePayPalSignature(transmissionID, transmissionTime, string(payload), setting.PayPalWebhookSecret)
+	token, err := getPayPalAccessToken()
+	if err != nil {
+		common.SysError("paypal webhook signature token failed: " + err.Error())
+		return false
+	}
 
-	return hmac.Equal([]byte(signature), []byte(expectedSignature))
-}
+	body, err := common.Marshal(map[string]interface{}{
+		"transmission_id":   transmissionID,
+		"transmission_time": transmissionTime,
+		"cert_url":          certURL,
+		"auth_algo":         "SHA256withRSA",
+		"transmission_sig":  signature,
+		"webhook_id":        setting.PayPalWebhookSecret,
+		"webhook_event":     json.RawMessage(payload),
+	})
+	if err != nil {
+		common.SysError("paypal webhook signature payload marshal failed: " + err.Error())
+		return false
+	}
 
-func computePayPalSignature(transmissionID, transmissionTime, payload, webhookSecret string) string {
-	signString := transmissionID + transmissionTime + payload + webhookSecret
-	hash := hmac.New(sha256.New, []byte(webhookSecret))
-	hash.Write([]byte(signString))
-	return base64.StdEncoding.EncodeToString(hash.Sum(nil))
+	url := fmt.Sprintf("%s/v1/notifications/verify-webhook-signature", getPayPalURL())
+	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		common.SysError("paypal webhook signature request create failed: " + err.Error())
+		return false
+	}
+	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	httpResp, err := payPalHTTPClient.Do(httpReq)
+	if err != nil {
+		common.SysError("paypal webhook signature request failed: " + err.Error())
+		return false
+	}
+	defer httpResp.Body.Close()
+
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		common.SysError("paypal webhook signature response read failed: " + err.Error())
+		return false
+	}
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		common.SysError(fmt.Sprintf("paypal webhook signature HTTP %d: %s", httpResp.StatusCode, truncateRespBody(respBody)))
+		return false
+	}
+
+	var resp struct {
+		VerificationStatus string `json:"verification_status"`
+	}
+	if err := common.Unmarshal(respBody, &resp); err != nil {
+		common.SysError("paypal webhook signature response parse failed: " + err.Error())
+		return false
+	}
+	return strings.EqualFold(resp.VerificationStatus, "SUCCESS")
 }
 
 // ExtractPayPalOrderID 从 webhook payload 中提取订单 ID

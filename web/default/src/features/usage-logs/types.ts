@@ -53,6 +53,10 @@ export interface CommonLogFilters extends CommonFilters {
   username?: string
   requestId?: string
   upstreamRequestId?: string
+  /** Filter logs for WiseModel users only */
+  isWisemodel?: boolean
+  /** Filter logs by WiseModel package ID */
+  wisemodelPackageId?: string
 }
 
 /**
@@ -269,6 +273,8 @@ export interface GetLogsParams {
   group?: string
   request_id?: string
   upstream_request_id?: string
+  is_wisemodel?: boolean
+  wisemodel_package_id?: string
 }
 
 export interface GetLogsResponse {
@@ -293,6 +299,8 @@ export interface GetLogStatsParams {
   group?: string
   request_id?: string
   upstream_request_id?: string
+  is_wisemodel?: boolean
+  wisemodel_package_id?: string
 }
 
 export interface GetLogStatsResponse {
