@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -88,12 +89,14 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		audioRatio = ratio_setting.GetAudioRatio(info.OriginModelName)
 		audioCompletionRatio = ratio_setting.GetAudioCompletionRatio(info.OriginModelName)
 		ratio := modelRatio * groupRatioInfo.GroupRatio
-		preConsumedQuota = int(float64(preConsumedTokens) * ratio)
+		// 与结算口径(service/text_quota.go 的 decimal.Round(0))一致：四舍五入而非截断
+		preConsumedQuota = int(math.Round(float64(preConsumedTokens) * ratio))
 	} else {
 		if meta.ImagePriceRatio != 0 {
 			modelPrice = modelPrice * meta.ImagePriceRatio
 		}
-		preConsumedQuota = int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
+		// 与结算口径(service/text_quota.go 的 decimal.Round(0))一致：四舍五入而非截断
+		preConsumedQuota = int(math.Round(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio))
 	}
 
 	// check if free model pre-consume is disabled
@@ -112,6 +115,16 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 				preConsumedQuota = 0
 				freeModel = true
 			}
+		}
+	}
+
+	// 预扣额度兜底：与结算口径(service/text_quota.go 中 quota==0 -> 1)对齐。
+	// 对计费率非零、但单次成本四舍五入后仍为 0 的付费模型(如按次价 < 0.5 额度),
+	// 兜底为 1，避免 preConsumedQuota=0 旁路按量门控(如 wisemodel 资源包预扣 PreConsumeWisemodelPkg)。
+	// 免费模型(价/倍率/分组倍率为 0)不受影响，仍按 0 预扣。
+	if !freeModel && preConsumedQuota <= 0 && groupRatioInfo.GroupRatio > 0 {
+		if (usePrice && modelPrice > 0) || (!usePrice && modelRatio > 0) {
+			preConsumedQuota = 1
 		}
 	}
 
