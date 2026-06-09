@@ -16,6 +16,7 @@ import (
 // the symmetric Alipay fields the frontend needs to render the Alipay button.
 func TestGetTopUpInfoIncludesAlipayFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	confirmPaymentComplianceForTest(t)
 
 	originalEnabled := setting.AlipayEnabled
 	originalMin := setting.AlipayMinTopUp
@@ -69,6 +70,7 @@ func TestGetTopUpInfoAlipayDisabled(t *testing.T) {
 // the symmetric WeChat Pay fields the frontend needs to render the wxpay button.
 func TestGetTopUpInfoIncludesWxpayFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	confirmPaymentComplianceForTest(t)
 
 	originalEnabled := setting.WxpayEnabled
 	originalMin := setting.WxpayMinTopUp

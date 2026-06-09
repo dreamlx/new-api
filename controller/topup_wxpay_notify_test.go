@@ -21,14 +21,15 @@ func seedWxpayPendingTopUp(t *testing.T, db *gorm.DB, tradeNo string, payAmountC
 	t.Helper()
 	user := seedWxpayUser(t, db)
 	topUp := &model.TopUp{
-		UserId:         user.Id,
-		Amount:         100,
-		Money:          1.0,
-		TradeNo:        tradeNo,
-		PaymentMethod:  PaymentMethodWxpay,
-		CreateTime:     1,
-		Status:         common.TopUpStatusPending,
-		PayAmountCents: payAmountCents,
+		UserId:          user.Id,
+		Amount:          100,
+		Money:           1.0,
+		TradeNo:         tradeNo,
+		PaymentMethod:   PaymentMethodWxpay,
+		PaymentProvider: model.PaymentProviderWxpay,
+		CreateTime:      1,
+		Status:          common.TopUpStatusPending,
+		PayAmountCents:  payAmountCents,
 	}
 	require.NoError(t, db.Create(topUp).Error)
 	return topUp

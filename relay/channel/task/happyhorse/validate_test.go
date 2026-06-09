@@ -462,7 +462,277 @@ func TestValidateMediaInvalidScheme(t *testing.T) {
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
 	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
 	require.NotNil(t, taskErr)
-	assert.Contains(t, taskErr.Message, "http or https")
+	assert.Contains(t, taskErr.Message, "image base64 data url")
+}
+
+// --- Base64 media validation tests ---
+
+func TestIsValidImageDataURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"jpeg", "data:image/jpeg;base64,/9j/4AAQ", true},
+		{"jpg", "data:image/jpg;base64,/9j/4AAQ", true},
+		{"png", "data:image/png;base64,iVBORw0KGgo", true},
+		{"webp", "data:image/webp;base64,UklGR", true},
+		{"no data prefix", "iVBORw0KGgo=", false},
+		{"video mime", "data:video/mp4;base64,AAAA", false},
+		{"text mime", "data:text/plain;base64,SGVsbG8=", false},
+		{"empty base64", "data:image/png;base64,", false},
+		{"no base64 marker", "data:image/png;hex,iVBORw0KGgo", false},
+		{"no semicolon", "data:image/pngbase64,iVBORw0KGgo", false},
+		{"unsupported subtype", "data:image/gif;base64,R0lGODlh", false},
+		{"missing subtype", "data:image/;base64,AAA", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isValidImageDataURL(tt.value))
+		})
+	}
+}
+
+func TestIsValidMediaValue(t *testing.T) {
+	assert.True(t, isValidMediaValue(MediaTypeFirstFrame, "https://example.com/img.png"))
+	assert.True(t, isValidMediaValue(MediaTypeFirstFrame, "data:image/png;base64,abc"))
+	assert.True(t, isValidMediaValue(MediaTypeReferenceImage, "https://example.com/ref.png"))
+	assert.True(t, isValidMediaValue(MediaTypeReferenceImage, "data:image/jpeg;base64,abc"))
+	assert.True(t, isValidMediaValue(MediaTypeVideo, "https://example.com/video.mp4"))
+	assert.False(t, isValidMediaValue(MediaTypeVideo, "data:video/mp4;base64,abc"))
+	assert.False(t, isValidMediaValue(MediaTypeVideo, "data:image/png;base64,abc"))
+	assert.False(t, isValidMediaValue(MediaTypeFirstFrame, "ftp://example.com/img.png"))
+}
+
+// Native I2V base64 first_frame passes
+func TestValidateNativeI2VBase64FirstFrame(t *testing.T) {
+	req := GenerateRequest{
+		Model: ModelI2V,
+		Input: Input{
+			Prompt: "test",
+			Media: []MediaItem{
+				{Type: MediaTypeFirstFrame, URL: "data:image/png;base64,iVBORw0KGgo"},
+			},
+		},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/happyhorse/api/generate")
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:   &relaycommon.ChannelMeta{},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+	}
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
+	assert.Nil(t, taskErr)
+}
+
+// Native R2V base64 reference_image passes
+func TestValidateNativeR2VBase64RefImage(t *testing.T) {
+	req := GenerateRequest{
+		Model: ModelR2V,
+		Input: Input{
+			Prompt: "test",
+			Media: []MediaItem{
+				{Type: MediaTypeReferenceImage, URL: "data:image/jpeg;base64,/9j/4AAQ"},
+			},
+		},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/happyhorse/api/generate")
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:   &relaycommon.ChannelMeta{},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+	}
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
+	assert.Nil(t, taskErr)
+}
+
+// Native Video Edit reference_image base64 passes
+func TestValidateNativeVideoEditBase64RefImage(t *testing.T) {
+	req := GenerateRequest{
+		Model: ModelVideoEdit,
+		Input: Input{
+			Prompt: "test",
+			Media: []MediaItem{
+				{Type: MediaTypeVideo, URL: "https://example.com/input.mp4"},
+				{Type: MediaTypeReferenceImage, URL: "data:image/png;base64,iVBORw0KGgo"},
+			},
+		},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/happyhorse/api/generate")
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:   &relaycommon.ChannelMeta{},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+	}
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
+	assert.Nil(t, taskErr)
+}
+
+// Native Video Edit video base64 returns 400
+func TestValidateNativeVideoEditVideoBase64(t *testing.T) {
+	req := GenerateRequest{
+		Model: ModelVideoEdit,
+		Input: Input{
+			Prompt: "test",
+			Media: []MediaItem{
+				{Type: MediaTypeVideo, URL: "data:video/mp4;base64,AAAA"},
+			},
+		},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/happyhorse/api/generate")
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, info)
+	require.NotNil(t, taskErr)
+	assert.Contains(t, taskErr.Message, "video media must use http or https url")
+}
+
+// V1 I2V image base64 passes
+func TestValidateV1I2VImageBase64(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelI2V,
+		Prompt: "test",
+		Image:  "data:image/png;base64,iVBORw0KGgo",
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	assert.Nil(t, taskErr)
+}
+
+func TestValidateV1I2VBase64ImageCopiedToImagesIsNotDuplicated(t *testing.T) {
+	dataURL := "data:image/png;base64,iVBORw0KGgo"
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelI2V,
+		Prompt: "test",
+		Image:  dataURL,
+		Images: []string{dataURL},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	assert.Nil(t, taskErr)
+}
+
+// V1 R2V images[] base64 passes
+func TestValidateV1R2VImagesBase64(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelR2V,
+		Prompt: "test",
+		Images: []string{"data:image/jpeg;base64,/9j/4AAQ"},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	assert.Nil(t, taskErr)
+}
+
+// V1 Video Edit reference_images[] base64 passes
+func TestValidateV1VideoEditRefImagesBase64(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelVideoEdit,
+		Prompt: "test",
+		Metadata: map[string]interface{}{
+			"video_url":        "https://example.com/input.mp4",
+			"reference_images": []interface{}{"data:image/png;base64,iVBORw0KGgo"},
+		},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	assert.Nil(t, taskErr)
+}
+
+// V1 non-image MIME returns 400
+func TestValidateV1NonImageMIME(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelI2V,
+		Prompt: "test",
+		Image:  "data:text/plain;base64,SGVsbG8=",
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	require.NotNil(t, taskErr)
+	assert.Contains(t, taskErr.Message, "image base64 data url")
+}
+
+// V1 empty base64 content returns 400
+func TestValidateV1EmptyBase64Content(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelI2V,
+		Prompt: "test",
+		Image:  "data:image/png;base64,",
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	require.NotNil(t, taskErr)
+	assert.Contains(t, taskErr.Message, "image base64 data url")
+}
+
+// V1 plain base64 (no data: prefix) returns 400
+func TestValidateV1PlainBase64NoPrefix(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelI2V,
+		Prompt: "test",
+		Image:  "iVBORw0KGgo=",
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	require.NotNil(t, taskErr)
+	assert.Contains(t, taskErr.Message, "image base64 data url")
 }
 
 // T2V/R2V accept 4:3 and 3:4 ratios
@@ -656,7 +926,7 @@ func TestValidateV1MediaInvalidScheme(t *testing.T) {
 
 	taskErr := validateHappyHorseTaskRequest(c)
 	require.NotNil(t, taskErr)
-	assert.Contains(t, taskErr.Message, "http or https")
+	assert.Contains(t, taskErr.Message, "image base64 data url")
 }
 
 // V1 I2V with multiple images → 400 (exactly 1 first_frame required)
@@ -680,6 +950,44 @@ func TestValidateV1I2VMultipleImages(t *testing.T) {
 }
 
 // V1 Video Edit with >5 reference_images → 400
+func TestValidateV1I2VImageCopiedToImagesIsNotDuplicated(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelI2V,
+		Prompt: "test",
+		Image:  "https://example.com/a.png",
+		Images: []string{"https://example.com/a.png"},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	assert.Nil(t, taskErr)
+}
+
+func TestValidateV1R2VImageCopiedToImagesIsNotDuplicated(t *testing.T) {
+	req := relaycommon.TaskSubmitReq{
+		Model:  ModelR2V,
+		Prompt: "test",
+		Image:  "https://example.com/a.png",
+		Images: []string{"https://example.com/a.png"},
+	}
+	body, err := common.Marshal(req)
+	require.NoError(t, err)
+
+	c := setupGinContext(body, "/v1/video/generations")
+	var parsed relaycommon.TaskSubmitReq
+	require.NoError(t, common.UnmarshalBodyReusable(c, &parsed))
+	c.Set("task_request", parsed)
+
+	taskErr := validateHappyHorseTaskRequest(c)
+	assert.Nil(t, taskErr)
+}
+
 func TestValidateV1VideoEditTooManyRefs(t *testing.T) {
 	refs := make([]interface{}, 6)
 	for i := range refs {

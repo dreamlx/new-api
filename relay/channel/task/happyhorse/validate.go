@@ -86,15 +86,19 @@ func validateHappyHorseTaskRequest(c *gin.Context) *dto.TaskError {
 		return service.TaskErrorWrapperLocal(mediaErr, "invalid_request", http.StatusBadRequest)
 	}
 
-	// Validate media URLs
+	// Validate media values
 	for _, m := range media {
 		if m.URL == "" {
 			return service.TaskErrorWrapperLocal(
 				fmt.Errorf("media item url is required"), "invalid_request", http.StatusBadRequest)
 		}
-		if !isValidMediaURL(m.URL) {
+		if !isValidMediaValue(m.Type, m.URL) {
+			msg := "image media must use http/https url or image base64 data url"
+			if m.Type == MediaTypeVideo {
+				msg = "video media must use http or https url"
+			}
 			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("media url must use http or https scheme"), "invalid_request", http.StatusBadRequest)
+				fmt.Errorf("%s", msg), "invalid_request", http.StatusBadRequest)
 		}
 	}
 
@@ -125,16 +129,25 @@ func v1ToMediaItems(req relaycommon.TaskSubmitReq) ([]MediaItem, error) {
 
 	case ModelI2V:
 		var items []MediaItem
+		seen := map[string]bool{}
 		if req.Image != "" {
 			items = append(items, MediaItem{Type: MediaTypeFirstFrame, URL: req.Image})
+			seen[req.Image] = true
 		}
 		for _, url := range req.Images {
 			if url == "" {
 				return nil, fmt.Errorf("images contains empty url")
 			}
+			if seen[url] {
+				continue
+			}
 			items = append(items, MediaItem{Type: MediaTypeFirstFrame, URL: url})
+			seen[url] = true
 		}
 		if req.InputReference != "" {
+			if seen[req.InputReference] {
+				return items, nil
+			}
 			items = append(items, MediaItem{Type: MediaTypeFirstFrame, URL: req.InputReference})
 		}
 		return items, nil
@@ -145,16 +158,28 @@ func v1ToMediaItems(req relaycommon.TaskSubmitReq) ([]MediaItem, error) {
 			return parseMediaFromMetadata(raw)
 		}
 		var items []MediaItem
+		seen := map[string]bool{}
 		for _, url := range req.Images {
 			if url == "" {
 				return nil, fmt.Errorf("images contains empty url")
 			}
+			if seen[url] {
+				continue
+			}
 			items = append(items, MediaItem{Type: MediaTypeReferenceImage, URL: url})
+			seen[url] = true
 		}
 		if req.Image != "" {
+			if seen[req.Image] {
+				return items, nil
+			}
 			items = append(items, MediaItem{Type: MediaTypeReferenceImage, URL: req.Image})
+			seen[req.Image] = true
 		}
 		if req.InputReference != "" {
+			if seen[req.InputReference] {
+				return items, nil
+			}
 			items = append(items, MediaItem{Type: MediaTypeReferenceImage, URL: req.InputReference})
 		}
 		return items, nil
@@ -231,15 +256,19 @@ func validateNativeRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.Tas
 		}
 	}
 
-	// Validate media: URL non-empty and http/https scheme
+	// Validate media values
 	for _, m := range req.Input.Media {
 		if m.URL == "" {
 			return service.TaskErrorWrapperLocal(
 				fmt.Errorf("media item url is required"), "invalid_request", http.StatusBadRequest)
 		}
-		if !isValidMediaURL(m.URL) {
+		if !isValidMediaValue(m.Type, m.URL) {
+			msg := "image media must use http/https url or image base64 data url"
+			if m.Type == MediaTypeVideo {
+				msg = "video media must use http or https url"
+			}
 			return service.TaskErrorWrapperLocal(
-				fmt.Errorf("media url must use http or https scheme"), "invalid_request", http.StatusBadRequest)
+				fmt.Errorf("%s", msg), "invalid_request", http.StatusBadRequest)
 		}
 	}
 
@@ -332,8 +361,46 @@ func countMediaType(media []MediaItem, typ string) int {
 	return n
 }
 
-func isValidMediaURL(url string) bool {
+func isHTTPURL(url string) bool {
 	return strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")
+}
+
+// isValidMediaValue checks whether a media value is valid for the given media type.
+// Image types (first_frame, reference_image) accept HTTP/HTTPS URLs or image base64 data URLs.
+// Video type only accepts HTTP/HTTPS URLs.
+func isValidMediaValue(mediaType, value string) bool {
+	if isHTTPURL(value) {
+		return true
+	}
+	switch mediaType {
+	case MediaTypeFirstFrame, MediaTypeReferenceImage:
+		return isValidImageDataURL(value)
+	default:
+		return false
+	}
+}
+
+// isValidImageDataURL validates data:image/{jpeg|jpg|png|webp};base64,{non-empty}
+func isValidImageDataURL(value string) bool {
+	if !strings.HasPrefix(value, "data:image/") {
+		return false
+	}
+	rest := value[len("data:image/"):]
+	semiIdx := strings.Index(rest, ";")
+	if semiIdx <= 0 {
+		return false
+	}
+	subtype := rest[:semiIdx]
+	switch subtype {
+	case "jpeg", "jpg", "png", "webp":
+	default:
+		return false
+	}
+	rest = rest[semiIdx+1:]
+	if !strings.HasPrefix(rest, "base64,") {
+		return false
+	}
+	return len(rest) > len("base64,")
 }
 
 // isDurationExplicit checks whether the original request JSON contained a "duration" key.

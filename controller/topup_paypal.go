@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,6 +24,8 @@ const PaymentMethodPayPal = "paypal"
 
 var payPalCaptureOrder = service.CapturePayPalOrder
 var payPalGetOrder = service.GetPayPalOrder
+var payPalCreateOrder = service.CreatePayPalOrder
+var payPalVerifyWebhookSignature = service.VerifyPayPalWebhookSignature
 
 type payPalCaptureInfo struct {
 	CaptureID      string
@@ -53,6 +56,12 @@ func RequestPayPalTopUp(c *gin.Context) {
 		return
 	}
 
+	minTopup := getMinTopupForPayment(PaymentMethodPayPal)
+	if req.Amount < minTopup {
+		common.ApiErrorMsg(c, fmt.Sprintf("充值数量不能小于 %d", minTopup))
+		return
+	}
+
 	userId := c.GetInt("id")
 	user, err := model.GetUserById(userId, false)
 	if err != nil {
@@ -80,7 +89,7 @@ func RequestPayPalTopUp(c *gin.Context) {
 	cancelUrl := system_setting.ServerAddress + "/console/topup"
 	log.Printf("PayPal 创建订单开始: user_id=%d trade_no=%s amount=%d money=%s currency=USD return_url=%s cancel_url=%s\n", userId, referenceId, req.Amount, moneyStr, returnUrl, cancelUrl)
 
-	payLink, err := service.CreatePayPalOrder(referenceId, moneyStr, "USD", returnUrl, cancelUrl)
+	payLink, err := payPalCreateOrder(referenceId, moneyStr, "USD", returnUrl, cancelUrl)
 	if err != nil {
 		log.Printf("创建 PayPal 订单失败: user_id=%d trade_no=%s err=%v\n", userId, referenceId, err)
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": fmt.Sprintf("创建 PayPal 订单失败: %v", err)})
@@ -90,13 +99,14 @@ func RequestPayPalTopUp(c *gin.Context) {
 
 	// 创建本地充值记录
 	order := &model.TopUp{
-		UserId:        userId,
-		Amount:        req.Amount,
-		Money:         money,
-		TradeNo:       referenceId,
-		PaymentMethod: PaymentMethodPayPal,
-		CreateTime:    time.Now().Unix(),
-		Status:        common.TopUpStatusPending,
+		UserId:          userId,
+		Amount:          req.Amount,
+		Money:           money,
+		TradeNo:         referenceId,
+		PaymentMethod:   PaymentMethodPayPal,
+		PaymentProvider: model.PaymentProviderPayPal,
+		CreateTime:      time.Now().Unix(),
+		Status:          common.TopUpStatusPending,
 	}
 	if err := order.Insert(); err != nil {
 		log.Printf("创建 PayPal 本地充值订单失败: user_id=%d trade_no=%s err=%v\n", userId, referenceId, err)
@@ -122,10 +132,14 @@ func PayPalWebhook(c *gin.Context) {
 	}
 
 	eventID := c.GetHeader("Paypal-Transmission-Id")
-	// signature verification TODO: use PayPal verify-webhook-signature endpoint
-	_ = c.GetHeader("Paypal-Transmission-Time")
-	_ = c.GetHeader("Paypal-Cert-Url")
-	_ = c.GetHeader("Paypal-Transmission-Sig")
+	transmissionTime := c.GetHeader("Paypal-Transmission-Time")
+	certURL := c.GetHeader("Paypal-Cert-Url")
+	signature := c.GetHeader("Paypal-Transmission-Sig")
+	if !payPalVerifyWebhookSignature(eventID, transmissionTime, certURL, payload, signature) {
+		log.Printf("PayPal webhook 签名验证失败: event_id=%s payload_size=%d\n", eventID, len(payload))
+		c.AbortWithStatus(http.StatusUnauthorized)
+		return
+	}
 
 	eventType, err := extractPayPalEventType(payload)
 	if err != nil {
@@ -311,6 +325,10 @@ func completePayPalOrder(referenceID string, amount float64, currency string, ev
 	defer UnlockOrder(referenceID)
 	log.Printf("PayPal 本地订单完成开始: trade_no=%s event=%s amount=%.2f currency=%s\n", referenceID, event, amount, currency)
 
+	if err := validatePayPalPaymentAmount(referenceID, amount, currency); err != nil {
+		return err
+	}
+
 	payloadStr := common.GetJsonString(map[string]interface{}{
 		"amount":   amount,
 		"currency": currency,
@@ -318,7 +336,7 @@ func completePayPalOrder(referenceID string, amount float64, currency string, ev
 	})
 
 	// 尝试完成订阅订单（如果存在）
-	if err := model.CompleteSubscriptionOrder(referenceID, payloadStr); err == nil {
+	if err := model.CompleteSubscriptionOrder(referenceID, payloadStr, model.PaymentProviderPayPal, ""); err == nil {
 		log.Printf("PayPal 订阅订单完成成功: trade_no=%s event=%s\n", referenceID, event)
 		return nil
 	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
@@ -343,12 +361,43 @@ func completePayPalOrder(referenceID string, amount float64, currency string, ev
 		return err
 	}
 
-	if err := model.Recharge(referenceID, ""); err != nil {
+	if err := model.RechargePayPal(referenceID, ""); err != nil {
 		log.Println("充值失败:", err.Error(), referenceID)
 		return err
 	}
 
 	log.Printf("PayPal 支付成功，本地充值完成: trade_no=%s topup_id=%d user_id=%d amount=%.2f currency=%s event=%s\n", referenceID, topUp.Id, topUp.UserId, amount, currency, event)
+	return nil
+}
+
+func validatePayPalPaymentAmount(referenceID string, amount float64, currency string) error {
+	if !strings.EqualFold(currency, "USD") {
+		return fmt.Errorf("PayPal 币种不匹配: trade_no=%s currency=%s", referenceID, currency)
+	}
+
+	if order := model.GetSubscriptionOrderByTradeNo(referenceID); order != nil {
+		if order.PaymentProvider != model.PaymentProviderPayPal {
+			return model.ErrPaymentMethodMismatch
+		}
+		return comparePayPalAmount(referenceID, order.Money, amount)
+	}
+
+	topUp := model.GetTopUpByTradeNo(referenceID)
+	if topUp == nil {
+		return fmt.Errorf("PayPal 订单不存在: %s", referenceID)
+	}
+	if topUp.PaymentProvider != model.PaymentProviderPayPal {
+		return model.ErrPaymentMethodMismatch
+	}
+	return comparePayPalAmount(referenceID, topUp.Money, amount)
+}
+
+func comparePayPalAmount(referenceID string, expected float64, actual float64) error {
+	expectedCents := int64(math.Round(expected * 100))
+	actualCents := int64(math.Round(actual * 100))
+	if expectedCents != actualCents {
+		return fmt.Errorf("PayPal 金额不匹配: trade_no=%s expected_cents=%d actual_cents=%d", referenceID, expectedCents, actualCents)
+	}
 	return nil
 }
 

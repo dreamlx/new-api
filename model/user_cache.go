@@ -58,6 +58,7 @@ func invalidateUserCache(userId int) error {
 }
 
 // InvalidateUserCache clears the user's Redis cache, forcing the next read to fetch fresh DB data.
+// 供 controller 等上层包在用户状态变更（如禁用、删除、角色变更）后主动清理缓存。
 func InvalidateUserCache(userId int) error {
 	return invalidateUserCache(userId)
 }
