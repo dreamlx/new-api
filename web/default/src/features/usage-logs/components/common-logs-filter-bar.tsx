@@ -24,6 +24,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useIsAdmin } from '@/hooks/use-admin'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -90,6 +91,9 @@ export function CommonLogsFilterBar<TData>(
     if (searchParams.requestId) next.requestId = searchParams.requestId
     if (searchParams.upstreamRequestId)
       next.upstreamRequestId = searchParams.upstreamRequestId
+    if (searchParams.isWisemodel) next.isWisemodel = searchParams.isWisemodel
+    if (searchParams.wisemodelPackageId)
+      next.wisemodelPackageId = searchParams.wisemodelPackageId
 
     if (Object.keys(next).length > 0) {
       setFilters((prev) => ({ ...prev, ...next }))
@@ -109,11 +113,16 @@ export function CommonLogsFilterBar<TData>(
     searchParams.username,
     searchParams.requestId,
     searchParams.upstreamRequestId,
+    searchParams.isWisemodel,
+    searchParams.wisemodelPackageId,
     searchParams.type,
   ])
 
   const handleChange = useCallback(
-    (field: keyof CommonLogFilters, value: Date | string | undefined) => {
+    (
+      field: keyof CommonLogFilters,
+      value: Date | string | boolean | undefined
+    ) => {
       setFilters((prev) => ({ ...prev, [field]: value }))
     },
     []
@@ -165,7 +174,9 @@ export function CommonLogsFilterBar<TData>(
     !!filters.username ||
     !!filters.channel ||
     !!filters.requestId ||
-    !!filters.upstreamRequestId
+    !!filters.upstreamRequestId ||
+    !!filters.isWisemodel ||
+    !!filters.wisemodelPackageId
 
   const hasAdditionalFilters =
     !!filters.model || !!filters.group || !!logType || hasExpandedFilters
@@ -287,6 +298,34 @@ export function CommonLogsFilterBar<TData>(
               className={inputClass}
             />
           )}
+          {isAdmin && (
+            <div className='flex items-center gap-2'>
+              <Checkbox
+                id='wisemodel-filter'
+                checked={filters.isWisemodel ?? false}
+                onCheckedChange={(checked) =>
+                  handleChange('isWisemodel', checked === true)
+                }
+              />
+              <label
+                htmlFor='wisemodel-filter'
+                className='text-muted-foreground cursor-pointer text-sm leading-none'
+              >
+                {t('only_users', { ns: 'wisemodel' })}
+              </label>
+            </div>
+          )}
+          {isAdmin && (
+            <Input
+              placeholder={t('package_id_placeholder', { ns: 'wisemodel' })}
+              value={filters.wisemodelPackageId || ''}
+              onChange={(e) =>
+                handleChange('wisemodelPackageId', e.target.value)
+              }
+              onKeyDown={handleKeyDown}
+              className={inputClass}
+            />
+          )}
           <Input
             placeholder={t('Request ID')}
             value={filters.requestId || ''}
@@ -297,9 +336,7 @@ export function CommonLogsFilterBar<TData>(
           <Input
             placeholder={t('Upstream Request ID')}
             value={filters.upstreamRequestId || ''}
-            onChange={(e) =>
-              handleChange('upstreamRequestId', e.target.value)
-            }
+            onChange={(e) => handleChange('upstreamRequestId', e.target.value)}
             onKeyDown={handleKeyDown}
             className={inputClass}
           />

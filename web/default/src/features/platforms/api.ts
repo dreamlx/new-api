@@ -59,7 +59,9 @@ export async function updatePlatform(
  */
 export async function deletePlatform(
   id: number
-): Promise<ApiEnvelope<{ id: number; platform_id: string; tokens_disabled: number }>> {
+): Promise<
+  ApiEnvelope<{ id: number; platform_id: string; tokens_disabled: number }>
+> {
   const res = await api.delete(`${BASE}/${id}`)
   return res.data
 }

@@ -28,6 +28,12 @@ import type {
   AmountResponse,
   PaymentResponse,
   StripePaymentResponse,
+  PayPalPaymentRequest,
+  PayPalPaymentResponse,
+  AlipayPaymentRequest,
+  AlipayPaymentResponse,
+  WxpayPaymentRequest,
+  WxpayPaymentResponse,
   AffiliateCodeResponse,
   AffiliateTransferResponse,
   BillingHistoryResponse,
@@ -115,6 +121,42 @@ export async function requestStripePayment(
   request: PaymentRequest
 ): Promise<StripePaymentResponse> {
   const res = await api.post('/api/user/stripe/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Request PayPal payment
+ */
+export async function requestPayPalPayment(
+  request: PayPalPaymentRequest
+): Promise<PayPalPaymentResponse> {
+  const res = await api.post('/api/user/paypal/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Request Alipay (direct) payment
+ */
+export async function requestAlipayPayment(
+  request: AlipayPaymentRequest
+): Promise<AlipayPaymentResponse> {
+  const res = await api.post('/api/user/alipay/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Request Wxpay (direct) payment
+ */
+export async function requestWxpayPayment(
+  request: WxpayPaymentRequest
+): Promise<WxpayPaymentResponse> {
+  const res = await api.post('/api/user/wxpay/pay', request, {
     skipBusinessError: true,
   } as Record<string, unknown>)
   return res.data

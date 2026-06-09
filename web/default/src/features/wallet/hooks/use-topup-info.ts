@@ -190,6 +190,13 @@ export function useTopupInfo() {
         waffo_pay_methods: parseWaffoPayMethods(
           response.data.waffo_pay_methods
         ),
+        // Ensure dedicated gateway enable flags are surfaced as booleans
+        enable_paypal_topup: response.data.enable_paypal_topup === true,
+        enable_alipay_topup: response.data.enable_alipay_topup === true,
+        enable_wxpay_topup: response.data.enable_wxpay_topup === true,
+        paypal_min_topup: response.data.paypal_min_topup,
+        alipay_min_topup: response.data.alipay_min_topup,
+        wxpay_min_topup: response.data.wxpay_min_topup,
       }
 
       setTopupInfo(processedData)
