@@ -331,6 +331,71 @@ func TestPrepareWisemodelPackageForPreConsume_ReturnsErrorWhenNoPackageCanCoverR
 	require.Equal(t, "", c.GetString("wisemodel_package_id"))
 }
 
+// TestPrepareWisemodelPackageForPreConsume_RollsOverWhenFirstPackageOverBudget
+// reproduces the production scenario (user 164): two same-model packages where the
+// earliest-expiring one is massively over budget. With a floored estimate (>=1),
+// billing must SKIP the over-budget package and roll over to the fresh sibling.
+func TestPrepareWisemodelPackageForPreConsume_RollsOverWhenFirstPackageOverBudget(t *testing.T) {
+	setupWisemodelQuotaTest(t)
+
+	userID := 164
+	base := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+	// Two glm-5.1-count packages; the first is created earlier so it sorts first.
+	// Trailing comma in available_models mirrors the real stored value.
+	seedPackageForUser(t, userID, "pkg-glm-258", 1400, "glm-5.1-count,", base)
+	seedPackageForUser(t, userID, "pkg-glm-264", 1400, "glm-5.1-count,", base.Add(72*time.Hour))
+
+	// First package is 6.4x over its 1400 cap (8948 consumed), correctly tagged.
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		UserId:             userID,
+		Type:               model.LogTypeConsume,
+		Quota:              8948,
+		WisemodelPackageId: "pkg-glm-258",
+		CreatedAt:          time.Now().Unix(),
+	}).Error)
+
+	c := newQuotaTestCtx("")
+	c.Set("id", userID)
+	c.Set("token_name", "wisemodel-token")
+
+	// estimatedQuota=1 is what the price.go floor now guarantees (instead of 0).
+	err := PrepareWisemodelPackageForPreConsume(c, "glm-5.1-count", 1)
+	require.NoError(t, err)
+	require.Equal(t, "pkg-glm-264", c.GetString("wisemodel_package_id"),
+		"over-budget package must be skipped; billing must roll over to the fresh sibling")
+}
+
+// TestPrepareWisemodelPackageForPreConsume_ZeroEstimatePinsOverBudgetPackage documents
+// the pre-fix bug: a zero estimate makes buildWisemodelPackageCandidates skip the budget
+// filter, so the over-budget package is (wrongly) selected. The price.go floor prevents
+// this by ensuring the estimate is never 0 for a paid model.
+func TestPrepareWisemodelPackageForPreConsume_ZeroEstimatePinsOverBudgetPackage(t *testing.T) {
+	setupWisemodelQuotaTest(t)
+
+	userID := 164
+	base := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+	seedPackageForUser(t, userID, "pkg-glm-258", 1400, "glm-5.1-count,", base)
+	seedPackageForUser(t, userID, "pkg-glm-264", 1400, "glm-5.1-count,", base.Add(72*time.Hour))
+
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		UserId:             userID,
+		Type:               model.LogTypeConsume,
+		Quota:              8948,
+		WisemodelPackageId: "pkg-glm-258",
+		CreatedAt:          time.Now().Unix(),
+	}).Error)
+
+	c := newQuotaTestCtx("")
+	c.Set("id", userID)
+	c.Set("token_name", "wisemodel-token")
+
+	// estimatedQuota=0 is the unfloored value that triggered the production bug.
+	err := PrepareWisemodelPackageForPreConsume(c, "glm-5.1-count", 0)
+	require.NoError(t, err)
+	require.Equal(t, "pkg-glm-258", c.GetString("wisemodel_package_id"),
+		"pre-fix behavior: zero estimate pins the over-budget package (no rollover)")
+}
+
 func TestPreConsumeWisemodelPkg_FallsBackToNextCandidateWhenRedisBalanceDrifted(t *testing.T) {
 	mr := setupWisemodelQuotaTest(t)
 
