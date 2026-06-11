@@ -387,13 +387,6 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
-	// Volcano-compatible API format (Seedance and other Volcano-compatible channels)
-	if strings.HasPrefix(c.Request.URL.Path, "/api/v3/contents/generations/tasks") {
-		// Return the raw upstream response (ResponseTask format)
-		respBody = originTask.Data
-		return
-	}
-
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
