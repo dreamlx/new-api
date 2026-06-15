@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -99,6 +98,7 @@ func CreateOrder(c *gin.Context) {
 			OriginalPoints:    originalPoints,
 			OriginalTokens:    originalTokens,
 			QuotaGranted:      quota,
+			RemainQuota:       quota,
 			AvailableModels:   availableModels,
 			Amount:            pkg.Amount,
 			IsFree:            pkg.IsFree,
@@ -118,9 +118,6 @@ func CreateOrder(c *gin.Context) {
 		}
 
 		_ = model.InvalidateUserCache(user.Id)
-		if quota > 0 && common.RDB != nil {
-			_ = common.RDB.Set(context.Background(), "wm:pkg:remain:"+wisemodelPkg.PackageId, wisemodelPkg.QuotaGranted, 0).Err()
-		}
 
 		content := fmt.Sprintf("Wisemodel资源包充值: %s", pkg.Id)
 		if pkg.Amount > 0 {

@@ -313,6 +313,12 @@ func TestCreateOrder(t *testing.T) {
 		// Verify quota added: 2000000 points = 2000000 quota
 		user := model.GetUserByPhone("13800000050")
 		assert.Equal(t, 2000000, user.Quota)
+
+		// remain_quota must be initialized to the granted amount (single ledger).
+		var pkg model.WisemodelPackage
+		require.NoError(t, model.DB.Where("original_package_id = ?", "PKG_PTS_001").First(&pkg).Error)
+		assert.Equal(t, pkg.QuotaGranted, pkg.RemainQuota)
+		assert.Equal(t, int64(2000000), pkg.RemainQuota)
 	})
 
 	t.Run("Tokens模式充值成功", func(t *testing.T) {

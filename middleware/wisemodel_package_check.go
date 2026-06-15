@@ -11,13 +11,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// WisemodelPackageCheck 检查 wisemodel token 是否有有效资源包。
-// DB 故障 → fail-closed (503)；无有效包/配额耗尽 → 403。
+// WisemodelPackageCheck 是 wisemodel token 的存在性粗检：
+//   - 是否 wisemodel token；
+//   - 是否存在 active 资源包；
+//   - 请求模型是否被某个 active 包覆盖。
+//
+// 它**不读取/比较任何额度数字、不选包、不设 wisemodel_package_id**——
+// 额度门控与选包由 relay 预扣钩子(service.PrepareWisemodelPackageForPreConsume +
+// PreConsumeWisemodelPkg 的原子扣减)单点负责，从而消除"双层账本背离"。
+// DB 故障 → fail-closed(503)；无 active 包/模型不支持 → 403。
 func WisemodelPackageCheck() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenName, _ := c.Get("token_name")
 		tokenKey, _ := c.Get("token_key")
-
 		name, _ := tokenName.(string)
 		key, _ := tokenKey.(string)
 
@@ -69,29 +75,9 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 			))
 		}
 
-		// 归因计算使用全部包，并将 packages 原地按 FIFO 顺序排序（ValidUntil ASC, CreatedAt ASC）。
-		// 必须在 FilterPackagesByModel 之前调用，确保 eligiblePackages 继承相同的 FIFO 顺序，
-		// 从而让 SelectPackageWithRemainingQuota 优先选择最早到期（配额最充裕）的包。
-		attribution, err := model.CalculatePackageAttribution(userId, packages)
-		if err != nil {
-			logger.LogError(c, fmt.Sprintf("WisemodelPackageCheck: attribution failed for user %d: %s", userId, err.Error()))
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"error": gin.H{
-					"message": "服务暂时不可用，请稍后重试",
-					"type":    "server_error",
-					"code":    "wisemodel_attribution_error",
-				},
-			})
-			return
-		}
-
-		// 按请求模型过滤出可承载该请求的资源包子集（在 FIFO 排序后过滤，保留顺序）。
-		// 通用包（AvailableModels 为空）可承载任意模型；
-		// 专用包仅在请求模型出现在其列表中时才纳入候选。
-		eligiblePackages := packages // 默认全部可用（解析失败或无模型名时不限制）
+		// 请求模型必须被某个 active 包覆盖（通用包 AvailableModels 为空，承载任意模型）。
 		if modelReq.Model != "" {
-			eligiblePackages = model.FilterPackagesByModel(packages, modelReq.Model)
-			if len(eligiblePackages) == 0 {
+			if len(model.FilterPackagesByModel(packages, modelReq.Model)) == 0 {
 				logger.LogWarn(c, fmt.Sprintf(
 					"WisemodelPackageCheck: user %d requested model '%s' not covered by any active package",
 					userId, modelReq.Model,
@@ -106,19 +92,8 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 				return
 			}
 		}
-		selected := model.SelectPackageWithRemainingQuota(eligiblePackages, attribution)
-		if selected == nil {
-			logger.LogWarn(c, fmt.Sprintf("WisemodelPackageCheck: user %d has no remaining quota in any eligible package", userId))
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": gin.H{
-					"message": "Wisemodel 资源包配额已耗尽，请购买新的资源包",
-					"type":    "insufficient_quota",
-					"code":    "wisemodel_quota_exhausted",
-				},
-			})
-			return
-		}
-		c.Set("wisemodel_package_id", selected.PackageId)
+
+		// 存在性粗检通过；额度门控与选包交由 relay 预扣钩子单点处理。
 		c.Next()
 	}
 }

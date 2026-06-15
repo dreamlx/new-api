@@ -1,51 +1,31 @@
 package service
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis/v8"
 )
 
-const wisemodelPkgRemainKeyPrefix = "wm:pkg:remain:"
 const wisemodelPkgCandidatesContextKey = "wisemodel_package_candidates"
 
-func buildWisemodelPackageCandidates(packages []*model.WisemodelPackage, attribution map[string]int64, requiredQuota int64) []string {
-	candidates := make([]string, 0, len(packages))
-	for _, pkg := range packages {
-		if requiredQuota > 0 && pkg.QuotaGranted-attribution[pkg.PackageId] < requiredQuota {
-			continue
-		}
-		candidates = append(candidates, pkg.PackageId)
+// isWisemodelToken reports whether the request is authenticated with a wisemodel token.
+func isWisemodelToken(c *gin.Context) bool {
+	if c.GetString("token_name") == "wisemodel-token" {
+		return true
 	}
-	return candidates
+	return strings.HasPrefix(c.GetString("token_key"), "wisemodel-")
 }
 
-func initWisemodelPkgRemainKey(ctx context.Context, pkgID string) error {
-	key := wisemodelPkgRemainKeyPrefix + pkgID
-	if _, err := common.RDB.Get(ctx, key).Result(); errors.Is(err, redis.Nil) {
-		remain, initErr := model.ComputeWisemodelPackageRemain(pkgID)
-		if initErr != nil {
-			common.SysError(fmt.Sprintf("PreConsumeWisemodelPkg: init failed for pkg %s: %v", pkgID, initErr))
-			return initErr
-		}
-		common.RDB.SetNX(ctx, key, remain, 0)
-	}
-	return nil
-}
-
+// PrepareWisemodelPackageForPreConsume 选出可承载该请求的 active 资源包候选(按到期 FIFO 序),
+// 存入 context 供 PreConsumeWisemodelPkg 原子扣减。本步骤不读取/比较任何额度数字——
+// 额度门控由 PreConsumeWisemodelPkg 的原子扣减唯一负责,避免双层判定背离。
 func PrepareWisemodelPackageForPreConsume(c *gin.Context, requestedModel string, estimatedQuota int) error {
-	tokenName := c.GetString("token_name")
-	tokenKey := c.GetString("token_key")
-	if tokenName != "wisemodel-token" && !strings.HasPrefix(tokenKey, "wisemodel-") {
+	if !isWisemodelToken(c) {
 		return nil
 	}
-
 	userID := c.GetInt("id")
 	if userID == 0 {
 		return nil
@@ -60,98 +40,102 @@ func PrepareWisemodelPackageForPreConsume(c *gin.Context, requestedModel string,
 		return fmt.Errorf("wisemodel package quota exhausted")
 	}
 
-	attribution, err := model.CalculatePackageAttribution(userID, packages)
-	if err != nil {
-		return err
-	}
+	// 按到期先后排序(ValidUntil ASC, nil 永久包最后),优先消耗最早到期的包。
+	model.SortPackagesByValidUntil(packages)
 
-	eligiblePackages := packages
+	eligible := packages
 	if requestedModel != "" {
-		eligiblePackages = model.FilterPackagesByModel(packages, requestedModel)
-		if len(eligiblePackages) == 0 {
+		eligible = model.FilterPackagesByModel(packages, requestedModel)
+		if len(eligible) == 0 {
 			c.Set(wisemodelPkgCandidatesContextKey, []string{})
 			c.Set("wisemodel_package_id", "")
 			return fmt.Errorf("wisemodel package does not support model %s", requestedModel)
 		}
 	}
 
-	candidates := buildWisemodelPackageCandidates(eligiblePackages, attribution, int64(estimatedQuota))
-	c.Set(wisemodelPkgCandidatesContextKey, candidates)
-	if len(candidates) == 0 {
-		c.Set("wisemodel_package_id", "")
-		return fmt.Errorf("wisemodel package quota exhausted")
+	candidates := make([]string, len(eligible))
+	for i, pkg := range eligible {
+		candidates[i] = pkg.PackageId
 	}
-
+	c.Set(wisemodelPkgCandidatesContextKey, candidates)
 	c.Set("wisemodel_package_id", candidates[0])
 	return nil
 }
 
-// PreConsumeWisemodelPkg 在上游调用前原子预扣资源包配额。
-// 仅在 context 有 wisemodel_package_id 时生效；Redis 故障 fail-open。
-// 成功时将预扣量写入 context key "wisemodel_pre_consumed_quota"。
+// PreConsumeWisemodelPkg 在 active 候选包中按 FIFO 序原子预扣 estimatedQuota。
+// 首个扣减成功的包被选中并记入 context;全部不足则报耗尽。DB 故障 fail-closed
+// (权威账本不可用时拒绝,避免旁路门控)。
+// estimatedQuota <= 0(按次/免费模型,单次成本四舍五入为 0)时不预扣,保留 Prepare 选中的
+// 首个候选,由结算按实际量扣减,杜绝按量门控被旁路。
 func PreConsumeWisemodelPkg(c *gin.Context, estimatedQuota int) error {
-	pkgId := c.GetString("wisemodel_package_id")
-	if pkgId == "" || estimatedQuota <= 0 {
-		return nil
-	}
-	if !common.RedisEnabled {
+	if !isWisemodelToken(c) {
 		return nil
 	}
 
-	ctx := context.Background()
-	candidates := []string{pkgId}
-	if rawCandidates, ok := c.Get(wisemodelPkgCandidatesContextKey); ok {
-		if ids, ok := rawCandidates.([]string); ok && len(ids) > 0 {
-			candidates = ids
-		}
+	ids := wisemodelCandidates(c)
+	if len(ids) == 0 {
+		return nil
 	}
 
-	for _, candidateID := range candidates {
-		if candidateID == "" {
+	if estimatedQuota <= 0 {
+		c.Set("wisemodel_package_id", ids[0])
+		c.Set("wisemodel_pre_consumed_quota", 0)
+		return nil
+	}
+
+	for _, pkgId := range ids {
+		if pkgId == "" {
 			continue
 		}
-
-		if err := initWisemodelPkgRemainKey(ctx, candidateID); err != nil {
-			return nil // Redis/DB 初始化异常 → fail-open
-		}
-
-		key := wisemodelPkgRemainKeyPrefix + candidateID
-		newVal, err := common.RDB.DecrBy(ctx, key, int64(estimatedQuota)).Result()
+		ok, err := model.TryDeductPackageRemain(pkgId, int64(estimatedQuota))
 		if err != nil {
-			common.SysError(fmt.Sprintf("PreConsumeWisemodelPkg: Redis DecrBy error for pkg %s: %v", candidateID, err))
-			return nil // Redis 故障 → fail-open
+			return err
 		}
-		if newVal < 0 {
-			common.RDB.IncrBy(ctx, key, int64(estimatedQuota)) // 回滚预扣
+		if !ok {
 			continue
 		}
-
-		c.Set("wisemodel_package_id", candidateID)
+		c.Set("wisemodel_package_id", pkgId)
 		c.Set("wisemodel_pre_consumed_quota", estimatedQuota)
 		return nil
 	}
-
 	return fmt.Errorf("wisemodel package quota exhausted")
 }
 
-// SettleWisemodelPkg 结算实际用量与预扣量的差额。
-// actualQuota=0 表示上游失败，全额退还预扣。
-func SettleWisemodelPkg(c *gin.Context, actualQuota int) {
-	pkgId := c.GetString("wisemodel_package_id")
-	preConsumed := c.GetInt("wisemodel_pre_consumed_quota")
-	if pkgId == "" || preConsumed == 0 {
-		return
+// wisemodelCandidates returns the FIFO candidate package ids set by Prepare,
+// falling back to a single already-selected package id when Prepare was skipped.
+func wisemodelCandidates(c *gin.Context) []string {
+	if raw, ok := c.Get(wisemodelPkgCandidatesContextKey); ok {
+		if ids, ok := raw.([]string); ok && len(ids) > 0 {
+			return ids
+		}
 	}
-	if !common.RedisEnabled {
-		return
+	if pkgId := c.GetString("wisemodel_package_id"); pkgId != "" {
+		return []string{pkgId}
 	}
+	return nil
+}
 
-	delta := int64(preConsumed - actualQuota) // 正=释放过估，负=补扣低估
+// SettleWisemodelPkg 结算实际用量与预扣量的差额到选中包的 remain_quota。
+// delta = 预扣 - 实扣:正值退还过估,负值补扣低估;预扣为 0(按次/免费)时按实际量扣减。
+// actualQuota=0(上游失败)→ 全额退还预扣。结算幂等:重复调用不会重复增减。
+func SettleWisemodelPkg(c *gin.Context, actualQuota int) {
+	if !isWisemodelToken(c) {
+		return
+	}
+	if c.GetBool("wisemodel_settled") {
+		return
+	}
+	pkgId := c.GetString("wisemodel_package_id")
+	if pkgId == "" {
+		return
+	}
+	preConsumed := c.GetInt("wisemodel_pre_consumed_quota")
+	delta := int64(preConsumed - actualQuota)
+	c.Set("wisemodel_settled", true)
 	if delta == 0 {
 		return
 	}
-	ctx := context.Background()
-	if err := common.RDB.IncrBy(ctx, wisemodelPkgRemainKeyPrefix+pkgId, delta).Err(); err != nil {
-		common.SysError(fmt.Sprintf("SettleWisemodelPkg: Redis IncrBy error for pkg %s: %v", pkgId, err))
+	if err := model.AdjustPackageRemain(pkgId, delta); err != nil {
+		common.SysError(fmt.Sprintf("SettleWisemodelPkg: adjust remain error for pkg %s: %v", pkgId, err))
 	}
 }
