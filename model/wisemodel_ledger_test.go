@@ -35,6 +35,31 @@ func TestReclaimExpiredPackages_RefundsRemainQuota(t *testing.T) {
 	require.NotNil(t, got.ReclaimedAt)
 }
 
+// Reclaim-then-settle interleaving: a settle arriving after the package was
+// reclaimed mid-flight must be dropped (not resurrect the dead package). This
+// is the documented bounded tradeoff — the over-estimate is not re-credited.
+func TestReclaimThenSettle_SettleDropped(t *testing.T) {
+	setupPackageTestDB(t)
+	require.NoError(t, DB.Create(&User{Id: 40, Username: "u40", Quota: 1000}).Error)
+	past := time.Now().Add(-time.Hour)
+	require.NoError(t, DB.Create(&WisemodelPackage{
+		UserId: 40, PackageId: "pkg-race", OrderId: "o",
+		QuotaGranted: 1000, RemainQuota: 700, Amount: 1, // 300 pre-deducted in-flight
+		ValidUntil: &past, CreatedAt: time.Now().Add(-48 * time.Hour),
+	}).Error)
+
+	// reclaim fires: refunds current remain (700) to wallet, zeroes remain.
+	require.NoError(t, ReclaimExpiredPackages(40))
+	require.Equal(t, int64(0), pkgRemainModel(t, "pkg-race"))
+	var u User
+	require.NoError(t, DB.Where("id = ?", 40).First(&u).Error)
+	require.Equal(t, 300, u.Quota) // 1000 - 700
+
+	// in-flight request settles afterward (over-estimate return) — must be dropped.
+	require.NoError(t, AdjustPackageRemain("pkg-race", 100))
+	require.Equal(t, int64(0), pkgRemainModel(t, "pkg-race")) // not resurrected
+}
+
 // Reclaim must be idempotent: a second pass must not double-refund.
 func TestReclaimExpiredPackages_Idempotent(t *testing.T) {
 	setupPackageTestDB(t)
@@ -103,6 +128,35 @@ func TestBackfillWisemodelRemainQuota_InitializesFromHistory(t *testing.T) {
 	require.Equal(t, int64(700), got.RemainQuota) // 1000 - 300
 }
 
+// Backfill uses PRECISE attribution only: ownerless (pre-feature, empty
+// wisemodel_package_id) consume logs must NOT be FIFO-redistributed onto
+// surviving packages (which mis-charges them). Only exact-tagged logs count.
+func TestBackfillWisemodelRemainQuota_IgnoresOwnerlessLogs(t *testing.T) {
+	setupPackageTestDB(t)
+	vu := time.Now().Add(24 * time.Hour)
+	require.NoError(t, DB.Create(&WisemodelPackage{
+		UserId: 9, PackageId: "pkg-bf3", OrderId: "o",
+		QuotaGranted: 1000, RemainQuota: 0, Amount: 1,
+		ValidUntil: &vu, CreatedAt: time.Now().Add(-time.Hour),
+	}).Error)
+	// Ownerless pre-feature consume log — must be ignored by backfill.
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId: 9, Type: LogTypeConsume, Quota: 400,
+		WisemodelPackageId: "", CreatedAt: time.Now().Unix(),
+	}).Error)
+	// Precisely-tagged consume log — must reduce remain.
+	require.NoError(t, LOG_DB.Create(&Log{
+		UserId: 9, Type: LogTypeConsume, Quota: 300,
+		WisemodelPackageId: "pkg-bf3", CreatedAt: time.Now().Unix(),
+	}).Error)
+
+	require.NoError(t, BackfillWisemodelRemainQuota())
+
+	var got WisemodelPackage
+	require.NoError(t, DB.Where("package_id = ?", "pkg-bf3").First(&got).Error)
+	require.Equal(t, int64(700), got.RemainQuota) // 1000 - 300 precise; ownerless 400 ignored
+}
+
 // Backfill must be idempotent: a second run must not recompute/overwrite.
 func TestBackfillWisemodelRemainQuota_Idempotent(t *testing.T) {
 	setupPackageTestDB(t)
@@ -163,6 +217,28 @@ func TestTryDeductPackageRemain_InsufficientRejects(t *testing.T) {
 	var got WisemodelPackage
 	require.NoError(t, DB.Where("package_id = ?", "pkg_b").First(&got).Error)
 	require.Equal(t, int64(100), got.RemainQuota)
+}
+
+// GetActiveWisemodelPackages must exclude reclaimed packages even if not yet expired.
+func TestGetActiveWisemodelPackages_ExcludesReclaimed(t *testing.T) {
+	setupPackageTestDB(t)
+	future := time.Now().Add(time.Hour)
+	reclaimed := time.Now()
+	require.NoError(t, DB.Create(&WisemodelPackage{
+		UserId: 30, PackageId: "pkg-recl-active", OrderId: "o",
+		QuotaGranted: 100, RemainQuota: 100, Amount: 1,
+		ValidUntil: &future, ReclaimedAt: &reclaimed,
+	}).Error)
+	require.NoError(t, DB.Create(&WisemodelPackage{
+		UserId: 30, PackageId: "pkg-live", OrderId: "o",
+		QuotaGranted: 100, RemainQuota: 100, Amount: 1,
+		ValidUntil: &future,
+	}).Error)
+
+	pkgs, err := GetActiveWisemodelPackages(30)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	require.Equal(t, "pkg-live", pkgs[0].PackageId)
 }
 
 // Deduct must reject an expired package even if remain is sufficient (TOCTOU guard).

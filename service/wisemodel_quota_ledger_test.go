@@ -150,32 +150,6 @@ func TestWmGate_ZeroEstimateChargesAtSettle(t *testing.T) {
 	require.Equal(t, int64(1393), pkgRemain(t, "pkg-count"))
 }
 
-// Zero-estimate must roll over an exhausted earliest package to a sibling with quota.
-func TestWmGate_ZeroEstimateRollsOverExhausted(t *testing.T) {
-	setupWisemodelLedgerTest(t)
-	now := time.Now()
-	seedPkg(t, 70, "pkg-z0", "glm-5.1-count,", 0, now.Add(24*time.Hour), now)               // exhausted
-	seedPkg(t, 70, "pkg-z1", "glm-5.1-count,", 500, now.Add(72*time.Hour), now.Add(time.Hour)) // has quota
-
-	c := newWmCtx(70)
-	require.NoError(t, PrepareWisemodelPackageForPreConsume(c, "glm-5.1-count", 0))
-	require.NoError(t, PreConsumeWisemodelPkg(c, 0))
-	require.Equal(t, "pkg-z1", c.GetString("wisemodel_package_id"))
-}
-
-// Zero-estimate with every eligible package exhausted must reject, not serve.
-func TestWmGate_ZeroEstimateExhaustedRejects(t *testing.T) {
-	setupWisemodelLedgerTest(t)
-	now := time.Now()
-	seedPkg(t, 71, "pkg-z2", "glm-5.1-count,", 0, now.Add(24*time.Hour), now)
-
-	c := newWmCtx(71)
-	require.NoError(t, PrepareWisemodelPackageForPreConsume(c, "glm-5.1-count", 0))
-	err := PreConsumeWisemodelPkg(c, 0)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "wisemodel package quota exhausted")
-}
-
 // Settlement releases over-estimate back to the package.
 func TestWmSettle_ReleasesOverestimate(t *testing.T) {
 	setupWisemodelLedgerTest(t)

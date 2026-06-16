@@ -79,24 +79,12 @@ func PreConsumeWisemodelPkg(c *gin.Context, estimatedQuota int) error {
 	}
 
 	if estimatedQuota <= 0 {
-		// 按次/免费模型不预扣，但仍须挑选一个尚有额度的候选包(按 FIFO 序)，
-		// 由结算按实际量扣减；全部耗尽则拒绝，杜绝从已耗尽包旁路按量门控。
-		for _, pkgId := range ids {
-			if pkgId == "" {
-				continue
-			}
-			positive, err := model.PackageRemainPositive(pkgId)
-			if err != nil {
-				return fmt.Errorf("%w: %v", ErrWisemodelServiceUnavailable, err)
-			}
-			if !positive {
-				continue
-			}
-			c.Set("wisemodel_package_id", pkgId)
-			c.Set("wisemodel_pre_consumed_quota", 0)
-			return nil
-		}
-		return fmt.Errorf("wisemodel package quota exhausted")
+		// est<=0 仅对真·零成本模型可达：付费模型(含按次)已由 price.go 的 floor
+		// 兜底为 >=1，走下方原子扣减。零成本请求结算量也≈0，无需原子预留，
+		// pin FIFO 首个候选供结算/日志归属即可。
+		c.Set("wisemodel_package_id", ids[0])
+		c.Set("wisemodel_pre_consumed_quota", 0)
+		return nil
 	}
 
 	for _, pkgId := range ids {
