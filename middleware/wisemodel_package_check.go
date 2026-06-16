@@ -3,7 +3,6 @@ package middleware
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -27,8 +26,7 @@ func WisemodelPackageCheck() gin.HandlerFunc {
 		name, _ := tokenName.(string)
 		key, _ := tokenKey.(string)
 
-		isWisemodelToken := name == "wisemodel-token" || strings.HasPrefix(key, "wisemodel-")
-		if !isWisemodelToken {
+		if !model.IsWisemodelToken(name, key) {
 			c.Next()
 			return
 		}

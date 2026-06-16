@@ -3,7 +3,6 @@ package service
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -18,10 +17,7 @@ var ErrWisemodelServiceUnavailable = errors.New("wisemodel service temporarily u
 
 // isWisemodelToken reports whether the request is authenticated with a wisemodel token.
 func isWisemodelToken(c *gin.Context) bool {
-	if c.GetString("token_name") == "wisemodel-token" {
-		return true
-	}
-	return strings.HasPrefix(c.GetString("token_key"), "wisemodel-")
+	return model.IsWisemodelToken(c.GetString("token_name"), c.GetString("token_key"))
 }
 
 // PrepareWisemodelPackageForPreConsume 选出可承载该请求的 active 资源包候选(按到期 FIFO 序),

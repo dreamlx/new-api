@@ -52,6 +52,12 @@ func (WisemodelPackage) TableName() string {
 	return "wisemodel_packages"
 }
 
+// IsWisemodelToken 判定给定 token 名/密钥是否属于 wisemodel 渠道。
+// 单一判定来源，供 middleware 与 relay 门控共用，避免命名规则变更时两处分叉。
+func IsWisemodelToken(tokenName, tokenKey string) bool {
+	return tokenName == "wisemodel-token" || strings.HasPrefix(tokenKey, "wisemodel-")
+}
+
 // TryDeductPackageRemain 原子扣减单个资源包的剩余额度。
 // 通过单条 `UPDATE ... WHERE remain_quota >= amount` 实现，行锁保证并发不超卖，
 // 三种数据库一致。返回 true 表示扣减成功，false 表示剩余额度不足（未改动）。
@@ -150,8 +156,13 @@ const wisemodelRemainBackfilledKey = "WisemodelRemainBackfilled"
 
 // BackfillWisemodelRemainQuota 一次性把每个未回收资源包的 remain_quota 从历史消费回填。
 // remain = max(0, QuotaGranted - 历史消费归因)，归因复用 CalculatePackageAttribution
-// (精确归因 + 一次性 FIFO 历史无主日志)。通过 option flag 保证全局只执行一次——
-// 上线加列后第一次启动回填，之后由运行时的原子扣减/结算维护，永不重算。
+// (精确归因 + 一次性 FIFO 历史无主日志)。通过 option flag 保证全局只执行一次。
+//
+// 调用时机：由 extension/wisemodel.Init() 在 model.InitDB() 之后、HTTP 服务接客之前
+// 同步执行(见 main.go)。因此回填期间没有并发请求消费 remain_quota，重跑天然幂等
+// (已完成的消费都已落入 consume 日志、会被归因重新算入)——故意保持阻塞式而非后台，
+// 后台回填会让尚未回填的包短暂显示 remain=0 而被误拒。
+// 每个用户的回填在单事务内完成，进程中途崩溃不会留下半写状态。
 func BackfillWisemodelRemainQuota() error {
 	var flag Option
 	err := DB.Where("key = ?", wisemodelRemainBackfilledKey).First(&flag).Error
@@ -180,15 +191,20 @@ func BackfillWisemodelRemainQuota() error {
 		if err != nil {
 			return err
 		}
-		for _, pkg := range packages {
-			remain := pkg.QuotaGranted - attribution[pkg.PackageId]
-			if remain < 0 {
-				remain = 0
+		if err := DB.Transaction(func(tx *gorm.DB) error {
+			for _, pkg := range packages {
+				remain := pkg.QuotaGranted - attribution[pkg.PackageId]
+				if remain < 0 {
+					remain = 0
+				}
+				if err := tx.Model(&WisemodelPackage{}).Where("id = ?", pkg.Id).
+					UpdateColumn("remain_quota", remain).Error; err != nil {
+					return err
+				}
 			}
-			if err := DB.Model(&WisemodelPackage{}).Where("id = ?", pkg.Id).
-				UpdateColumn("remain_quota", remain).Error; err != nil {
-				return err
-			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 	return DB.Save(&Option{Key: wisemodelRemainBackfilledKey, Value: "true"}).Error
@@ -477,27 +493,6 @@ func CalculatePackageAttribution(userId int, packages []*WisemodelPackage) (map[
 	return attribution, nil
 }
 
-func SelectPackageWithRemainingQuota(packages []*WisemodelPackage, attribution map[string]int64) *WisemodelPackage {
-	for _, pkg := range packages {
-		if pkg.QuotaGranted-attribution[pkg.PackageId] > 0 {
-			return pkg
-		}
-	}
-	return nil
-}
-
-func SelectPackageWithSufficientQuota(packages []*WisemodelPackage, attribution map[string]int64, requiredQuota int64) *WisemodelPackage {
-	if requiredQuota <= 0 {
-		return SelectPackageWithRemainingQuota(packages, attribution)
-	}
-	for _, pkg := range packages {
-		if pkg.QuotaGranted-attribution[pkg.PackageId] >= requiredQuota {
-			return pkg
-		}
-	}
-	return nil
-}
-
 // FilterPackagesByModel 返回能承载指定模型请求的资源包子集。
 // 规则（按包逐个判断）：
 //   - 包的 AvailableModels 为空 → 通用包，能承载任意模型
@@ -548,25 +543,6 @@ func getPreciseAttributionByPackages(pkgIds []string) (map[string]int64, error) 
 		result[r.WisemodelPackageId] = r.UsedQuota
 	}
 	return result, nil
-}
-
-// ComputeWisemodelPackageRemain 计算单个资源包的剩余配额（精确归因），供 Redis 计数器懒初始化使用。
-func ComputeWisemodelPackageRemain(pkgId string) (int64, error) {
-	pkg, err := GetWisemodelPackageByPackageId(pkgId)
-	if err != nil {
-		return 0, err
-	}
-	var used int64
-	if err := LOG_DB.Model(&Log{}).
-		Where("wisemodel_package_id = ? AND type = ?", pkgId, LogTypeConsume).
-		Select("COALESCE(SUM(quota), 0)").Scan(&used).Error; err != nil {
-		return 0, err
-	}
-	remain := pkg.QuotaGranted - used
-	if remain < 0 {
-		remain = 0
-	}
-	return remain, nil
 }
 
 // ReclaimAllExpiredPackages 全局扫描所有用户的过期未回收包，供后台定时任务调用。
