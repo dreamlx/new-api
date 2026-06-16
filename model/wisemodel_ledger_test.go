@@ -165,6 +165,59 @@ func TestTryDeductPackageRemain_InsufficientRejects(t *testing.T) {
 	require.Equal(t, int64(100), got.RemainQuota)
 }
 
+// Deduct must reject an expired package even if remain is sufficient (TOCTOU guard).
+func TestTryDeductPackageRemain_RejectsExpired(t *testing.T) {
+	setupPackageTestDB(t)
+	past := time.Now().Add(-time.Hour)
+	require.NoError(t, DB.Create(&WisemodelPackage{
+		UserId: 1, PackageId: "pkg-exp-deduct", OrderId: "o",
+		QuotaGranted: 100, RemainQuota: 100, Amount: 1, ValidUntil: &past,
+	}).Error)
+
+	ok, err := TryDeductPackageRemain("pkg-exp-deduct", 30)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, int64(100), pkgRemainModel(t, "pkg-exp-deduct"))
+}
+
+// Deduct must reject a reclaimed package even if (stale) remain looks sufficient.
+func TestTryDeductPackageRemain_RejectsReclaimed(t *testing.T) {
+	setupPackageTestDB(t)
+	future := time.Now().Add(time.Hour)
+	reclaimed := time.Now()
+	require.NoError(t, DB.Create(&WisemodelPackage{
+		UserId: 1, PackageId: "pkg-reclaimed-deduct", OrderId: "o",
+		QuotaGranted: 100, RemainQuota: 100, Amount: 1,
+		ValidUntil: &future, ReclaimedAt: &reclaimed,
+	}).Error)
+
+	ok, err := TryDeductPackageRemain("pkg-reclaimed-deduct", 30)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+// Settlement must NOT resurrect remain on an already-reclaimed package.
+func TestAdjustPackageRemain_SkipsReclaimed(t *testing.T) {
+	setupPackageTestDB(t)
+	future := time.Now().Add(time.Hour)
+	reclaimed := time.Now()
+	require.NoError(t, DB.Create(&WisemodelPackage{
+		UserId: 1, PackageId: "pkg-reclaimed-adj", OrderId: "o",
+		QuotaGranted: 100, RemainQuota: 0, Amount: 1,
+		ValidUntil: &future, ReclaimedAt: &reclaimed,
+	}).Error)
+
+	require.NoError(t, AdjustPackageRemain("pkg-reclaimed-adj", 80))
+	require.Equal(t, int64(0), pkgRemainModel(t, "pkg-reclaimed-adj")) // not resurrected
+}
+
+func pkgRemainModel(t *testing.T, pkgId string) int64 {
+	t.Helper()
+	var got WisemodelPackage
+	require.NoError(t, DB.Where("package_id = ?", pkgId).First(&got).Error)
+	return got.RemainQuota
+}
+
 // AdjustPackageRemain releases over-estimate (positive delta) back to the package.
 func TestAdjustPackageRemain_ReleaseOverestimate(t *testing.T) {
 	setupPackageTestDB(t)

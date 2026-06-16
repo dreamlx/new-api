@@ -506,6 +506,10 @@ func TestWisemodelIntegrationFlow(t *testing.T) {
 		PromptTokens: 500, CompletionTokens: 200,
 		WisemodelPackageId: pkgs[0].PackageId,
 	})
+	// Charge the single ledger as the gate would (display now reads remain_quota).
+	ok, derr := model.TryDeductPackageRemain(pkgs[0].PackageId, 5000)
+	require.NoError(t, derr)
+	require.True(t, ok)
 
 	// 6. Re-query usage — should show consumption on first package
 	w = doWmRequest(router, "POST", "/api/wisemodel/user/package_usage", map[string]interface{}{

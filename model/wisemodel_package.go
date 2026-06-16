@@ -60,13 +60,27 @@ func TryDeductPackageRemain(packageId string, amount int64) (bool, error) {
 	if amount <= 0 {
 		return true, nil
 	}
+	// 扣减即校验有效性：未回收、未过期、额度足额，三者在同一原子语句内判定，
+	// 消除"选包(t)→扣减(t+δ)"之间包过期/被回收的 TOCTOU 窗口。
 	result := DB.Model(&WisemodelPackage{}).
-		Where("package_id = ? AND remain_quota >= ?", packageId, amount).
+		Where("package_id = ? AND reclaimed_at IS NULL AND (valid_until IS NULL OR valid_until > ?) AND remain_quota >= ?",
+			packageId, time.Now(), amount).
 		UpdateColumn("remain_quota", gorm.Expr("remain_quota - ?", amount))
 	if result.Error != nil {
 		return false, result.Error
 	}
 	return result.RowsAffected == 1, nil
+}
+
+// PackageRemainPositive 判断某资源包当前是否可承载(未回收、未过期、remain>0)。
+// 供按次/免费(预扣为 0)模型在不预扣时挑选有额度的包。
+func PackageRemainPositive(packageId string) (bool, error) {
+	var count int64
+	err := DB.Model(&WisemodelPackage{}).
+		Where("package_id = ? AND reclaimed_at IS NULL AND (valid_until IS NULL OR valid_until > ?) AND remain_quota > 0",
+			packageId, time.Now()).
+		Count(&count).Error
+	return count > 0, err
 }
 
 // AdjustPackageRemain 结算时调整资源包剩余额度。
@@ -76,8 +90,10 @@ func AdjustPackageRemain(packageId string, delta int64) error {
 	if delta == 0 {
 		return nil
 	}
+	// reclaimed_at IS NULL 守卫：包若在请求飞行期间已被回收(cron 已退还其 remain 到钱包),
+	// 结算不得再写回，否则会在已回收的死包上复活幻影余额并与钱包重复计数。
 	return DB.Model(&WisemodelPackage{}).
-		Where("package_id = ?", packageId).
+		Where("package_id = ? AND reclaimed_at IS NULL", packageId).
 		UpdateColumn("remain_quota", gorm.Expr("remain_quota + ?", delta)).Error
 }
 
@@ -351,10 +367,16 @@ func GetModelUsageByPackages(pkgIds []string) (map[string][]ModelUsageRow, error
 	return result, nil
 }
 
-func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]int64, modelMap map[string][]ModelUsageRow) []map[string]interface{} {
+// BuildPackageUsageRows 构建用量展示行。剩余额度直接取自单账本 remain_quota，
+// 与门控同源，杜绝"展示有余额却被门控拒绝"的双账本背离。per-model 明细仍取自
+// 精确归因(GetModelUsageByPackages)。
+func BuildPackageUsageRows(packages []*WisemodelPackage, modelMap map[string][]ModelUsageRow) []map[string]interface{} {
 	rows := make([]map[string]interface{}, 0, len(packages))
 	for _, pkg := range packages {
-		consumed := attribution[pkg.PackageId]
+		remain := pkg.RemainQuota
+		if remain < 0 {
+			remain = 0
+		}
 
 		availableModels := []string{}
 		if pkg.AvailableModels != "" {
@@ -395,18 +417,12 @@ func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]
 		}
 
 		if pkg.OriginalPoints > 0 {
-			remainPoints := (pkg.QuotaGranted - consumed) * pointsPerQuota
-			if remainPoints < 0 {
-				remainPoints = 0
-			}
+			remainPoints := remain * pointsPerQuota
 			row["points"] = pkg.OriginalPoints
 			row["remain_points"] = remainPoints
 			row["amount"] = int64(pkg.OriginalPoints) - remainPoints
 		} else {
-			remainTokens := (pkg.QuotaGranted - consumed) * tokensPerQuota
-			if remainTokens < 0 {
-				remainTokens = 0
-			}
+			remainTokens := remain * tokensPerQuota
 			row["tokens"] = pkg.OriginalTokens
 			row["remain_tokens"] = remainTokens
 			row["amount_tokens"] = int64(pkg.OriginalTokens) - remainTokens

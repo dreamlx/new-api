@@ -159,14 +159,13 @@ func TestBuildPackageUsageRows(t *testing.T) {
 		OriginalPackageId: "PKG001",
 		OriginalPoints:    3_000_000,
 		QuotaGranted:      3_000_000,
+		RemainQuota:       2_500_000, // consumed 500_000
 		AvailableModels:   "DeepSeek-V3,DeepSeek-R1",
 		CreatedAt:         time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 		ValidUntil:        &expire,
 	}
 
-	rows := BuildPackageUsageRows([]*WisemodelPackage{pkg}, map[string]int64{
-		pkg.PackageId: 500000,
-	}, map[string][]ModelUsageRow{})
+	rows := BuildPackageUsageRows([]*WisemodelPackage{pkg}, map[string][]ModelUsageRow{})
 	if len(rows) != 1 {
 		t.Fatalf("want 1 row, got %d", len(rows))
 	}
@@ -283,6 +282,7 @@ func TestBuildPackageUsageRowsDetails(t *testing.T) {
 		PackageId:      "PKG001_ts",
 		OriginalPoints: 10000,
 		QuotaGranted:   10000,
+		RemainQuota:    1000, // consumed 9000
 		ValidUntil:     &expire,
 	}
 	// Tokens 包
@@ -290,15 +290,11 @@ func TestBuildPackageUsageRowsDetails(t *testing.T) {
 		PackageId:      "PKG002_ts",
 		OriginalTokens: 500000,
 		QuotaGranted:   500000,
+		RemainQuota:    350000, // consumed 150000
 		ValidUntil:     &expire,
 	}
 
 	packages := []*WisemodelPackage{pkgPoints, pkgTokens}
-
-	attribution := map[string]int64{
-		"PKG001_ts": 9000,
-		"PKG002_ts": 150000,
-	}
 
 	modelMap := map[string][]ModelUsageRow{
 		"PKG001_ts": {
@@ -310,7 +306,7 @@ func TestBuildPackageUsageRowsDetails(t *testing.T) {
 		},
 	}
 
-	rows := BuildPackageUsageRows(packages, attribution, modelMap)
+	rows := BuildPackageUsageRows(packages, modelMap)
 
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 rows, got %d", len(rows))
@@ -366,12 +362,12 @@ func TestBuildPackageUsageRowsDetailsEmpty(t *testing.T) {
 		PackageId:      "PKG003_ts",
 		OriginalPoints: 5000,
 		QuotaGranted:   5000,
+		RemainQuota:    5000, // no consumption
 		ValidUntil:     &expire,
 	}
-	attribution := map[string]int64{"PKG003_ts": 0}
 	modelMap := map[string][]ModelUsageRow{}
 
-	rows := BuildPackageUsageRows([]*WisemodelPackage{pkg}, attribution, modelMap)
+	rows := BuildPackageUsageRows([]*WisemodelPackage{pkg}, modelMap)
 
 	details, ok := rows[0]["details"].([]interface{})
 	if !ok {

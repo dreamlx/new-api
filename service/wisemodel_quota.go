@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,10 @@ import (
 )
 
 const wisemodelPkgCandidatesContextKey = "wisemodel_package_candidates"
+
+// ErrWisemodelServiceUnavailable 包裹账本不可用(DB 故障)类错误，供 relay 层映射为
+// 可重试的 503，而非把瞬时故障误报成永久的 403「资源包额度耗尽」。
+var ErrWisemodelServiceUnavailable = errors.New("wisemodel service temporarily unavailable")
 
 // isWisemodelToken reports whether the request is authenticated with a wisemodel token.
 func isWisemodelToken(c *gin.Context) bool {
@@ -33,7 +38,7 @@ func PrepareWisemodelPackageForPreConsume(c *gin.Context, requestedModel string,
 
 	packages, err := model.GetActiveWisemodelPackages(userID)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrWisemodelServiceUnavailable, err)
 	}
 	if len(packages) == 0 {
 		c.Set("wisemodel_package_id", "")
@@ -78,9 +83,24 @@ func PreConsumeWisemodelPkg(c *gin.Context, estimatedQuota int) error {
 	}
 
 	if estimatedQuota <= 0 {
-		c.Set("wisemodel_package_id", ids[0])
-		c.Set("wisemodel_pre_consumed_quota", 0)
-		return nil
+		// 按次/免费模型不预扣，但仍须挑选一个尚有额度的候选包(按 FIFO 序)，
+		// 由结算按实际量扣减；全部耗尽则拒绝，杜绝从已耗尽包旁路按量门控。
+		for _, pkgId := range ids {
+			if pkgId == "" {
+				continue
+			}
+			positive, err := model.PackageRemainPositive(pkgId)
+			if err != nil {
+				return fmt.Errorf("%w: %v", ErrWisemodelServiceUnavailable, err)
+			}
+			if !positive {
+				continue
+			}
+			c.Set("wisemodel_package_id", pkgId)
+			c.Set("wisemodel_pre_consumed_quota", 0)
+			return nil
+		}
+		return fmt.Errorf("wisemodel package quota exhausted")
 	}
 
 	for _, pkgId := range ids {
@@ -89,7 +109,7 @@ func PreConsumeWisemodelPkg(c *gin.Context, estimatedQuota int) error {
 		}
 		ok, err := model.TryDeductPackageRemain(pkgId, int64(estimatedQuota))
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: %v", ErrWisemodelServiceUnavailable, err)
 		}
 		if !ok {
 			continue

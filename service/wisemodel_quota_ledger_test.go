@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -149,6 +150,32 @@ func TestWmGate_ZeroEstimateChargesAtSettle(t *testing.T) {
 	require.Equal(t, int64(1393), pkgRemain(t, "pkg-count"))
 }
 
+// Zero-estimate must roll over an exhausted earliest package to a sibling with quota.
+func TestWmGate_ZeroEstimateRollsOverExhausted(t *testing.T) {
+	setupWisemodelLedgerTest(t)
+	now := time.Now()
+	seedPkg(t, 70, "pkg-z0", "glm-5.1-count,", 0, now.Add(24*time.Hour), now)               // exhausted
+	seedPkg(t, 70, "pkg-z1", "glm-5.1-count,", 500, now.Add(72*time.Hour), now.Add(time.Hour)) // has quota
+
+	c := newWmCtx(70)
+	require.NoError(t, PrepareWisemodelPackageForPreConsume(c, "glm-5.1-count", 0))
+	require.NoError(t, PreConsumeWisemodelPkg(c, 0))
+	require.Equal(t, "pkg-z1", c.GetString("wisemodel_package_id"))
+}
+
+// Zero-estimate with every eligible package exhausted must reject, not serve.
+func TestWmGate_ZeroEstimateExhaustedRejects(t *testing.T) {
+	setupWisemodelLedgerTest(t)
+	now := time.Now()
+	seedPkg(t, 71, "pkg-z2", "glm-5.1-count,", 0, now.Add(24*time.Hour), now)
+
+	c := newWmCtx(71)
+	require.NoError(t, PrepareWisemodelPackageForPreConsume(c, "glm-5.1-count", 0))
+	err := PreConsumeWisemodelPkg(c, 0)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "wisemodel package quota exhausted")
+}
+
 // Settlement releases over-estimate back to the package.
 func TestWmSettle_ReleasesOverestimate(t *testing.T) {
 	setupWisemodelLedgerTest(t)
@@ -203,6 +230,26 @@ func TestWmGate_SkipsExpiredPackage(t *testing.T) {
 	require.Equal(t, "pkg-active", c.GetString("wisemodel_package_id"))
 	require.Equal(t, int64(1000), pkgRemain(t, "pkg-expired")) // untouched
 	require.Equal(t, int64(700), pkgRemain(t, "pkg-active"))
+}
+
+// A transient DB error must be reported as a retryable service-unavailable
+// condition, NOT as a permanent "quota exhausted" 403.
+func TestWmGate_DBError_IsRetryableNotExhausted(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	// Intentionally do NOT migrate WisemodelPackage → any query errors.
+	origDB := model.DB
+	origRedis := common.RedisEnabled
+	model.DB = db
+	common.RedisEnabled = false
+	t.Cleanup(func() { model.DB = origDB; common.RedisEnabled = origRedis })
+
+	c := newWmCtx(99)
+	err = PrepareWisemodelPackageForPreConsume(c, "minimax-m2", 100)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrWisemodelServiceUnavailable),
+		"DB error must wrap ErrWisemodelServiceUnavailable so relay maps it to 503, not 403")
+	require.NotContains(t, err.Error(), "quota exhausted")
 }
 
 // Non-wisemodel token bypasses the gate entirely.

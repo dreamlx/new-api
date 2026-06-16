@@ -158,12 +158,6 @@ func GetPackageUsage(c *gin.Context) {
 		return
 	}
 
-	attribution, err := model.CalculatePackageAttribution(user.Id, packages)
-	if err != nil {
-		c.JSON(500, gin.H{"message": "查询资源包消费失败: " + err.Error(), "success": false})
-		return
-	}
-
 	pkgIds := make([]string, len(packages))
 	for i, p := range packages {
 		pkgIds[i] = p.PackageId
@@ -174,6 +168,7 @@ func GetPackageUsage(c *gin.Context) {
 		return
 	}
 
-	data := model.BuildPackageUsageRows(packages, attribution, modelMap)
+	// 剩余额度直接取自单账本 remain_quota（与门控同源）。
+	data := model.BuildPackageUsageRows(packages, modelMap)
 	c.JSON(200, gin.H{"code": 200, "data": data, "msg": "success"})
 }
