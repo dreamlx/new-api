@@ -82,8 +82,9 @@ docker build -t new-api:lh-main .
 cd /root/new-api
 docker compose up -d --force-recreate new-api
 
-# 5. 等健康
-until curl -sf http://localhost:3001/api/status | grep -q success; do sleep 2; done; echo READY
+# 5. 等健康（publish 绑 Tailscale IP,非 localhost — 见 §3.6;host 上 localhost:3001 返回 000）
+NEW_API_LOCAL="http://$(tailscale ip -4):3001"
+until curl -sf "$NEW_API_LOCAL/api/status" | grep -q '"success"'; do sleep 2; done; echo READY
 ```
 
 ### 2.2 验证升级生效
@@ -92,8 +93,8 @@ until curl -sf http://localhost:3001/api/status | grep -q success; do sleep 2; d
 # 镜像 digest 应该匹配 build 输出
 docker inspect new-api --format '{{.Image}}'
 
-# 行为级验证：跑一次 chat completion
-curl -H "Authorization: Bearer <test_token>" -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":10}' -H "Content-Type: application/json" http://localhost:3001/v1/chat/completions
+# 行为级验证：跑一次 chat completion（$NEW_API_LOCAL 见 §2.1 step 5 / §3.6）
+curl -H "Authorization: Bearer <test_token>" -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":10}' -H "Content-Type: application/json" "$NEW_API_LOCAL/v1/chat/completions"
 ```
 
 ### 2.3 Rollback
@@ -229,7 +230,8 @@ export NEW_API_LOCAL="http://$(tailscale ip -4):3001"
 
 后续所有 host 内诊断命令用 `$NEW_API_LOCAL/api/status` 等，runbook 例子里的 `http://localhost:3001/...` 一律换成 `$NEW_API_LOCAL/...`。
 
-涉及位置：§2.1 readiness probe (line ~74)、§2.1 smoke test (line ~84)、§4.1 健康查询、§4.4 / §5 诊断命令。
+**已转用 `$NEW_API_LOCAL`**：§2.1 readiness probe + 行为级验证、§4.1 健康查询。
+**仍用字面 `localhost:3001`（host 上会 000,诊断时记得换 `$NEW_API_LOCAL`）**：§4.4 login/channel-test 示例、§7 等其余诊断命令。
 
 > 从开发者本地访问无影响：`http://lh-canary:3001/...`（ssh config alias）走 Tailscale 直达，cutover 前后一致。
 
@@ -242,8 +244,8 @@ export NEW_API_LOCAL="http://$(tailscale ip -4):3001"
 ### 4.1 服务级健康
 
 ```bash
-# 整体健康
-curl -s http://localhost:3001/api/status | jq
+# 整体健康（$NEW_API_LOCAL 见 §3.6;host 上 localhost:3001 返回 000）
+curl -s "$NEW_API_LOCAL/api/status" | jq
 
 # Container 状态
 docker ps --filter name=new-api --format 'table {{.Names}}\t{{.Status}}'
