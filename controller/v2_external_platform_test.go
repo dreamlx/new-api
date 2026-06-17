@@ -323,3 +323,57 @@ func TestV2AuthorizeThenQueryLogs(t *testing.T) {
 	summary := data["summary"].(map[string]interface{})
 	assert.Equal(t, float64(15000), summary["total_quota_consumed"])
 }
+
+// TestV2GetPlatformLogsCacheTokens verifies that cache_tokens stored in the
+// per-log Other JSON (written by service/log_info_generate.go) is surfaced in
+// each log item and aggregated into the summary. The LH side pulls this to
+// expose prompt-cache hit counts in its usage reporting (customer-facing).
+func TestV2GetPlatformLogsCacheTokens(t *testing.T) {
+	router := setupV2TestRouter()
+
+	user := &model.User{
+		Username:       "platform_cachetest",
+		Email:          "cachetest@platform.local",
+		ExternalUserId: "platform_cachetest",
+		IsExternal:     true,
+		Quota:          PlatformQuotaForNewUser,
+	}
+	model.DB.Create(user)
+
+	token := &model.Token{
+		UserId: user.Id, Key: "cachetesttoken111111111111111111111",
+		Name: "v2_cachetest", Status: common.TokenStatusEnabled,
+		CreatedTime: common.GetTimestamp(), ExpiredTime: -1, UnlimitedQuota: true,
+	}
+	model.DB.Create(token)
+
+	now := common.GetTimestamp()
+	// One log with a cache hit (80 cached prompt tokens), one without.
+	model.LOG_DB.Create(&model.Log{
+		UserId: user.Id, Username: user.Username, TokenId: token.Id,
+		CreatedAt: now, Type: model.LogTypeConsume, ModelName: "gemini-3.1-pro-preview",
+		Quota: 3000, PromptTokens: 200, CompletionTokens: 100,
+		Other: common.MapToJsonStr(map[string]interface{}{"cache_tokens": 80, "cache_ratio": 0.25}),
+	})
+	model.LOG_DB.Create(&model.Log{
+		UserId: user.Id, Username: user.Username, TokenId: token.Id,
+		CreatedAt: now - 100, Type: model.LogTypeConsume, ModelName: "gemini-3.1-pro-preview",
+		Quota: 1000, PromptTokens: 50, CompletionTokens: 20,
+	})
+
+	w := doV2Request(router, "GET", "/api/v2/external/platforms/cachetest/logs?page=1&page_size=50", nil)
+	assert.Equal(t, 200, w.Code)
+	resp := parseV2Response(t, w)
+	data := resp["data"].(map[string]interface{})
+	logs := data["logs"].([]interface{})
+	require.Len(t, logs, 2)
+
+	// Logs are ordered created_at DESC → cache-hit log first.
+	hit := logs[0].(map[string]interface{})
+	assert.Equal(t, float64(80), hit["cache_tokens"], "cache_tokens must be surfaced from Other")
+	miss := logs[1].(map[string]interface{})
+	assert.Equal(t, float64(0), miss["cache_tokens"], "absent cache_tokens defaults to 0")
+
+	summary := data["summary"].(map[string]interface{})
+	assert.Equal(t, float64(80), summary["total_cache_tokens"])
+}

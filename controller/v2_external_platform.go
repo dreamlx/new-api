@@ -259,7 +259,7 @@ func V2GetPlatformLogs(c *gin.Context) {
 	}
 
 	// Build response
-	var totalPromptTokens, totalCompletionTokens, totalQuotaConsumed int
+	var totalPromptTokens, totalCompletionTokens, totalQuotaConsumed, totalCacheTokens int
 	uniqueTokens := make(map[int]bool)
 	logItems := make([]gin.H, 0, len(logs))
 
@@ -267,6 +267,12 @@ func V2GetPlatformLogs(c *gin.Context) {
 		totalPromptTokens += log.PromptTokens
 		totalCompletionTokens += log.CompletionTokens
 		totalQuotaConsumed += log.Quota
+
+		// Prompt-cache hit count is stored in the per-log Other JSON
+		// (service/log_info_generate.go writes other["cache_tokens"]). Surface it
+		// so LH can expose cache-hit stats in its customer-facing usage reporting.
+		cacheTokens := extractCacheTokens(log.Other)
+		totalCacheTokens += cacheTokens
 
 		// Resolve full token_key
 		var tokenKey string
@@ -289,6 +295,7 @@ func V2GetPlatformLogs(c *gin.Context) {
 			"channel_name":      log.ChannelName,
 			"prompt_tokens":     log.PromptTokens,
 			"completion_tokens": log.CompletionTokens,
+			"cache_tokens":      cacheTokens,
 			"total_tokens":      log.PromptTokens + log.CompletionTokens,
 			"quota_cost":        log.Quota,
 		})
@@ -311,6 +318,7 @@ func V2GetPlatformLogs(c *gin.Context) {
 				"total_requests":          len(logItems),
 				"total_prompt_tokens":     totalPromptTokens,
 				"total_completion_tokens": totalCompletionTokens,
+				"total_cache_tokens":      totalCacheTokens,
 				"total_tokens":            totalPromptTokens + totalCompletionTokens,
 				"total_quota_consumed":    totalQuotaConsumed,
 				"unique_tokens":           len(uniqueTokens),
@@ -320,6 +328,28 @@ func V2GetPlatformLogs(c *gin.Context) {
 }
 
 // ==================== Helpers ====================
+
+// extractCacheTokens reads the prompt-cache hit count from a log's Other JSON
+// blob (key "cache_tokens", written by service/log_info_generate.go). Returns 0
+// when absent or unparseable — cache reporting is best-effort observability and
+// must never break the logs endpoint. JSON numbers decode to float64.
+func extractCacheTokens(other string) int {
+	if other == "" {
+		return 0
+	}
+	m, err := common.StrToMap(other)
+	if err != nil || m == nil {
+		return 0
+	}
+	switch v := m["cache_tokens"].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
+	}
+}
 
 func getOrCreatePlatformUser(username, platformId string) (*model.User, error) {
 	var user model.User
