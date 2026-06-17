@@ -58,95 +58,6 @@ func TestSortPackagesByValidUntilStableTieBreak(t *testing.T) {
 	}
 }
 
-// TestAttributeLogsToPackages 验证 FIFO 归因算法
-func TestAttributeLogsToPackages(t *testing.T) {
-	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	mar := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	apr := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-
-	// 场景1：两包时间重叠，2月消费归属最早到期包（PKG-A）
-	t.Run("overlap: feb consumption goes to PKG-A", func(t *testing.T) {
-		pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &mar, QuotaGranted: 1000000}
-		pkgB := &WisemodelPackage{PackageId: "PKG-B", CreatedAt: feb, ValidUntil: &apr, QuotaGranted: 2000000}
-		pkgs := []*WisemodelPackage{pkgA, pkgB}
-
-		logs := []Log{
-			{CreatedAt: feb.Add(15 * 24 * time.Hour).Unix(), Quota: 500000, Type: LogTypeConsume},
-		}
-
-		attr := AttributeLogsToPackages(pkgs, logs)
-		if attr["PKG-A"] != 500000 {
-			t.Errorf("PKG-A want 500000, got %d", attr["PKG-A"])
-		}
-		if attr["PKG-B"] != 0 {
-			t.Errorf("PKG-B want 0, got %d", attr["PKG-B"])
-		}
-	})
-
-	// 场景2：log 在所有包有效期外，忽略
-	t.Run("log outside all windows is ignored", func(t *testing.T) {
-		pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &feb, QuotaGranted: 1000000}
-		pkgs := []*WisemodelPackage{pkgA}
-		logs := []Log{
-			{CreatedAt: mar.Unix(), Quota: 100000, Type: LogTypeConsume},
-		}
-		attr := AttributeLogsToPackages(pkgs, logs)
-		if attr["PKG-A"] != 0 {
-			t.Errorf("PKG-A want 0, got %d", attr["PKG-A"])
-		}
-	})
-
-	// 场景3：永久包（ValidUntil=nil）排在最后
-	t.Run("permanent package is last resort", func(t *testing.T) {
-		pkgPerm := &WisemodelPackage{PackageId: "PERM", CreatedAt: jan, ValidUntil: nil, QuotaGranted: 9999999}
-		pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &mar, QuotaGranted: 1000000}
-		pkgs := []*WisemodelPackage{pkgA, pkgPerm}
-		logs := []Log{
-			{CreatedAt: feb.Unix(), Quota: 100000, Type: LogTypeConsume},
-		}
-		attr := AttributeLogsToPackages(pkgs, logs)
-		if attr["PKG-A"] != 100000 {
-			t.Errorf("PKG-A want 100000, got %d", attr["PKG-A"])
-		}
-		if attr["PERM"] != 0 {
-			t.Errorf("PERM want 0, got %d", attr["PERM"])
-		}
-	})
-
-	// 场景4：单包无重叠，结果同原时间窗口
-	t.Run("single package no overlap", func(t *testing.T) {
-		pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &apr, QuotaGranted: 1000000}
-		pkgs := []*WisemodelPackage{pkgA}
-		logs := []Log{
-			{CreatedAt: feb.Unix(), Quota: 300000, Type: LogTypeConsume},
-			{CreatedAt: mar.Unix(), Quota: 200000, Type: LogTypeConsume},
-		}
-		attr := AttributeLogsToPackages(pkgs, logs)
-		if attr["PKG-A"] != 500000 {
-			t.Errorf("PKG-A want 500000, got %d", attr["PKG-A"])
-		}
-	})
-
-	t.Run("old log spills into next valid package when first package is exhausted", func(t *testing.T) {
-		pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &mar, QuotaGranted: 500000}
-		pkgB := &WisemodelPackage{PackageId: "PKG-B", CreatedAt: feb, ValidUntil: &apr, QuotaGranted: 1000000}
-		pkgs := []*WisemodelPackage{pkgA, pkgB}
-
-		logs := []Log{
-			{CreatedAt: feb.Add(15 * 24 * time.Hour).Unix(), Quota: 800000, Type: LogTypeConsume},
-		}
-
-		attr := AttributeLogsToPackages(pkgs, logs)
-		if attr["PKG-A"] != 500000 {
-			t.Errorf("PKG-A want 500000, got %d", attr["PKG-A"])
-		}
-		if attr["PKG-B"] != 300000 {
-			t.Errorf("PKG-B want 300000, got %d", attr["PKG-B"])
-		}
-	})
-}
-
 func TestBuildPackageUsageRows(t *testing.T) {
 	expire := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	// QuotaPerUnit=500_000, WisemodelPointsPerUnit=500_000
@@ -159,14 +70,13 @@ func TestBuildPackageUsageRows(t *testing.T) {
 		OriginalPackageId: "PKG001",
 		OriginalPoints:    3_000_000,
 		QuotaGranted:      3_000_000,
+		RemainQuota:       2_500_000, // consumed 500_000
 		AvailableModels:   "DeepSeek-V3,DeepSeek-R1",
 		CreatedAt:         time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 		ValidUntil:        &expire,
 	}
 
-	rows := BuildPackageUsageRows([]*WisemodelPackage{pkg}, map[string]int64{
-		pkg.PackageId: 500000,
-	}, map[string][]ModelUsageRow{})
+	rows := BuildPackageUsageRows([]*WisemodelPackage{pkg}, map[string][]ModelUsageRow{})
 	if len(rows) != 1 {
 		t.Fatalf("want 1 row, got %d", len(rows))
 	}
@@ -186,91 +96,10 @@ func TestBuildPackageUsageRows(t *testing.T) {
 	}
 }
 
-func TestAttributeLogsToPackagesWithBaseline(t *testing.T) {
-	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	mar := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	apr := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-
-	pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &mar, QuotaGranted: 500000}
-	pkgB := &WisemodelPackage{PackageId: "PKG-B", CreatedAt: feb, ValidUntil: &apr, QuotaGranted: 1000000}
-	pkgs := []*WisemodelPackage{pkgA, pkgB}
-
-	attr := AttributeLogsToPackagesWithBaseline(pkgs, []Log{
-		{CreatedAt: feb.Add(15 * 24 * time.Hour).Unix(), Quota: 500000, Type: LogTypeConsume},
-	}, map[string]int64{
-		"PKG-A": 400000,
-	})
-
-	if attr["PKG-A"] != 100000 {
-		t.Fatalf("PKG-A want 100000 after baseline, got %d", attr["PKG-A"])
-	}
-	if attr["PKG-B"] != 400000 {
-		t.Fatalf("PKG-B want 400000 after spillover, got %d", attr["PKG-B"])
-	}
-}
-
 func TestDisplayPackageIdFallsBackToLegacyInternalId(t *testing.T) {
 	pkg := &WisemodelPackage{PackageId: "PKG_LEGACY_1742457600000000000"}
 	if got := pkg.DisplayPackageId(); got != "PKG_LEGACY" {
 		t.Fatalf("want legacy display id PKG_LEGACY, got %s", got)
-	}
-}
-
-func TestSelectPackageWithRemainingQuota(t *testing.T) {
-	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	mar := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	apr := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-
-	pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &mar, QuotaGranted: 500000}
-	pkgB := &WisemodelPackage{PackageId: "PKG-B", CreatedAt: feb, ValidUntil: &apr, QuotaGranted: 1000000}
-	pkgs := []*WisemodelPackage{pkgA, pkgB}
-
-	selected := SelectPackageWithRemainingQuota(pkgs, map[string]int64{
-		"PKG-A": 500000,
-		"PKG-B": 200000,
-	})
-	if selected == nil || selected.PackageId != "PKG-B" {
-		t.Fatalf("want PKG-B, got %#v", selected)
-	}
-}
-
-func TestSelectPackageWithSufficientQuota_SkipsFirstPackageWhenRequestWouldOverflow(t *testing.T) {
-	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	mar := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	apr := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-
-	pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &mar, QuotaGranted: 500}
-	pkgB := &WisemodelPackage{PackageId: "PKG-B", CreatedAt: feb, ValidUntil: &apr, QuotaGranted: 2_000}
-	pkgs := []*WisemodelPackage{pkgA, pkgB}
-
-	selected := SelectPackageWithSufficientQuota(pkgs, map[string]int64{
-		"PKG-A": 450,
-		"PKG-B": 200,
-	}, 300)
-	if selected == nil || selected.PackageId != "PKG-B" {
-		t.Fatalf("want PKG-B, got %#v", selected)
-	}
-}
-
-func TestSelectPackageWithSufficientQuota_ReturnsNilWhenNoPackageCanCoverRequest(t *testing.T) {
-	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	mar := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	apr := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-
-	pkgA := &WisemodelPackage{PackageId: "PKG-A", CreatedAt: jan, ValidUntil: &mar, QuotaGranted: 500}
-	pkgB := &WisemodelPackage{PackageId: "PKG-B", CreatedAt: feb, ValidUntil: &apr, QuotaGranted: 2_000}
-	pkgs := []*WisemodelPackage{pkgA, pkgB}
-
-	selected := SelectPackageWithSufficientQuota(pkgs, map[string]int64{
-		"PKG-A": 450,
-		"PKG-B": 1_900,
-	}, 300)
-	if selected != nil {
-		t.Fatalf("want nil when every package would overflow, got %#v", selected)
 	}
 }
 
@@ -283,6 +112,7 @@ func TestBuildPackageUsageRowsDetails(t *testing.T) {
 		PackageId:      "PKG001_ts",
 		OriginalPoints: 10000,
 		QuotaGranted:   10000,
+		RemainQuota:    1000, // consumed 9000
 		ValidUntil:     &expire,
 	}
 	// Tokens 包
@@ -290,15 +120,11 @@ func TestBuildPackageUsageRowsDetails(t *testing.T) {
 		PackageId:      "PKG002_ts",
 		OriginalTokens: 500000,
 		QuotaGranted:   500000,
+		RemainQuota:    350000, // consumed 150000
 		ValidUntil:     &expire,
 	}
 
 	packages := []*WisemodelPackage{pkgPoints, pkgTokens}
-
-	attribution := map[string]int64{
-		"PKG001_ts": 9000,
-		"PKG002_ts": 150000,
-	}
 
 	modelMap := map[string][]ModelUsageRow{
 		"PKG001_ts": {
@@ -310,7 +136,7 @@ func TestBuildPackageUsageRowsDetails(t *testing.T) {
 		},
 	}
 
-	rows := BuildPackageUsageRows(packages, attribution, modelMap)
+	rows := BuildPackageUsageRows(packages, modelMap)
 
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 rows, got %d", len(rows))
@@ -366,12 +192,12 @@ func TestBuildPackageUsageRowsDetailsEmpty(t *testing.T) {
 		PackageId:      "PKG003_ts",
 		OriginalPoints: 5000,
 		QuotaGranted:   5000,
+		RemainQuota:    5000, // no consumption
 		ValidUntil:     &expire,
 	}
-	attribution := map[string]int64{"PKG003_ts": 0}
 	modelMap := map[string][]ModelUsageRow{}
 
-	rows := BuildPackageUsageRows([]*WisemodelPackage{pkg}, attribution, modelMap)
+	rows := BuildPackageUsageRows([]*WisemodelPackage{pkg}, modelMap)
 
 	details, ok := rows[0]["details"].([]interface{})
 	if !ok {
@@ -465,107 +291,5 @@ func TestFilterPackagesByModel(t *testing.T) {
 					tc.packages, tc.model, len(got), tc.wantEligible)
 			}
 		})
-	}
-}
-
-// TestSelectPackageAfterFIFOSort_LargeOldPackageSelected is the regression test for the
-// bug where eligiblePackages was filtered before CalculatePackageAttribution sorted packages,
-// causing the newest (smallest) package to be selected instead of the oldest (largest).
-//
-// Setup:
-//   - oldLargePkg: created Jan, valid until Dec, QuotaGranted=500_000_000
-//   - newSmallPkg: created Feb, valid until Dec, QuotaGranted=7 (from 15 points)
-//
-// If filtering happens BEFORE sort: DB order is DESC, newSmallPkg comes first → selected.
-// If filtering happens AFTER sort:  FIFO order is ASC, oldLargePkg comes first → selected.
-func TestSelectPackageAfterFIFOSort_LargeOldPackageSelected(t *testing.T) {
-	expire := time.Date(2027, 12, 31, 23, 59, 59, 0, time.UTC)
-	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-
-	oldLargePkg := &WisemodelPackage{
-		PackageId:    "pkg-old-large",
-		CreatedAt:    jan,
-		ValidUntil:   &expire,
-		QuotaGranted: 500_000_000,
-		// AvailableModels="" → universal
-	}
-	newSmallPkg := &WisemodelPackage{
-		PackageId:    "pkg-new-small",
-		CreatedAt:    feb,
-		ValidUntil:   &expire,
-		QuotaGranted: 7,
-		// AvailableModels="" → universal
-	}
-
-	// DB order (created_at DESC): newSmallPkg first, oldLargePkg second
-	packages := []*WisemodelPackage{newSmallPkg, oldLargePkg}
-
-	// Step 1: Sort via CalculatePackageAttribution (sorts in-place to FIFO order)
-	SortPackagesByValidUntil(packages)
-	// After sort (ValidUntil same, so CreatedAt ASC): oldLargePkg first, newSmallPkg second
-
-	// Step 2: Filter AFTER sort — eligible = both (both universal)
-	eligible := FilterPackagesByModel(packages, "any-model")
-
-	// Step 3: Select with zero attribution (neither has been consumed)
-	attribution := map[string]int64{
-		"pkg-old-large": 0,
-		"pkg-new-small": 0,
-	}
-	selected := SelectPackageWithRemainingQuota(eligible, attribution)
-
-	if selected == nil {
-		t.Fatal("expected a package to be selected, got nil")
-	}
-	if selected.PackageId != "pkg-old-large" {
-		t.Errorf("expected pkg-old-large (FIFO first), got %s (QuotaGranted=%d)",
-			selected.PackageId, selected.QuotaGranted)
-	}
-}
-
-// TestSelectPackageBeforeFIFOSort_SmallNewPackageWouldBeSelected documents the OLD
-// (buggy) behavior: filtering before sort causes the newest small package to win.
-// This test is intentionally named to show what WOULD happen without the fix.
-func TestSelectPackageBeforeFIFOSort_SmallNewPackageWouldBeSelected(t *testing.T) {
-	expire := time.Date(2027, 12, 31, 23, 59, 59, 0, time.UTC)
-	jan := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	feb := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-
-	oldLargePkg := &WisemodelPackage{
-		PackageId:    "pkg-old-large",
-		CreatedAt:    jan,
-		ValidUntil:   &expire,
-		QuotaGranted: 500_000_000,
-	}
-	newSmallPkg := &WisemodelPackage{
-		PackageId:    "pkg-new-small",
-		CreatedAt:    feb,
-		ValidUntil:   &expire,
-		QuotaGranted: 7,
-	}
-
-	// DB order (created_at DESC): newSmallPkg first
-	packages := []*WisemodelPackage{newSmallPkg, oldLargePkg}
-
-	// OLD BUG: filter BEFORE sort
-	eligible := FilterPackagesByModel(packages, "any-model")
-	// eligible order: [newSmallPkg, oldLargePkg] — small one first
-
-	// Sort happens AFTER (in CalculatePackageAttribution), but eligible is already snapshotted
-	SortPackagesByValidUntil(packages)
-
-	attribution := map[string]int64{
-		"pkg-old-large": 0,
-		"pkg-new-small": 0,
-	}
-	selected := SelectPackageWithRemainingQuota(eligible, attribution)
-
-	// With the old order, newSmallPkg (QuotaGranted=7) would be selected — documenting the bug
-	if selected == nil {
-		t.Fatal("expected selection, got nil")
-	}
-	if selected.PackageId != "pkg-new-small" {
-		t.Errorf("this test documents buggy behavior: expected pkg-new-small, got %s", selected.PackageId)
 	}
 }

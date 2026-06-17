@@ -288,6 +288,12 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptT
 		}
 	}
 
+	// 预扣兜底：与标准路径(price.go ModelPriceHelper)一致。表达式产出正成本但
+	// 四舍五入后为 0 的付费模型，兜底为 1，避免 est=0 旁路 wisemodel 资源包按量门控。
+	if !freeModel && preConsumedQuota <= 0 && groupRatioInfo.GroupRatio > 0 && quotaBeforeGroup > 0 {
+		preConsumedQuota = 1
+	}
+
 	exprHash := billingexpr.ExprHashString(exprStr)
 	snapshot := &billingexpr.BillingSnapshot{
 		BillingMode:               billing_setting.BillingModeTieredExpr,
