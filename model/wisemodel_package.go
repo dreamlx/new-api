@@ -156,8 +156,10 @@ const wisemodelRemainBackfilledKey = "WisemodelRemainBackfilled"
 // 后台回填会让尚未回填的包短暂显示 remain=0 而被误拒。
 // 每个用户的回填在单事务内完成，进程中途崩溃不会留下半写状态。
 func BackfillWisemodelRemainQuota() error {
+	// 用结构体条件而非裸 "key = ?"：key 是 MySQL/PostgreSQL 保留字，
+	// GORM 对结构体字段会自动按库加引号(跨库安全，符合 Rule 2)。
 	var flag Option
-	err := DB.Where("key = ?", wisemodelRemainBackfilledKey).First(&flag).Error
+	err := DB.Where(&Option{Key: wisemodelRemainBackfilledKey}).First(&flag).Error
 	if err == nil && flag.Value == "true" {
 		return nil
 	}
@@ -206,7 +208,11 @@ func BackfillWisemodelRemainQuota() error {
 			return err
 		}
 	}
-	return DB.Save(&Option{Key: wisemodelRemainBackfilledKey, Value: "true"}).Error
+	// 同样用结构体条件的 upsert(FirstOrCreate+Assign),避免裸保留字且在标志行
+	// 不存在时正确插入、存在时置为 true。
+	return DB.Where(&Option{Key: wisemodelRemainBackfilledKey}).
+		Assign(&Option{Value: "true"}).
+		FirstOrCreate(&Option{}).Error
 }
 
 // SortPackagesByValidUntil 按 ValidUntil ASC 排序，nil（永久包）排最后
