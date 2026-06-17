@@ -165,14 +165,22 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			return
 		}
+		// 区分账本不可用(DB 故障)与真正耗尽：前者映射为可重试的 503，
+		// 后者(无包/不支持模型/额度耗尽)才是不可重试的 403。
+		mapWmErr := func(wErr error) *types.NewAPIError {
+			if errors.Is(wErr, service.ErrWisemodelServiceUnavailable) {
+				return types.NewErrorWithStatusCode(wErr, "wisemodel_service_unavailable", http.StatusServiceUnavailable)
+			}
+			return types.NewErrorWithStatusCode(wErr, "insufficient_quota", http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		}
 		if wErr := service.PrepareWisemodelPackageForPreConsume(c, relayInfo.OriginModelName, priceData.QuotaToPreConsume); wErr != nil {
-			newAPIError = types.NewErrorWithStatusCode(wErr, "insufficient_quota", http.StatusForbidden, types.ErrOptionWithSkipRetry())
+			newAPIError = mapWmErr(wErr)
 			return
 		}
 		// wisemodel 资源包原子预扣（在 user/token 预扣成功后执行）
 		// 失败时只设置 newAPIError+return，由下方 defer 统一回滚 user/token 预扣
 		if wErr := service.PreConsumeWisemodelPkg(c, priceData.QuotaToPreConsume); wErr != nil {
-			newAPIError = types.NewErrorWithStatusCode(wErr, "insufficient_quota", http.StatusForbidden, types.ErrOptionWithSkipRetry())
+			newAPIError = mapWmErr(wErr)
 			return
 		}
 	}

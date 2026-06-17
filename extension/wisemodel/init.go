@@ -30,10 +30,10 @@ var initOnce sync.Once
 //   - Registers &model.WisemodelPackage{} for AutoMigrate. Note: callers
 //     must register BEFORE model.InitDB runs migrateDB(), so the cleanest
 //     wiring order in main.go is:
-//       wisemodel.RegisterModels()        // before InitDB
-//       err := model.InitDB()
-//       ...
-//       wisemodel.Init()                  // after InitDB; starts cron + migrations
+//     wisemodel.RegisterModels()        // before InitDB
+//     err := model.InitDB()
+//     ...
+//     wisemodel.Init()                  // after InitDB; starts cron + migrations
 //   - Runs wisemodel-specific BIGINT column type migrations
 //     (wisemodel_packages.original_points / original_tokens). The
 //     users.quota migration is generic and stays on main as
@@ -47,7 +47,13 @@ func Init() {
 			common.SysError("wisemodel migration failed: " + err.Error())
 		}
 
-		// 2. Launch the expired package quota reclaim loop.
+		// 2. One-time backfill of remain_quota from historical consumption
+		//    (after AutoMigrate added the column). Idempotent via option flag.
+		if err := model.BackfillWisemodelRemainQuota(); err != nil {
+			common.SysError("wisemodel remain_quota backfill failed: " + err.Error())
+		}
+
+		// 3. Launch the expired package quota reclaim loop.
 		go reclaimExpiredPackagesLoop()
 	})
 }
