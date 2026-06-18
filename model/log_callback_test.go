@@ -39,6 +39,10 @@ func setupCallbackTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func ptrCallbackExternalUserId(externalUserId string) *string {
+	return &externalUserId
+}
+
 // ==================== HMAC Signature ====================
 
 func TestGenerateHMACSignature(t *testing.T) {
@@ -75,7 +79,7 @@ func TestHMACSignatureDifferentData(t *testing.T) {
 func TestCallbackSkipsWhenDisabled(t *testing.T) {
 	db := setupCallbackTestDB(t)
 
-	user := &User{Username: "cb_user", Email: "cb@test.com", ExternalUserId: "ext_cb_001", IsExternal: true}
+	user := &User{Username: "cb_user", Email: "cb@test.com", ExternalUserId: ptrCallbackExternalUserId("ext_cb_001"), IsExternal: true}
 	db.Create(user)
 
 	token := &Token{
@@ -94,7 +98,7 @@ func TestCallbackSkipsWhenDisabled(t *testing.T) {
 func TestCallbackSkipsWhenNoUrl(t *testing.T) {
 	db := setupCallbackTestDB(t)
 
-	user := &User{Username: "cb_user2", Email: "cb2@test.com", ExternalUserId: "ext_cb_002", IsExternal: true}
+	user := &User{Username: "cb_user2", Email: "cb2@test.com", ExternalUserId: ptrCallbackExternalUserId("ext_cb_002"), IsExternal: true}
 	db.Create(user)
 
 	token := &Token{
@@ -112,7 +116,7 @@ func TestCallbackSkipsWhenNoUrl(t *testing.T) {
 func TestCallbackSkipsNonExternalUser(t *testing.T) {
 	db := setupCallbackTestDB(t)
 
-	user := &User{Username: "internal_user", Email: "int@test.com", ExternalUserId: ""}
+	user := &User{Username: "internal_user", Email: "int@test.com"}
 	db.Create(user)
 
 	token := &Token{
@@ -153,7 +157,7 @@ func TestCallbackSendsCorrectPayload(t *testing.T) {
 	}))
 	defer server.Close()
 
-	user := &User{Username: "cb_happy", Email: "happy@test.com", ExternalUserId: "ext_happy_001", IsExternal: true}
+	user := &User{Username: "cb_happy", Email: "happy@test.com", ExternalUserId: ptrCallbackExternalUserId("ext_happy_001"), IsExternal: true}
 	db.Create(user)
 
 	token := &Token{
@@ -209,7 +213,7 @@ func TestCallbackNoSignatureWhenNoSecret(t *testing.T) {
 	}))
 	defer server.Close()
 
-	user := &User{Username: "cb_nosec", Email: "nosec@test.com", ExternalUserId: "ext_nosec", IsExternal: true}
+	user := &User{Username: "cb_nosec", Email: "nosec@test.com", ExternalUserId: ptrCallbackExternalUserId("ext_nosec"), IsExternal: true}
 	db.Create(user)
 
 	token := &Token{

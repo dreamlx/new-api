@@ -49,4 +49,22 @@ func SetVideoRouter(router *gin.Engine) {
 		// Maps to: /?Action=CVSync2AsyncSubmitTask&Version=2022-08-31 and /?Action=CVSync2AsyncGetResult&Version=2022-08-31
 		jimengOfficialGroup.POST("/", controller.RelayTask)
 	}
+
+	// HappyHorse native API routes
+	happyHorseRouter := router.Group("/happyhorse/api")
+	happyHorseRouter.Use(middleware.RouteTag("relay"))
+	happyHorseRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	{
+		happyHorseRouter.POST("/generate", controller.RelayTask)
+		happyHorseRouter.GET("/status/:task_id", controller.RelayTaskFetch)
+	}
+
+	// Volcano-compatible API routes (for Seedance and other Volcano-compatible channels)
+	volcanoV3Router := router.Group("/api/v3/contents/generations")
+	volcanoV3Router.Use(middleware.RouteTag("relay"))
+	volcanoV3Router.Use(middleware.TokenAuth(), middleware.Distribute())
+	{
+		volcanoV3Router.POST("/tasks", controller.RelayTask)
+		volcanoV3Router.GET("/tasks/:task_id", controller.RelayTaskFetch)
+	}
 }

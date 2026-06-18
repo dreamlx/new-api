@@ -60,6 +60,11 @@ type TaskAdaptor interface {
 	// Return 0 to keep the pre-charged amount unchanged.
 	AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int
 
+	// DisablePerCallBilling returns true if this adaptor should opt out of
+	// per-call billing and instead settle based on actual output after task
+	// completion. When true, AdjustBillingOnComplete determines the final quota.
+	DisablePerCallBilling() bool
+
 	// ── Request / Response ───────────────────────────────────────────
 
 	BuildRequestURL(info *relaycommon.RelayInfo) (string, error)

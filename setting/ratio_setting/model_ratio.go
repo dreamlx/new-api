@@ -146,6 +146,18 @@ var defaultModelRatio = map[string]float64{
 	"claude-opus-4-6-high":                      2.5,
 	"claude-opus-4-6-medium":                    2.5,
 	"claude-opus-4-6-low":                       2.5,
+	"claude-opus-4-7":                           2.5,
+	"claude-opus-4-7-max":                       2.5,
+	"claude-opus-4-7-xhigh":                     2.5,
+	"claude-opus-4-7-high":                      2.5,
+	"claude-opus-4-7-medium":                    2.5,
+	"claude-opus-4-7-low":                       2.5,
+	"claude-opus-4-8":                           2.5,
+	"claude-opus-4-8-max":                       2.5,
+	"claude-opus-4-8-xhigh":                     2.5,
+	"claude-opus-4-8-high":                      2.5,
+	"claude-opus-4-8-medium":                    2.5,
+	"claude-opus-4-8-low":                       2.5,
 	"claude-3-opus-20240229":                    7.5, // $15 / 1M tokens
 	"claude-opus-4-20250514":                    7.5,
 	"claude-opus-4-1-20250805":                  7.5,
@@ -297,6 +309,10 @@ var defaultModelPrice = map[string]float64{
 	"mj_upload":                      0.05,
 	"sora-2":                         0.3,
 	"sora-2-pro":                     0.5,
+	"happyhorse-1.0-t2v":             0.9,
+	"happyhorse-1.0-i2v":             0.9,
+	"happyhorse-1.0-r2v":             0.9,
+	"happyhorse-1.0-video-edit":      0.9,
 	"gpt-4o-mini-tts":                0.3,
 	"veo-3.0-generate-001":           0.4,
 	"veo-3.0-fast-generate-001":      0.15,
@@ -509,6 +525,9 @@ func getHardcodedCompletionModelRatio(name string) (float64, bool) {
 		}
 		// gpt-5 匹配
 		if strings.HasPrefix(name, "gpt-5") {
+			if strings.HasPrefix(name, "gpt-5.5") {
+				return 6, true
+			}
 			if strings.HasPrefix(name, "gpt-5.4") {
 				if strings.HasPrefix(name, "gpt-5.4-nano") {
 					return 6.25, true
@@ -698,6 +717,18 @@ func GetModelPriceCopy() map[string]float64 {
 
 func GetCompletionRatioCopy() map[string]float64 {
 	return completionRatioMap.ReadAll()
+}
+
+func GetImageRatioCopy() map[string]float64 {
+	return imageRatioMap.ReadAll()
+}
+
+func GetAudioRatioCopy() map[string]float64 {
+	return audioRatioMap.ReadAll()
+}
+
+func GetAudioCompletionRatioCopy() map[string]float64 {
+	return audioCompletionRatioMap.ReadAll()
 }
 
 // 转换模型名，减少渠道必须配置各种带参数模型

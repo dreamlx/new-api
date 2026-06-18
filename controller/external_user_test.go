@@ -9,12 +9,13 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -24,7 +25,7 @@ func setupTestDB() *gorm.DB {
 		panic("failed to connect database")
 	}
 
-	db.AutoMigrate(&model.User{}, &model.Token{}, &model.TopUp{}, &model.Log{})
+	db.AutoMigrate(&model.User{}, &model.Token{}, &model.TopUp{}, &model.Log{}, &model.Platform{})
 
 	// Create channels table
 	db.Exec(`CREATE TABLE IF NOT EXISTS channels (
@@ -45,7 +46,16 @@ func setupTestDB() *gorm.DB {
 	return db
 }
 
-func setupTestRouter() *gin.Engine {
+func ptrExternalUserId(externalUserId string) *string {
+	return &externalUserId
+}
+
+// setupTestRouter wires a fresh in-memory DB + V1 routes guarded by
+// PlatformAuth, and provisions a default platform whose credentials are
+// auto-injected into every subsequent doRequest call. Each top-level Test
+// function calls this once at the start.
+func setupTestRouter(t *testing.T) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 
@@ -53,8 +63,14 @@ func setupTestRouter() *gin.Engine {
 	model.DB = testDB
 	model.LOG_DB = testDB
 
+	// Provision the default platform for this test scope and arm auto-inject.
+	installDefaultTestPlatform(t, fmt.Sprintf("v1_%s", t.Name()))
+
+	// V1 group is guarded by PlatformAuth in production; mirror that here so
+	// tests cover the realistic request path (including the 401/403 branches).
 	api := router.Group("/api")
 	ext := api.Group("/user/external")
+	ext.Use(middleware.PlatformAuth())
 	{
 		ext.POST("/sync", SyncExternalUser)
 		ext.POST("/topup", ExternalUserTopUp)
@@ -69,9 +85,13 @@ func setupTestRouter() *gin.Engine {
 		ext.DELETE("/:external_user_id", DeleteExternalUser)
 	}
 
+	t.Cleanup(resetDefaultTestPlatform)
 	return router
 }
 
+// doRequest auto-injects defaultTestPlatformHeaders if installDefaultTestPlatform
+// has been called for this test. Use doRequestNoAuth (see test helpers) to
+// explicitly skip the headers for negative-path (401) tests.
 func doRequest(router *gin.Engine, method, path string, body interface{}) *httptest.ResponseRecorder {
 	var buf *bytes.Buffer
 	if body != nil {
@@ -82,6 +102,9 @@ func doRequest(router *gin.Engine, method, path string, body interface{}) *httpt
 	}
 	req, _ := http.NewRequest(method, path, buf)
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range defaultTestPlatformHeaders {
+		req.Header.Set(k, v)
+	}
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	return w
@@ -97,7 +120,7 @@ func parseResponse(t *testing.T, w *httptest.ResponseRecorder) map[string]interf
 // ==================== Sync ====================
 
 func TestSyncExternalUser(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	tests := []struct {
 		name       string
@@ -143,11 +166,11 @@ func TestSyncExternalUser(t *testing.T) {
 // ==================== TopUp ====================
 
 func TestTopupExternalUser(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "topup_user", Email: "topup@test.com",
-		ExternalUserId: "topup_001", IsExternal: true, Quota: 100000,
+		ExternalUserId: ptrExternalUserId("topup_001"), IsExternal: true, Quota: 100000,
 	})
 
 	tests := []struct {
@@ -188,11 +211,11 @@ func TestTopupExternalUser(t *testing.T) {
 // ==================== Deduct ====================
 
 func TestExternalUserDeduct(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "deduct_user", Email: "deduct@test.com",
-		ExternalUserId: "deduct_001", IsExternal: true, Quota: 10000000, // $20
+		ExternalUserId: ptrExternalUserId("deduct_001"), IsExternal: true, Quota: 10000000, // $20
 	})
 
 	tests := []struct {
@@ -246,11 +269,11 @@ func TestExternalUserDeduct(t *testing.T) {
 // ==================== Token Create ====================
 
 func TestCreateExternalUserToken(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "token_user", Email: "token@test.com",
-		ExternalUserId: "token_001", IsExternal: true, Quota: 20000000, // $40
+		ExternalUserId: ptrExternalUserId("token_001"), IsExternal: true, Quota: 20000000, // $40
 	})
 
 	tests := []struct {
@@ -323,11 +346,11 @@ func TestCreateExternalUserToken(t *testing.T) {
 // ==================== Token Delete ====================
 
 func TestDeleteExternalUserToken(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	user := &model.User{
 		Username: "del_token_user", Email: "del_token@test.com",
-		ExternalUserId: "del_token_001", IsExternal: true,
+		ExternalUserId: ptrExternalUserId("del_token_001"), IsExternal: true,
 	}
 	model.DB.Create(user)
 
@@ -371,11 +394,11 @@ func TestDeleteExternalUserToken(t *testing.T) {
 // ==================== Token List ====================
 
 func TestGetExternalUserTokens(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	user := &model.User{
 		Username: "list_user", Email: "list@test.com",
-		ExternalUserId: "list_001", IsExternal: true,
+		ExternalUserId: ptrExternalUserId("list_001"), IsExternal: true,
 	}
 	model.DB.Create(user)
 
@@ -406,11 +429,11 @@ func TestGetExternalUserTokens(t *testing.T) {
 // ==================== Token Verify ====================
 
 func TestVerifyExternalUserToken(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	user := &model.User{
 		Username: "verify_user", Email: "verify@test.com",
-		ExternalUserId: "verify_001", IsExternal: true,
+		ExternalUserId: ptrExternalUserId("verify_001"), IsExternal: true,
 	}
 	model.DB.Create(user)
 
@@ -491,11 +514,11 @@ func TestVerifyExternalUserToken(t *testing.T) {
 // ==================== Stats ====================
 
 func TestGetExternalUserStats(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "stats_user", Email: "stats@test.com",
-		ExternalUserId: "stats_001", IsExternal: true, Quota: 5000000,
+		ExternalUserId: ptrExternalUserId("stats_001"), IsExternal: true, Quota: 5000000,
 	})
 
 	w := doRequest(router, "GET", "/api/user/external/stats_001/stats", nil)
@@ -512,11 +535,11 @@ func TestGetExternalUserStats(t *testing.T) {
 // ==================== Logs ====================
 
 func TestGetExternalUserLogs(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	user := &model.User{
 		Username: "logs_user", Email: "logs@test.com",
-		ExternalUserId: "logs_001", IsExternal: true,
+		ExternalUserId: ptrExternalUserId("logs_001"), IsExternal: true,
 	}
 	model.DB.Create(user)
 
@@ -525,7 +548,7 @@ func TestGetExternalUserLogs(t *testing.T) {
 		model.LOG_DB.Create(&model.Log{
 			UserId: user.Id, Username: user.Username,
 			CreatedAt: common.GetTimestamp() - int64(i*100),
-			Type: model.LogTypeConsume, ModelName: "deepseek-chat",
+			Type:      model.LogTypeConsume, ModelName: "deepseek-chat",
 			Quota: 1000, PromptTokens: 100, CompletionTokens: 50,
 		})
 	}
@@ -545,7 +568,7 @@ func TestGetExternalUserLogs(t *testing.T) {
 // ==================== Models ====================
 
 func TestGetExternalUserModels(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 	w := doRequest(router, "GET", "/api/user/external/models", nil)
 	assert.Equal(t, 200, w.Code)
 
@@ -558,11 +581,11 @@ func TestGetExternalUserModels(t *testing.T) {
 // ==================== Delete User ====================
 
 func TestDeleteExternalUser(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	user := &model.User{
 		Username: "del_user", Email: "del@test.com",
-		ExternalUserId: "del_001", IsExternal: true,
+		ExternalUserId: ptrExternalUserId("del_001"), IsExternal: true,
 		Status: common.UserStatusEnabled,
 	}
 	model.DB.Create(user)
@@ -589,7 +612,7 @@ func TestDeleteExternalUser(t *testing.T) {
 }
 
 func TestDeleteExternalUserThenReregister(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	// Create user
 	w := doRequest(router, "POST", "/api/user/external/sync", map[string]interface{}{
@@ -613,11 +636,11 @@ func TestDeleteExternalUserThenReregister(t *testing.T) {
 // ==================== TopUp Idempotency ====================
 
 func TestTopupIdempotency(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "idempotent_user", Email: "idempotent@test.com",
-		ExternalUserId: "idempotent_001", IsExternal: true, Quota: 0,
+		ExternalUserId: ptrExternalUserId("idempotent_001"), IsExternal: true, Quota: 0,
 	})
 
 	body := map[string]interface{}{
@@ -646,13 +669,13 @@ func TestTopupIdempotency(t *testing.T) {
 
 // ==================== Token Delete Refund ====================
 
-func TestDeleteExternalUserTokenRefund(t *testing.T) {
-	router := setupTestRouter()
+func TestDeleteExternalUserTokenNoRefund(t *testing.T) {
+	router := setupTestRouter(t)
 
 	initialQuota := 20000000
 	user := &model.User{
-		Username: "refund_user", Email: "refund@test.com",
-		ExternalUserId: "refund_001", IsExternal: true, Quota: initialQuota,
+		Username: "norefund_user", Email: "norefund@test.com",
+		ExternalUserId: ptrExternalUserId("norefund_001"), IsExternal: true, Quota: initialQuota,
 	}
 	model.DB.Create(user)
 
@@ -660,8 +683,8 @@ func TestDeleteExternalUserTokenRefund(t *testing.T) {
 
 	// Create token via API (deducts from user)
 	w := doRequest(router, "POST", "/api/user/external/token", map[string]interface{}{
-		"external_user_id": "refund_001",
-		"token_name":       "Refundable Token",
+		"external_user_id": "norefund_001",
+		"token_name":       "Non-Refundable Token",
 		"allocated_quota":  allocatedQuota,
 	})
 	assert.Equal(t, 200, w.Code)
@@ -673,26 +696,27 @@ func TestDeleteExternalUserTokenRefund(t *testing.T) {
 	model.DB.First(user, user.Id)
 	assert.Equal(t, initialQuota-allocatedQuota, user.Quota)
 
-	// Delete token — should refund
-	w = doRequest(router, "DELETE", fmt.Sprintf("/api/user/external/refund_001/token/%d", tokenId), nil)
+	// Delete token — NO refund (remaining quota stays consumed)
+	w = doRequest(router, "DELETE", fmt.Sprintf("/api/user/external/norefund_001/token/%d", tokenId), nil)
 	assert.Equal(t, 200, w.Code)
 	resp = parseResponse(t, w)
 	data = resp["data"].(map[string]interface{})
-	assert.Equal(t, float64(allocatedQuota), data["refunded_quota"])
+	assert.Nil(t, data["refunded_quota"]) // no refund field in response
+	assert.Equal(t, float64(tokenId), data["token_id"])
 
-	// Verify user quota was restored
+	// Verify user quota was NOT restored
 	model.DB.First(user, user.Id)
-	assert.Equal(t, initialQuota, user.Quota)
+	assert.Equal(t, initialQuota-allocatedQuota, user.Quota)
 }
 
 // ==================== Token with ModelLimits ====================
 
 func TestCreateExternalUserTokenWithModelLimits(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "ml_user", Email: "ml@test.com",
-		ExternalUserId: "ml_001", IsExternal: true, Quota: 20000000,
+		ExternalUserId: ptrExternalUserId("ml_001"), IsExternal: true, Quota: 20000000,
 	})
 
 	t.Run("带模型限制", func(t *testing.T) {
@@ -737,11 +761,11 @@ func TestCreateExternalUserTokenWithModelLimits(t *testing.T) {
 // ==================== Token with Group ====================
 
 func TestCreateExternalUserTokenWithGroup(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	model.DB.Create(&model.User{
 		Username: "grp_user", Email: "grp@test.com",
-		ExternalUserId: "grp_001", IsExternal: true, Quota: 20000000,
+		ExternalUserId: ptrExternalUserId("grp_001"), IsExternal: true, Quota: 20000000,
 	})
 
 	t.Run("指定有效分组", func(t *testing.T) {
@@ -777,7 +801,7 @@ func TestCreateExternalUserTokenWithGroup(t *testing.T) {
 // ==================== Models with Group ====================
 
 func TestGetExternalUserModelsWithGroup(t *testing.T) {
-	router := setupTestRouter()
+	router := setupTestRouter(t)
 
 	t.Run("默认分组", func(t *testing.T) {
 		w := doRequest(router, "GET", "/api/user/external/models", nil)
@@ -794,5 +818,52 @@ func TestGetExternalUserModelsWithGroup(t *testing.T) {
 		resp := parseResponse(t, w)
 		data := resp["data"].(map[string]interface{})
 		assert.Equal(t, "vip", data["group"])
+	})
+}
+
+// ==================== Unlimited Quota Token ====================
+
+func TestCreateExternalUserTokenUnlimitedQuota(t *testing.T) {
+	router := setupTestRouter(t)
+
+	initialQuota := 10000000
+	model.DB.Create(&model.User{
+		Username: "unl_user", Email: "unl@test.com",
+		ExternalUserId: ptrExternalUserId("unl_001"), IsExternal: true, Quota: initialQuota,
+	})
+
+	t.Run("无限额度模式-不扣用户余额", func(t *testing.T) {
+		w := doRequest(router, "POST", "/api/user/external/token", map[string]interface{}{
+			"external_user_id": "unl_001",
+			"token_name":       "Unlimited Token",
+			"unlimited_quota":  true,
+		})
+		assert.Equal(t, 200, w.Code)
+		resp := parseResponse(t, w)
+		assert.Equal(t, true, resp["success"])
+		data := resp["data"].(map[string]interface{})
+		assert.Equal(t, true, data["unlimited_quota"])
+
+		// User quota must NOT be deducted
+		var user model.User
+		model.DB.Where("external_user_id = ?", "unl_001").First(&user)
+		assert.Equal(t, initialQuota, user.Quota)
+
+		// Token must have UnlimitedQuota=true
+		var token model.Token
+		model.DB.Where("name = ?", "Unlimited Token").First(&token)
+		assert.True(t, token.UnlimitedQuota)
+		assert.Equal(t, 0, token.RemainQuota)
+	})
+
+	t.Run("独立额度模式-缺少allocated_quota报错", func(t *testing.T) {
+		w := doRequest(router, "POST", "/api/user/external/token", map[string]interface{}{
+			"external_user_id": "unl_001",
+			"token_name":       "Bad Token",
+			// unlimited_quota=false (default), allocated_quota missing
+		})
+		assert.Equal(t, 400, w.Code)
+		resp := parseResponse(t, w)
+		assert.Contains(t, resp["message"], "allocated_quota")
 	})
 }

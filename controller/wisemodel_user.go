@@ -12,12 +12,12 @@ import (
 // 并发场景下若 duplicate key 则忽略错误。
 func createWisemodelToken(user *model.User, wisemodelKey string) error {
 	newToken := &model.Token{
-		UserId:          user.Id,
-		Key:             wisemodelKey,
-		Name:            "wisemodel-token",
-		Status:          common.TokenStatusEnabled,
-		CreatedTime:     common.GetTimestamp(),
-		AccessedTime:    common.GetTimestamp(),
+		UserId:         user.Id,
+		Key:            wisemodelKey,
+		Name:           "wisemodel-token",
+		Status:         common.TokenStatusEnabled,
+		CreatedTime:    common.GetTimestamp(),
+		AccessedTime:   common.GetTimestamp(),
 		ExpiredTime:    -1,
 		UnlimitedQuota: true,
 	}
@@ -55,16 +55,16 @@ func WisemodelBind(c *gin.Context) {
 	if user == nil {
 		// 用户不存在，创建新用户
 		user = &model.User{
-			Phone:          req.Phone,
-			Username:        req.Username,
-			DisplayName:     req.Username,
-			WisemodelKey:    req.WisemodelKey,
-			AffCode:         common.GetRandomString(16),
-			ExternalUserId:  "wm_" + req.Phone,
-			Role:            common.RoleCommonUser,
-			Status:          common.UserStatusEnabled,
-			Quota:           0,
+			Phone:        req.Phone,
+			Username:     req.Username,
+			DisplayName:  req.Username,
+			WisemodelKey: req.WisemodelKey,
+			AffCode:      common.GetRandomString(16),
+			Role:         common.RoleCommonUser,
+			Status:       common.UserStatusEnabled,
+			Quota:        0,
 		}
+		user.SetExternalUserId("wm_" + req.Phone)
 
 		// 生成随机密码（Wisemodel用户不使用密码登录）
 		randomPassword, err := common.GenerateKey()
@@ -110,6 +110,9 @@ func WisemodelBind(c *gin.Context) {
 			_ = model.DisableTokenByKey(user.WisemodelKey)
 		}
 
+		if user.AffCode == "" {
+			user.AffCode = common.GetRandomString(4)
+		}
 		user.WisemodelKey = req.WisemodelKey
 		err := model.DB.Save(user).Error
 		if err != nil {
@@ -166,6 +169,9 @@ func DeleteWisemodelKey(c *gin.Context) {
 	}
 
 	// 清空wisemodel_key
+	if user.AffCode == "" {
+		user.AffCode = common.GetRandomString(4)
+	}
 	user.WisemodelKey = ""
 	err := model.DB.Save(user).Error
 	if err != nil {
@@ -213,6 +219,9 @@ func UpdateWisemodelKey(c *gin.Context) {
 	}
 
 	// 更新wisemodel_key
+	if user.AffCode == "" {
+		user.AffCode = common.GetRandomString(4)
+	}
 	user.WisemodelKey = req.NewKey
 	err := model.DB.Save(user).Error
 	if err != nil {
@@ -275,6 +284,9 @@ func UpdatePhone(c *gin.Context) {
 	}
 
 	// 更新手机号
+	if user.AffCode == "" {
+		user.AffCode = common.GetRandomString(4)
+	}
 	user.Phone = req.NewPhone
 	err := model.DB.Save(user).Error
 	if err != nil {
@@ -349,6 +361,9 @@ func DeleteWisemodelUser(c *gin.Context) {
 	}
 
 	// 清空wisemodel相关字段
+	if user.AffCode == "" {
+		user.AffCode = common.GetRandomString(4)
+	}
 	user.WisemodelKey = ""
 	err = model.DB.Save(user).Error
 	if err != nil {

@@ -2,16 +2,36 @@ package helper
 
 import (
 	"fmt"
+	"math"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
+
+func modelPriceNotConfiguredError(modelName string, userId int) error {
+	if model.IsAdmin(userId) {
+		return fmt.Errorf(
+			"模型 %s 的价格未配置。请前往「系统设置 → 运营设置」开启自用模式，或在「系统设置 → 分组与模型定价设置」中为该模型配置价格；"+
+				"Model %s price not configured. Go to System Settings → Operation Settings to enable self-use mode, or configure the model price in System Settings → Group & Model Pricing.",
+			modelName, modelName,
+		)
+	}
+	return fmt.Errorf(
+		"模型 %s 的价格尚未由管理员配置，暂时无法使用，请联系站点管理员开启该模型；"+
+			"Model %s has not been priced by the administrator yet. Please contact the site administrator to enable this model.",
+		modelName, modelName,
+	)
+}
 
 // https://docs.claude.com/en/docs/build-with-claude/prompt-caching#1-hour-cache-duration
 const claudeCacheCreation1hMultiplier = 6 / 3.75
@@ -26,7 +46,7 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 	// check auto group
 	autoGroup, exists := ctx.Get("auto_group")
 	if exists {
-		logger.LogDebug(ctx, fmt.Sprintf("final group: %s", autoGroup))
+		logger.LogDebug(ctx, "final group: %s", autoGroup)
 		relayInfo.UsingGroup = autoGroup.(string)
 	}
 
@@ -49,6 +69,11 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	modelPrice, usePrice := ratio_setting.GetModelPrice(info.OriginModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
+
+	// Check if this model uses tiered_expr billing
+	if billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModeTieredExpr {
+		return modelPriceHelperTiered(c, info, promptTokens, meta, groupRatioInfo)
+	}
 
 	var preConsumedQuota int
 	var modelRatio float64
@@ -75,7 +100,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 				acceptUnsetRatio = true
 			}
 			if !acceptUnsetRatio {
-				return types.PriceData{}, fmt.Errorf("模型 %s 倍率或价格未配置，请联系管理员设置或开始自用模式；Model %s ratio or price not set, please set or start self-use mode", matchName, matchName)
+				return types.PriceData{}, modelPriceNotConfiguredError(matchName, info.UserId)
 			}
 		}
 		completionRatio = ratio_setting.GetCompletionRatio(info.OriginModelName)
@@ -88,12 +113,14 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		audioRatio = ratio_setting.GetAudioRatio(info.OriginModelName)
 		audioCompletionRatio = ratio_setting.GetAudioCompletionRatio(info.OriginModelName)
 		ratio := modelRatio * groupRatioInfo.GroupRatio
-		preConsumedQuota = int(float64(preConsumedTokens) * ratio)
+		// 与结算口径(service/text_quota.go 的 decimal.Round(0))一致：四舍五入而非截断
+		preConsumedQuota = int(math.Round(float64(preConsumedTokens) * ratio))
 	} else {
 		if meta.ImagePriceRatio != 0 {
 			modelPrice = modelPrice * meta.ImagePriceRatio
 		}
-		preConsumedQuota = int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
+		// 与结算口径(service/text_quota.go 的 decimal.Round(0))一致：四舍五入而非截断
+		preConsumedQuota = int(math.Round(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio))
 	}
 
 	// check if free model pre-consume is disabled
@@ -115,6 +142,16 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		}
 	}
 
+	// 预扣额度兜底：与结算口径(service/text_quota.go 中 quota==0 -> 1)对齐。
+	// 对计费率非零、但单次成本四舍五入后仍为 0 的付费模型(如按次价 < 0.5 额度),
+	// 兜底为 1，避免 preConsumedQuota=0 旁路按量门控(如 wisemodel 资源包预扣 PreConsumeWisemodelPkg)。
+	// 免费模型(价/倍率/分组倍率为 0)不受影响，仍按 0 预扣。
+	if !freeModel && preConsumedQuota <= 0 && groupRatioInfo.GroupRatio > 0 {
+		if (usePrice && modelPrice > 0) || (!usePrice && modelRatio > 0) {
+			preConsumedQuota = 1
+		}
+	}
+
 	priceData := types.PriceData{
 		FreeModel:            freeModel,
 		ModelPrice:           modelPrice,
@@ -133,7 +170,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	}
 
 	if common.DebugEnabled {
-		println(fmt.Sprintf("model_price_helper result: %s", priceData.ToSetting()))
+		logger.LogDebug(c, "model_price_helper result: %s", priceData.ToSetting())
 	}
 	info.PriceData = priceData
 	return priceData, nil
@@ -161,7 +198,7 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 				acceptUnsetRatio = true
 			}
 			if !ratioSuccess && !acceptUnsetRatio {
-				return types.PriceData{}, fmt.Errorf("模型 %s 倍率或价格未配置，请联系管理员设置或开始自用模式；Model %s ratio or price not set, please set or start self-use mode", matchName, matchName)
+				return types.PriceData{}, modelPriceNotConfiguredError(matchName, info.UserId)
 			}
 		}
 	}
@@ -200,14 +237,89 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 	return priceData, nil
 }
 
-func ContainPriceOrRatio(modelName string) bool {
-	_, ok := ratio_setting.GetModelPrice(modelName, false)
-	if ok {
+func HasModelBillingConfig(modelName string) bool {
+	if _, ok := ratio_setting.GetModelPrice(modelName, false); ok {
 		return true
 	}
-	_, ok, _ = ratio_setting.GetModelRatio(modelName)
-	if ok {
+	if _, ok, _ := ratio_setting.GetModelRatio(modelName); ok {
 		return true
 	}
-	return false
+	if billing_setting.GetBillingMode(modelName) != billing_setting.BillingModeTieredExpr {
+		return false
+	}
+	expr, ok := billing_setting.GetBillingExpr(modelName)
+	return ok && strings.TrimSpace(expr) != ""
+}
+
+func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta, groupRatioInfo types.GroupRatioInfo) (types.PriceData, error) {
+	exprStr, ok := billing_setting.GetBillingExpr(info.OriginModelName)
+	if !ok {
+		return types.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", info.OriginModelName)
+	}
+
+	estimatedCompletionTokens := 0
+	if meta.MaxTokens != 0 {
+		estimatedCompletionTokens = meta.MaxTokens
+	}
+
+	requestInput, err := ResolveIncomingBillingExprRequestInput(c, info)
+	if err != nil {
+		return types.PriceData{}, err
+	}
+
+	rawCost, trace, err := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{
+		P:   float64(promptTokens),
+		C:   float64(estimatedCompletionTokens),
+		Len: float64(promptTokens),
+	}, requestInput)
+	if err != nil {
+		return types.PriceData{}, fmt.Errorf("model %s tiered expr run failed: %w", info.OriginModelName, err)
+	}
+
+	// Expression coefficients are $/1M tokens prices; convert to quota the same way per-call billing does.
+	quotaBeforeGroup := rawCost / 1_000_000 * common.QuotaPerUnit
+	preConsumedQuota := billingexpr.QuotaRound(quotaBeforeGroup * groupRatioInfo.GroupRatio)
+
+	freeModel := false
+	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
+		if groupRatioInfo.GroupRatio == 0 {
+			preConsumedQuota = 0
+			freeModel = true
+		}
+	}
+
+	// 预扣兜底：与标准路径(price.go ModelPriceHelper)一致。表达式产出正成本但
+	// 四舍五入后为 0 的付费模型，兜底为 1，避免 est=0 旁路 wisemodel 资源包按量门控。
+	if !freeModel && preConsumedQuota <= 0 && groupRatioInfo.GroupRatio > 0 && quotaBeforeGroup > 0 {
+		preConsumedQuota = 1
+	}
+
+	exprHash := billingexpr.ExprHashString(exprStr)
+	snapshot := &billingexpr.BillingSnapshot{
+		BillingMode:               billing_setting.BillingModeTieredExpr,
+		ModelName:                 info.OriginModelName,
+		ExprString:                exprStr,
+		ExprHash:                  exprHash,
+		GroupRatio:                groupRatioInfo.GroupRatio,
+		EstimatedPromptTokens:     promptTokens,
+		EstimatedCompletionTokens: estimatedCompletionTokens,
+		EstimatedQuotaBeforeGroup: quotaBeforeGroup,
+		EstimatedQuotaAfterGroup:  preConsumedQuota,
+		EstimatedTier:             trace.MatchedTier,
+		QuotaPerUnit:              common.QuotaPerUnit,
+		ExprVersion:               billingexpr.ExprVersion(exprStr),
+	}
+	info.TieredBillingSnapshot = snapshot
+	info.BillingRequestInput = &requestInput
+
+	priceData := types.PriceData{
+		FreeModel:         freeModel,
+		GroupRatioInfo:    groupRatioInfo,
+		QuotaToPreConsume: preConsumedQuota,
+	}
+
+	logger.LogDebug(c, "model_price_helper_tiered result: model=%s preConsume=%d quotaBeforeGroup=%.2f groupRatio=%.2f tier=%s", info.OriginModelName, preConsumedQuota, quotaBeforeGroup, groupRatioInfo.GroupRatio, trace.MatchedTier)
+
+	info.PriceData = priceData
+	return priceData, nil
 }
