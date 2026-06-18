@@ -467,9 +467,21 @@ curl -c /tmp/test.txt -X POST -H "Content-Type: application/json" \
 
 **踩坑指标**（debug 用）：new-api 启动循环、log 报 `password authentication failed for user "root"` + IP 是 LH 网络段而不是 new-api 网络段。
 
-### 8.2 SSH fail2ban
+### 8.2 SSH fail2ban（2026-06-19 实装）
 
-短时多次 SSH 连接会触发 fail2ban，~5-15 分钟解禁。批量操作建议合并到单条 SSH 命令。
+**更正**：此前 SOP 误标 fail2ban 已存在；实际 2026-06-19 之前**根本没装**（也无 sshguard/denyhosts/crowdsec）。当时观察到的"短时多次连接被拒"是 sshd 自身的 `maxstartups 10:30:100` 并发节流（临时丢弃过多半开连接，非定时封 IP），不是 fail2ban。
+
+2026-06-19 起已安装 fail2ban v1.1.0 并启用。配置 `/etc/fail2ban/jail.local`：
+- `[sshd]` jail，`backend = systemd`（读 journald，本机 sshd 日志不落 `/var/log/auth.log`）
+- `maxretry = 5` / `findtime = 10m` / `bantime = 15m`
+- `ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10` —— **Tailscale CGNAT 段白名单：走 `lh-canary`（Tailscale）的维护连接永不被封，不会自锁**
+
+公网 `:22` 暴露、bot 持续爆破 → fail2ban 自动封。**注意**：从 `lh-canary-public`（公网 172.235.205.45）反复失败仍会被封（公网源 IP 不在 ignoreip）——维护一律走 `lh-canary`（Tailscale）。
+
+```bash
+fail2ban-client status sshd          # 查看 jail / 已封 IP
+fail2ban-client set sshd unbanip <IP> # 手动解封
+```
 
 ### 8.3 Admin API 需要 `New-Api-User` header
 
