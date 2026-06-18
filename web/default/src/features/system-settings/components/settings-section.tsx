@@ -22,7 +22,6 @@ import { useSuppressSettingsSectionHeader } from './settings-page-context'
 type SettingsSectionProps = {
   title: string
   titleProps?: React.HTMLAttributes<HTMLHeadingElement>
-  description?: string
   children: React.ReactNode
   className?: string
 }
@@ -30,7 +29,6 @@ type SettingsSectionProps = {
 export function SettingsSection({
   title,
   titleProps,
-  description,
   children,
   className,
 }: SettingsSectionProps) {
@@ -46,9 +44,6 @@ export function SettingsSection({
           >
             {title}
           </h3>
-          {description && (
-            <p className='text-muted-foreground text-sm'>{description}</p>
-          )}
         </div>
       )}
       {children}

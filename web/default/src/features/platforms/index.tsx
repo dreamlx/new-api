@@ -26,13 +26,13 @@ function PlatformsContent() {
     <>
       <SectionPageLayout>
         <SectionPageLayout.Title>{t('Platforms')}</SectionPageLayout.Title>
-        <SectionPageLayout.Description>
-          {t('Manage downstream platforms and their API credentials')}
-        </SectionPageLayout.Description>
         <SectionPageLayout.Actions>
           <PlatformsPrimaryButtons />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
+          <p className='text-muted-foreground mb-3 text-sm'>
+            {t('Manage downstream platforms and their API credentials')}
+          </p>
           <PlatformsTable />
         </SectionPageLayout.Content>
       </SectionPageLayout>

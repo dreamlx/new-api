@@ -16,12 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { useQueryClient } from '@tanstack/react-query'
+import type { UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
@@ -35,8 +31,8 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { SettingsSection } from '../components/settings-section'
-import { useUpdateOption } from '../hooks/use-update-option'
 import { isMaskedSecret } from './paypal-settings-section'
+import type { PaymentFormValues } from './payment-settings-section'
 
 export interface AlipaySettingsValues {
   AlipayEnabled: boolean
@@ -49,119 +45,83 @@ export interface AlipaySettingsValues {
 }
 
 interface Props {
-  defaultValues: AlipaySettingsValues
+  form: UseFormReturn<PaymentFormValues>
   serverAddress?: string
 }
 
-export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
+type AlipayUpdate = { key: string; value: string }
+
+/**
+ * Build option updates for Alipay using the same mask/changed guards as the
+ * original self-contained save. Credentials go in `options`; the Enabled switch
+ * is returned separately in `enable` so the caller persists it AFTER credentials
+ * (the backend rejects enable=true while credentials are empty).
+ */
+export function buildAlipayUpdates(
+  values: AlipaySettingsValues,
+  initial: AlipaySettingsValues
+): { options: AlipayUpdate[]; enable: AlipayUpdate | null } {
+  const options: AlipayUpdate[] = []
+
+  // AppId — plain field, only push when changed
+  if (values.AlipayAppId !== initial.AlipayAppId) {
+    options.push({ key: 'AlipayAppId', value: values.AlipayAppId || '' })
+  }
+
+  // Sensitive fields — only push if not masked (i.e., actually edited)
+  if (values.AlipayPrivateKey && !isMaskedSecret(values.AlipayPrivateKey)) {
+    options.push({ key: 'AlipayPrivateKey', value: values.AlipayPrivateKey })
+  }
+  if (values.AlipayPublicKey && !isMaskedSecret(values.AlipayPublicKey)) {
+    options.push({ key: 'AlipayPublicKey', value: values.AlipayPublicKey })
+  }
+
+  // SellerId — plain field, only push when changed
+  if (values.AlipaySellerId !== initial.AlipaySellerId) {
+    options.push({ key: 'AlipaySellerId', value: values.AlipaySellerId || '' })
+  }
+
+  if (initial.AlipayIsSandbox !== values.AlipayIsSandbox) {
+    options.push({
+      key: 'AlipayIsSandbox',
+      value: String(values.AlipayIsSandbox),
+    })
+  }
+
+  if (
+    values.AlipayMinTopUp !== undefined &&
+    values.AlipayMinTopUp !== null &&
+    values.AlipayMinTopUp !== initial.AlipayMinTopUp
+  ) {
+    options.push({
+      key: 'AlipayMinTopUp',
+      value: String(values.AlipayMinTopUp || 1),
+    })
+  }
+
+  // Enabled switch — persisted AFTER credentials by the caller.
+  let enable: AlipayUpdate | null = null
+  if (initial.AlipayEnabled !== values.AlipayEnabled) {
+    enable = { key: 'AlipayEnabled', value: String(values.AlipayEnabled) }
+  }
+
+  return { options, enable }
+}
+
+export function AlipaySettingsSection({ form, serverAddress }: Props) {
   const { t } = useTranslation()
-  const updateOption = useUpdateOption()
-  const queryClient = useQueryClient()
-  const [loading, setLoading] = useState(false)
-
-  const form = useForm<AlipaySettingsValues>({
-    defaultValues,
-  })
-
-  useEffect(() => {
-    form.reset(defaultValues)
-  }, [defaultValues, form])
 
   const notificationUrl = serverAddress
     ? `${serverAddress.replace(/\/+$/, '')}/api/user/alipay/notify`
     : `${t('Server Address')}/api/user/alipay/notify`
 
-  const handleSave = async () => {
-    setLoading(true)
-    try {
-      const values = form.getValues()
-      const options: { key: string; value: string }[] = []
-
-      // AppId — plain field, only push when changed
-      if (values.AlipayAppId !== defaultValues.AlipayAppId) {
-        options.push({ key: 'AlipayAppId', value: values.AlipayAppId || '' })
-      }
-
-      // Sensitive fields — only push if not masked (i.e., actually edited)
-      if (values.AlipayPrivateKey && !isMaskedSecret(values.AlipayPrivateKey)) {
-        options.push({
-          key: 'AlipayPrivateKey',
-          value: values.AlipayPrivateKey,
-        })
-      }
-      if (values.AlipayPublicKey && !isMaskedSecret(values.AlipayPublicKey)) {
-        options.push({ key: 'AlipayPublicKey', value: values.AlipayPublicKey })
-      }
-
-      // SellerId — plain field, only push when changed
-      if (values.AlipaySellerId !== defaultValues.AlipaySellerId) {
-        options.push({
-          key: 'AlipaySellerId',
-          value: values.AlipaySellerId || '',
-        })
-      }
-
-      if (defaultValues.AlipayIsSandbox !== values.AlipayIsSandbox) {
-        options.push({
-          key: 'AlipayIsSandbox',
-          value: String(values.AlipayIsSandbox),
-        })
-      }
-
-      if (
-        values.AlipayMinTopUp !== undefined &&
-        values.AlipayMinTopUp !== null &&
-        values.AlipayMinTopUp !== defaultValues.AlipayMinTopUp
-      ) {
-        options.push({
-          key: 'AlipayMinTopUp',
-          value: String(values.AlipayMinTopUp || 1),
-        })
-      }
-
-      // Enabled switch — saved AFTER credentials, because backend validation
-      // rejects enable=true when credentials are still empty
-      let enabledOption: { key: string; value: string } | null = null
-      if (defaultValues.AlipayEnabled !== values.AlipayEnabled) {
-        enabledOption = {
-          key: 'AlipayEnabled',
-          value: String(values.AlipayEnabled),
-        }
-      }
-
-      if (options.length === 0 && !enabledOption) {
-        toast.success(t('Updated successfully'))
-        setLoading(false)
-        return
-      }
-
-      for (const opt of options) {
-        await updateOption.mutateAsync(opt)
-      }
-      if (enabledOption) {
-        await updateOption.mutateAsync(enabledOption)
-      }
-      // Re-fetch options from the API. The backend strips sensitive fields
-      // (suffix Key/Secret/Token), so AlipayPrivateKey and AlipayPublicKey
-      // will come back empty. Non-sensitive fields like AlipayAppId,
-      // AlipaySellerId, AlipayIsSandbox, AlipayMinTopUp, AlipayEnabled
-      // will be re-populated with their saved values.
-      await queryClient.invalidateQueries({ queryKey: ['system-options'] })
-      toast.success(t('Updated successfully'))
-    } catch {
-      toast.error(t('Update failed'))
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
-    <SettingsSection
-      title={t('Alipay Settings')}
-      description={t('Configure Alipay payment gateway for top-ups')}
-    >
+    <SettingsSection title={t('Alipay Settings')}>
+      <p className='text-muted-foreground text-sm'>
+        {t('Configure Alipay payment gateway for top-ups')}
+      </p>
       <Form {...form}>
-        <form className='space-y-4'>
+        <div className='space-y-4'>
           {/* Blue info box */}
           <div className='rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100'>
             <p className='font-medium'>{t('Alipay Webhook Configuration:')}</p>
@@ -358,10 +318,7 @@ export function AlipaySettingsSection({ defaultValues, serverAddress }: Props) {
             />
           </div>
 
-          <Button type='button' onClick={handleSave} disabled={loading}>
-            {loading ? t('Saving...') : t('Save Alipay settings')}
-          </Button>
-        </form>
+        </div>
       </Form>
     </SettingsSection>
   )
