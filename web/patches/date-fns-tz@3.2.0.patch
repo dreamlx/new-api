@@ -1,0 +1,24 @@
+diff --git a/dist/cjs/index.js b/dist/cjs/index.js
+index 7d0c46b8b454713b0af8a65c479e1a8428618bdd..1a0ae94e214d1b32fb09b3e2e897f087e0db3817 100644
+--- a/dist/cjs/index.js
++++ b/dist/cjs/index.js
+@@ -13,3 +13,7 @@ var index_js_5 = require("./getTimezoneOffset/index.js");
+ Object.defineProperty(exports, "getTimezoneOffset", { enumerable: true, get: function () { return index_js_5.getTimezoneOffset; } });
+ var index_js_6 = require("./toDate/index.js");
+ Object.defineProperty(exports, "toDate", { enumerable: true, get: function () { return index_js_6.toDate; } });
++// v1 compatibility aliases (renamed in v3): kept so consumers built against
++// date-fns-tz@1 (e.g. @douyinfe/semi-foundation) keep working. Behavior-identical.
++Object.defineProperty(exports, "utcToZonedTime", { enumerable: true, get: function () { return index_js_4.toZonedTime; } });
++Object.defineProperty(exports, "zonedTimeToUtc", { enumerable: true, get: function () { return index_js_3.fromZonedTime; } });
+diff --git a/dist/esm/index.js b/dist/esm/index.js
+index 6f031a40cf8707bdd127913bbfb9fc73e12154e2..f1f8ec262d36c6dc051a608163fc39bd851c32ca 100644
+--- a/dist/esm/index.js
++++ b/dist/esm/index.js
+@@ -4,3 +4,7 @@ export { fromZonedTime } from './fromZonedTime/index.js';
+ export { toZonedTime } from './toZonedTime/index.js';
+ export { getTimezoneOffset } from './getTimezoneOffset/index.js';
+ export { toDate } from './toDate/index.js';
++// v1 compatibility aliases (renamed in v3): kept so consumers built against
++// date-fns-tz@1 (e.g. @douyinfe/semi-foundation) keep working. Behavior-identical.
++export { toZonedTime as utcToZonedTime } from './toZonedTime/index.js';
++export { fromZonedTime as zonedTimeToUtc } from './fromZonedTime/index.js';
