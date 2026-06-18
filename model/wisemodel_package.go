@@ -43,9 +43,12 @@ type WisemodelPackage struct {
 
 	Amount      float64    `json:"amount" gorm:"type:decimal(10,2);not null"`
 	IsFree      bool       `json:"is_free" gorm:"type:boolean;default:false"`
-	ValidUntil  *time.Time `json:"valid_until" gorm:"type:datetime"`
-	CreatedAt   time.Time  `json:"created_at" gorm:"type:datetime;default:CURRENT_TIMESTAMP"`
-	ReclaimedAt *time.Time `json:"reclaimed_at" gorm:"type:datetime"`
+	// Let GORM derive the per-DB timestamp type (SQLite: datetime, MySQL:
+	// datetime(3), PostgreSQL: timestamptz). An explicit `type:datetime` tag
+	// breaks PostgreSQL AutoMigrate with `type "datetime" does not exist`.
+	ValidUntil  *time.Time `json:"valid_until"`
+	CreatedAt   time.Time  `json:"created_at" gorm:"default:CURRENT_TIMESTAMP"`
+	ReclaimedAt *time.Time `json:"reclaimed_at"`
 }
 
 // TableName 指定表名
