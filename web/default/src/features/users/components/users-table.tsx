@@ -95,6 +95,17 @@ export function UsersTable() {
       { columnId: 'group', searchKey: 'group', type: 'string' },
     ],
   })
+  const statusFilter =
+    (columnFilters.find((filter) => filter.id === 'status')?.value as
+      | string[]
+      | undefined) ?? []
+  const roleFilter =
+    (columnFilters.find((filter) => filter.id === 'role')?.value as
+      | string[]
+      | undefined) ?? []
+  const groupFilter =
+    (columnFilters.find((filter) => filter.id === 'group')?.value as string) ??
+    ''
 
   // Fetch data with React Query
   const { data, isLoading, isFetching } = useQuery({
@@ -104,11 +115,16 @@ export function UsersTable() {
       pagination.pageSize,
       globalFilter,
       downstream,
+      statusFilter,
+      roleFilter,
+      groupFilter,
       refreshTrigger,
     ],
     queryFn: async () => {
       const hasFilter = globalFilter?.trim()
       const hasDownstream = downstream?.trim()
+      const hasColumnFilter =
+        statusFilter.length > 0 || roleFilter.length > 0 || Boolean(groupFilter)
       const params = {
         p: pagination.pageIndex + 1,
         page_size: pagination.pageSize,
@@ -116,8 +132,15 @@ export function UsersTable() {
 
       // When downstream filter is active, always use searchUsers
       const result =
-        hasFilter || hasDownstream
-          ? await searchUsers({ ...params, keyword: globalFilter, downstream })
+        hasFilter || hasDownstream || hasColumnFilter
+          ? await searchUsers({
+              ...params,
+              keyword: globalFilter,
+              downstream,
+              status: statusFilter[0] ?? '',
+              role: roleFilter[0] ?? '',
+              group: groupFilter,
+            })
           : await getUsers(params)
 
       if (!result.success) {
@@ -174,7 +197,7 @@ export function UsersTable() {
     onPaginationChange,
     onGlobalFilterChange,
     onColumnFiltersChange,
-    manualPagination: !globalFilter,
+    manualPagination: true,
     pageCount: Math.ceil((data?.total || 0) / pagination.pageSize),
   })
 

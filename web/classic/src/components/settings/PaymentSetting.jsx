@@ -195,11 +195,6 @@ const PaymentSetting = () => {
           case 'WxpayMinTopUp':
             newInputs[item.key] = parseFloat(item.value);
             break;
-          case 'WaffoPancakeMerchantID':
-          case 'WaffoPancakePrivateKey':
-          case 'WaffoPancakeReturnURL':
-            newInputs[item.key] = item.value;
-            break;
           default:
             if (item.key.endsWith('Enabled')) {
               newInputs[item.key] = toBoolean(item.value);

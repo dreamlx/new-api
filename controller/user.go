@@ -252,8 +252,20 @@ func SearchUsers(c *gin.Context) {
 	keyword := c.Query("keyword")
 	group := c.Query("group")
 	downstream := c.Query("downstream")
+	var role *int
+	if roleStr := c.Query("role"); roleStr != "" {
+		if parsed, err := strconv.Atoi(roleStr); err == nil {
+			role = &parsed
+		}
+	}
+	var status *int
+	if statusStr := c.Query("status"); statusStr != "" {
+		if parsed, err := strconv.Atoi(statusStr); err == nil {
+			status = &parsed
+		}
+	}
 	pageInfo := common.GetPageQuery(c)
-	users, total, err := model.SearchUsers(keyword, group, downstream, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	users, total, err := model.SearchUsers(keyword, group, downstream, role, status, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return

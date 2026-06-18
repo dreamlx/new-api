@@ -94,6 +94,8 @@ export interface SearchUsersParams {
   group?: string
   /** Filter by downstream platform (e.g. 'wisemodel') */
   downstream?: string
+  role?: string
+  status?: string
   p?: number
   page_size?: number
 }
