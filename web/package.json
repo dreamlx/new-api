@@ -5,6 +5,9 @@
     "default",
     "classic"
   ],
+  "overrides": {
+    "date-fns-tz": "^3.2.0"
+  },
   "catalog": {
     "@lobehub/icons": "^5.10.0",
     "axios": "^1.16.1",
@@ -16,5 +19,8 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "sse.js": "^2.8.0"
+  },
+  "patchedDependencies": {
+    "date-fns-tz@3.2.0": "patches/date-fns-tz@3.2.0.patch"
   }
 }
