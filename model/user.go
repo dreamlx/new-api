@@ -304,7 +304,11 @@ func SearchUsers(keyword string, group string, downstream string, role *int, sta
 		query = query.Where("role = ?", *role)
 	}
 	if status != nil {
-		query = query.Where("status = ?", *status)
+		if *status == -1 {
+			query = query.Where("deleted_at IS NOT NULL")
+		} else {
+			query = query.Where("deleted_at IS NULL").Where("status = ?", *status)
+		}
 	}
 
 	// 下游平台过滤
@@ -1110,6 +1114,23 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 	//if err := invalidateUserCache(id); err != nil {
 	//	common.SysError("failed to invalidate user cache: " + err.Error())
 	//}
+}
+
+func updateUserQuotaUsedQuotaAndRequestCount(id int, quota int, usedQuota int, requestCount int) {
+	if quota == 0 && usedQuota == 0 && requestCount == 0 {
+		return
+	}
+
+	err := DB.Model(&User{}).Where("id = ?", id).Updates(
+		map[string]interface{}{
+			"quota":         gorm.Expr("quota + ?", quota),
+			"used_quota":    gorm.Expr("used_quota + ?", usedQuota),
+			"request_count": gorm.Expr("request_count + ?", requestCount),
+		},
+	).Error
+	if err != nil {
+		common.SysLog("failed to batch update user quota, used quota and request count: " + err.Error())
+	}
 }
 
 func updateUserUsedQuota(id int, quota int) {

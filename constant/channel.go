@@ -181,7 +181,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeDoubaoVideo:    "DoubaoVideo",
 	ChannelTypeSora:           "Sora",
 	ChannelTypeReplicate:      "Replicate",
-	ChannelTypeCodex:          "Codex",
+	ChannelTypeCodex:          "ChatGPT Subscription (Codex)",
 	ChannelTypeOspreyAI:       "OspreyAI",
 	ChannelTypeHappyHorse:     "HappyHorse",
 	ChannelTypeSeedance:       "Seedance",

@@ -24,14 +24,6 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
   Form,
   FormControl,
   FormDescription,
@@ -41,6 +33,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Dialog } from '@/components/dialog'
 
 const createPaymentMethodDialogSchema = (t: (key: string) => string) =>
   z.object({
@@ -53,6 +46,8 @@ const createPaymentMethodDialogSchema = (t: (key: string) => string) =>
 type PaymentMethodDialogFormValues = z.infer<
   ReturnType<typeof createPaymentMethodDialogSchema>
 >
+
+const PAYMENT_METHOD_FORM_ID = 'payment-method-form'
 
 export type PaymentMethodData = {
   name: string
@@ -68,21 +63,10 @@ type PaymentMethodDialogProps = {
   editData?: PaymentMethodData | null
 }
 
-const getPaymentTypes = (t: (key: string) => string) => [
-  { value: 'alipay', label: t('Alipay') },
-  { value: 'wxpay', label: t('WeChat Pay') },
+const PAYMENT_TYPES = [
+  { value: 'alipay', label: 'Alipay' },
+  { value: 'wxpay', label: 'WeChat Pay' },
   { value: 'stripe', label: 'Stripe' },
-]
-
-const getColorPresets = (t: (key: string) => string) => [
-  { value: '#1677FF', label: t('Blue (Alipay)') },
-  { value: '#07C160', label: t('Green (WeChat)') },
-  { value: '#635BFF', label: t('Purple (Stripe)') },
-  { value: '#1890FF', label: t('Sky Blue') },
-  { value: '#52C41A', label: t('Lime Green') },
-  { value: 'black', label: t('Black') },
-  { value: '#FF4D4F', label: t('Red') },
-  { value: '#FFA940', label: t('Orange') },
 ]
 
 const getColorPreview = (color: string) => {
@@ -92,22 +76,29 @@ const getColorPreview = (color: string) => {
   return color
 }
 
-function useColorPresets(t: (key: string) => string) {
-  return getColorPresets(t).map((preset) => {
-    const previewColor = getColorPreview(preset.value)
-    return {
-      ...preset,
-      icon: previewColor ? (
-        <div
-          className='size-4 rounded border'
-          style={{ backgroundColor: previewColor }}
-        />
-      ) : (
-        <div className='bg-muted size-4 rounded border' />
-      ),
-    }
-  })
-}
+const COLOR_PRESETS = [
+  { value: '#1677FF', label: 'Blue (Alipay)' },
+  { value: '#07C160', label: 'Green (WeChat)' },
+  { value: '#635BFF', label: 'Purple (Stripe)' },
+  { value: '#1890FF', label: 'Sky Blue' },
+  { value: '#52C41A', label: 'Lime Green' },
+  { value: 'black', label: 'Black' },
+  { value: '#FF4D4F', label: 'Red' },
+  { value: '#FFA940', label: 'Orange' },
+].map((preset) => {
+  const previewColor = getColorPreview(preset.value)
+  return {
+    ...preset,
+    icon: previewColor ? (
+      <div
+        className='size-4 rounded border'
+        style={{ backgroundColor: previewColor }}
+      />
+    ) : (
+      <div className='bg-muted size-4 rounded border' />
+    ),
+  }
+})
 
 export function PaymentMethodDialog({
   open,
@@ -117,8 +108,6 @@ export function PaymentMethodDialog({
 }: PaymentMethodDialogProps) {
   const { t } = useTranslation()
   const isEditMode = !!editData
-  const paymentTypes = getPaymentTypes(t)
-  const colorPresets = useColorPresets(t)
   const paymentMethodDialogSchema = createPaymentMethodDialogSchema(t)
 
   const form = useForm<PaymentMethodDialogFormValues>({
@@ -175,134 +164,133 @@ export function PaymentMethodDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='sm:max-w-[500px]'>
-        <DialogHeader>
-          <DialogTitle>
-            {isEditMode ? t('Edit payment method') : t('Add payment method')}
-          </DialogTitle>
-          <DialogDescription>
-            {t('Configure a payment method for user recharge options.')}
-          </DialogDescription>
-        </DialogHeader>
-
-        <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(handleSubmit)}
-            className='space-y-4'
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={isEditMode ? t('Edit payment method') : t('Add payment method')}
+      description={t('Configure a payment method for user recharge options.')}
+      contentClassName='sm:max-w-[500px]'
+      contentHeight='auto'
+      bodyClassName='space-y-4'
+      footer={
+        <>
+          <Button
+            type='button'
+            variant='outline'
+            onClick={() => onOpenChange(false)}
           >
-            <FormField
-              control={form.control}
-              name='name'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Name')}</FormLabel>
-                  <FormControl>
-                    <Input placeholder={t('e.g., Alipay, WeChat')} {...field} />
-                  </FormControl>
-                  <FormDescription>
-                    {t('Display name for this payment method.')}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {t('Cancel')}
+          </Button>
+          <Button type='submit' form={PAYMENT_METHOD_FORM_ID}>
+            {isEditMode ? t('Update') : t('Add')}
+          </Button>
+        </>
+      }
+    >
+      <Form {...form}>
+        <form
+          id={PAYMENT_METHOD_FORM_ID}
+          onSubmit={form.handleSubmit(handleSubmit)}
+          className='space-y-4'
+        >
+          <FormField
+            control={form.control}
+            name='name'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Name')}</FormLabel>
+                <FormControl>
+                  <Input placeholder={t('e.g., Alipay, WeChat')} {...field} />
+                </FormControl>
+                <FormDescription>
+                  {t('Display name for this payment method.')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
-            <FormField
-              control={form.control}
-              name='type'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Type')}</FormLabel>
-                  <FormControl>
+          <FormField
+            control={form.control}
+            name='type'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Type')}</FormLabel>
+                <FormControl>
+                  <Combobox
+                    options={PAYMENT_TYPES}
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    placeholder={t('Select or enter payment type')}
+                    searchPlaceholder={t('Search payment types...')}
+                    allowCustomValue
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t('Select from presets or type custom identifier.')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='color'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Color')}</FormLabel>
+                <FormControl>
+                  <div className='flex items-center gap-2'>
                     <Combobox
-                      options={paymentTypes}
+                      options={COLOR_PRESETS}
                       value={field.value}
                       onValueChange={field.onChange}
-                      placeholder={t('Select or enter payment type')}
-                      searchPlaceholder={t('Search payment types...')}
+                      placeholder={t('Select or enter color value')}
+                      searchPlaceholder={t('Search colors...')}
                       allowCustomValue
+                      className='flex-1'
                     />
-                  </FormControl>
-                  <FormDescription>
-                    {t('Select from presets or type custom identifier.')}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name='color'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Color')}</FormLabel>
-                  <FormControl>
-                    <div className='flex items-center gap-2'>
-                      <Combobox
-                        options={colorPresets}
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        placeholder={t('Select or enter color value')}
-                        searchPlaceholder={t('Search colors...')}
-                        allowCustomValue
-                        className='flex-1'
+                    {colorPreview && (
+                      <div
+                        className='size-9 shrink-0 rounded border'
+                        style={{ backgroundColor: colorPreview }}
+                        title={colorPreview}
                       />
-                      {colorPreview && (
-                        <div
-                          className='size-9 shrink-0 rounded border'
-                          style={{ backgroundColor: colorPreview }}
-                          title={colorPreview}
-                        />
-                      )}
-                    </div>
-                  </FormControl>
-                  <FormDescription>
-                    {t('Select preset or enter custom CSS color value.')}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                    )}
+                  </div>
+                </FormControl>
+                <FormDescription>
+                  {t('Select preset or enter custom CSS color value.')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
-            <FormField
-              control={form.control}
-              name='min_topup'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Minimum top-up (optional)')}</FormLabel>
-                  <FormControl>
-                    <Input
-                      type='number'
-                      step='0.01'
-                      placeholder={t('e.g., 50')}
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    {t('Optional minimum recharge amount for this method.')}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <DialogFooter>
-              <Button
-                type='button'
-                variant='outline'
-                onClick={() => onOpenChange(false)}
-              >
-                {t('Cancel')}
-              </Button>
-              <Button type='submit'>
-                {isEditMode ? t('Update') : t('Add')}
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
-      </DialogContent>
+          <FormField
+            control={form.control}
+            name='min_topup'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Minimum top-up (optional)')}</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    step='0.01'
+                    placeholder={t('e.g., 50')}
+                    {...field}
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t('Optional minimum recharge amount for this method.')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </form>
+      </Form>
     </Dialog>
   )
 }
