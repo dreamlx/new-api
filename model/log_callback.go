@@ -21,7 +21,8 @@ func SendConsumeCallback(userId int, tokenId int, log *Log) {
 	}
 
 	user, err := GetUserById(userId, false)
-	if err != nil || user.ExternalUserId == "" {
+	externalUserId := user.GetExternalUserId()
+	if err != nil || externalUserId == "" {
 		return
 	}
 
@@ -34,7 +35,7 @@ func SendConsumeCallback(userId int, tokenId int, log *Log) {
 		"event":     "token_consumed",
 		"timestamp": time.Now().Unix(),
 
-		"external_user_id": user.ExternalUserId,
+		"external_user_id": externalUserId,
 		"token_id":         tokenId,
 		"token_key":        fullKey,
 		"token_name":       token.Name,

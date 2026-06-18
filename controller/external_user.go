@@ -14,6 +14,18 @@ import (
 	"gorm.io/gorm"
 )
 
+// ==================== Helpers ====================
+
+// maskExternalUserTokenKey hides the middle of a token Key, leaving the first
+// 8 chars and last 4 chars visible. Format: "sk-<first8>****<last4>". This is
+// the canonical V1 mask used by both GetExternalUserTokens and
+// GetExternalUserStats — do not return raw "sk-" + token.Key from V1 GETs.
+func maskExternalUserTokenKey(key string) string {
+	return fmt.Sprintf("sk-%s****%s",
+		key[:min(8, len(key))],
+		key[max(0, len(key)-4):])
+}
+
 // ==================== Request/Response Structs ====================
 
 type SyncExternalUserRequest struct {
@@ -45,7 +57,8 @@ type ExternalUserDeductRequest struct {
 type ExternalUserTokenRequest struct {
 	ExternalUserId  string   `json:"external_user_id" binding:"required,min=1,max=100"`
 	TokenName       string   `json:"token_name" binding:"required,min=1,max=100"`
-	AllocatedQuota  int      `json:"allocated_quota" binding:"required,min=1"`
+	AllocatedQuota  int      `json:"allocated_quota"` // 独立额度模式必填（非无限额度时）
+	UnlimitedQuota  bool     `json:"unlimited_quota"` // 无限额度模式（消耗用户余额）
 	ExpiresInDays   int      `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
 	ModelLimits     []string `json:"model_limits" binding:"omitempty"`
 	Group           string   `json:"group" binding:"omitempty,max=50"`
@@ -94,7 +107,7 @@ func SyncExternalUser(c *gin.Context) {
 			"message": "用户信息同步成功",
 			"data": gin.H{
 				"user_id":          existingUser.Id,
-				"external_user_id": existingUser.ExternalUserId,
+				"external_user_id": existingUser.GetExternalUserId(),
 				"is_new_user":      false,
 			},
 		})
@@ -119,40 +132,47 @@ func SyncExternalUser(c *gin.Context) {
 	}
 
 	user := &model.User{
-		Username:       req.Username,
-		DisplayName:    req.DisplayName,
-		Email:          email,
-		Password:       common.GetRandomString(16),
-		ExternalUserId: req.ExternalUserId,
-		Phone:          req.Phone,
-		WechatUnionId:  req.WechatUnionId,
-		AlipayUserId:   req.AlipayUserId,
-		LoginType:      getLoginType(req.LoginType),
-		IsExternal:     true,
-		ExternalData:   req.ExternalData,
-		Role:           common.RoleCommonUser,
-		Status:         common.UserStatusEnabled,
-		Quota:          common.QuotaForNewUser,
+		Username:      req.Username,
+		DisplayName:   req.DisplayName,
+		Email:         email,
+		Password:      common.GetRandomString(16),
+		Phone:         req.Phone,
+		WechatUnionId: req.WechatUnionId,
+		AlipayUserId:  req.AlipayUserId,
+		LoginType:     getLoginType(req.LoginType),
+		IsExternal:    true,
+		ExternalData:  req.ExternalData,
+		Role:          common.RoleCommonUser,
+		Status:        common.UserStatusEnabled,
+		Quota:         common.QuotaForNewUser,
 	}
-	if req.AffCode != "" {
+	user.SetExternalUserId(req.ExternalUserId)
+	userProvidedAffCode := req.AffCode != ""
+	if userProvidedAffCode {
 		user.AffCode = req.AffCode
 	} else {
 		user.AffCode = common.GetRandomString(4)
 	}
 
-	// Retry on aff_code collision (4-char random string has limited space)
-	maxRetries := 5
+	// Retry on aff_code collision when auto-generating (4-char random has limited space).
+	// User-provided AffCode is honored as-is — collision returns a clear error instead of silently overriding.
 	var createErr error
-	for i := 0; i < maxRetries; i++ {
+	for i := 0; i < 5; i++ {
+		if !userProvidedAffCode {
+			user.AffCode = common.GetRandomString(4)
+		}
 		createErr = model.DB.Create(user).Error
 		if createErr == nil {
 			break
 		}
-		if !strings.Contains(createErr.Error(), "aff_code") {
+		errMsg := createErr.Error()
+		isAffCodeDup := strings.Contains(errMsg, "aff_code") &&
+			(strings.Contains(errMsg, "Duplicate entry") ||
+				strings.Contains(errMsg, "UNIQUE constraint failed") ||
+				strings.Contains(errMsg, "duplicate key"))
+		if userProvidedAffCode || !isAffCodeDup {
 			break
 		}
-		// aff_code collision, regenerate and retry
-		user.AffCode = common.GetRandomString(4)
 	}
 	if createErr != nil {
 		errorMsg := "创建用户失败"
@@ -178,7 +198,7 @@ func SyncExternalUser(c *gin.Context) {
 		"message": "用户创建成功",
 		"data": gin.H{
 			"user_id":          user.Id,
-			"external_user_id": user.ExternalUserId,
+			"external_user_id": user.GetExternalUserId(),
 			"is_new_user":      true,
 		},
 	})
@@ -264,7 +284,7 @@ func ExternalUserTopUp(c *gin.Context) {
 			"quota_added":     quotaToAdd,
 			"current_quota":   user.Quota,
 			"current_balance": float64(user.Quota) / common.QuotaPerUnit,
-			"payment_id":     req.PaymentId,
+			"payment_id":      req.PaymentId,
 		},
 	})
 }
@@ -351,6 +371,12 @@ func CreateExternalUserToken(c *gin.Context) {
 		return
 	}
 
+	// Validate: non-unlimited mode must provide allocated_quota > 0
+	if !req.UnlimitedQuota && req.AllocatedQuota <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "独立额度模式必须提供allocated_quota参数"})
+		return
+	}
+
 	expiresInDays := req.ExpiresInDays
 	if expiresInDays == 0 {
 		expiresInDays = 365
@@ -363,23 +389,25 @@ func CreateExternalUserToken(c *gin.Context) {
 		}
 	}()
 
-	// Atomic deduct from user quota with SQL-level balance check
-	deductResult := tx.Model(&model.User{}).
-		Where("id = ? AND quota >= ?", user.Id, req.AllocatedQuota).
-		Update("quota", gorm.Expr("quota - ?", req.AllocatedQuota))
-	if deductResult.Error != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "扣减用户额度失败"})
-		return
-	}
-	if deductResult.RowsAffected == 0 {
-		tx.Rollback()
-		model.DB.First(user, user.Id)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": fmt.Sprintf("用户余额不足，当前余额: %d，请求分配: %d", user.Quota, req.AllocatedQuota),
-		})
-		return
+	// Atomic deduct from user quota — only in independent quota mode
+	if !req.UnlimitedQuota {
+		deductResult := tx.Model(&model.User{}).
+			Where("id = ? AND quota >= ?", user.Id, req.AllocatedQuota).
+			Update("quota", gorm.Expr("quota - ?", req.AllocatedQuota))
+		if deductResult.Error != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "扣减用户额度失败"})
+			return
+		}
+		if deductResult.RowsAffected == 0 {
+			tx.Rollback()
+			model.DB.First(user, user.Id)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": fmt.Sprintf("用户余额不足，当前余额: %d，请求分配: %d", user.Quota, req.AllocatedQuota),
+			})
+			return
+		}
 	}
 
 	// Create token
@@ -391,8 +419,8 @@ func CreateExternalUserToken(c *gin.Context) {
 		AccessedTime:    common.GetTimestamp(),
 		ExpiredTime:     common.GetTimestamp() + int64(expiresInDays*24*3600),
 		Status:          common.TokenStatusEnabled,
-		RemainQuota:     req.AllocatedQuota,
-		UnlimitedQuota:  false,
+		RemainQuota:     req.AllocatedQuota, // 0 for unlimited mode
+		UnlimitedQuota:  req.UnlimitedQuota,
 		Group:           req.Group,
 		CallbackUrl:     req.CallbackUrl,
 		CallbackEnabled: req.CallbackEnabled,
@@ -424,6 +452,9 @@ func CreateExternalUserToken(c *gin.Context) {
 		"expires_at":   token.ExpiredTime,
 		"remain_quota": req.AllocatedQuota,
 	}
+	if req.UnlimitedQuota {
+		data["unlimited_quota"] = true
+	}
 	if token.Group != "" {
 		data["group"] = token.Group
 	}
@@ -442,7 +473,7 @@ func CreateExternalUserToken(c *gin.Context) {
 	})
 }
 
-// DeleteExternalUserToken soft-deletes a token and refunds remaining quota.
+// DeleteExternalUserToken soft-deletes a token. Remaining quota is NOT refunded.
 // DELETE /api/user/external/:external_user_id/token/:token_id
 func DeleteExternalUserToken(c *gin.Context) {
 	externalUserId := c.Param("external_user_id")
@@ -470,34 +501,9 @@ func DeleteExternalUserToken(c *gin.Context) {
 		return
 	}
 
-	refundQuota := token.RemainQuota
-
-	tx := model.DB.Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-		}
-	}()
-
-	// Refund remaining quota to user
-	if refundQuota > 0 {
-		if err := tx.Model(&model.User{}).Where("id = ?", user.Id).
-			Update("quota", gorm.Expr("quota + ?", refundQuota)).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "退还额度失败"})
-			return
-		}
-	}
-
-	// Soft-delete token
-	if err := tx.Delete(token).Error; err != nil {
-		tx.Rollback()
+	// Soft-delete token (no quota refund — remaining quota stays consumed)
+	if err := model.DB.Delete(token).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "删除Token失败"})
-		return
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "事务提交失败"})
 		return
 	}
 
@@ -507,7 +513,6 @@ func DeleteExternalUserToken(c *gin.Context) {
 		"data": gin.H{
 			"token_id":         tokenId,
 			"external_user_id": externalUserId,
-			"refunded_quota":   refundQuota,
 		},
 	})
 }
@@ -537,7 +542,7 @@ func GetExternalUserTokens(c *gin.Context) {
 	tokenInfos := make([]gin.H, 0, len(tokens))
 
 	for _, token := range tokens {
-		maskedKey := fmt.Sprintf("sk-%s****%s", token.Key[:min(8, len(token.Key))], token.Key[max(0, len(token.Key)-4):])
+		maskedKey := maskExternalUserTokenKey(token.Key)
 
 		statusText := "启用"
 		switch token.Status {
@@ -645,7 +650,7 @@ func VerifyExternalUserToken(c *gin.Context) {
 			"is_valid":         isValid,
 			"token_id":         token.Id,
 			"token_name":       token.Name,
-			"external_user_id": user.ExternalUserId,
+			"external_user_id": user.GetExternalUserId(),
 			"status":           token.Status,
 			"status_text":      statusText,
 			"remain_quota":     token.RemainQuota,
@@ -837,10 +842,12 @@ func GetExternalUserStats(c *gin.Context) {
 
 	tokenInfos := make([]gin.H, 0, len(tokens))
 	for _, token := range tokens {
+		// Sk masked to match the V1 GetExternalUserTokens response shape;
+		// full sk is never returned by GET endpoints after this fix.
 		tokenInfos = append(tokenInfos, gin.H{
 			"id":           token.Id,
 			"name":         token.Name,
-			"key":          "sk-" + token.Key,
+			"key":          maskExternalUserTokenKey(token.Key),
 			"status":       token.Status,
 			"expired_time": token.ExpiredTime,
 		})
@@ -856,7 +863,7 @@ func GetExternalUserStats(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"user_info": gin.H{
-				"external_user_id": user.ExternalUserId,
+				"external_user_id": user.GetExternalUserId(),
 				"username":         user.Username,
 				"display_name":     user.DisplayName,
 				"group":            userGroup,
@@ -919,7 +926,7 @@ func DeleteExternalUser(c *gin.Context) {
 		"data": gin.H{
 			"user_id":                   user.Id,
 			"original_external_user_id": externalUserId,
-			"deleted_external_user_id":  user.ExternalUserId,
+			"deleted_external_user_id":  user.GetExternalUserId(),
 			"tokens_disabled":           tokensDisabled,
 			"deleted_at":                time.Now().UTC().Format(time.RFC3339),
 		},
@@ -1076,7 +1083,7 @@ func DeactivateExternalUser(externalUserId string) (*model.User, int, error) {
 
 	// Release unique fields
 	user.Username = fmt.Sprintf("deleted_%s_%d", user.Username, timestamp)
-	user.ExternalUserId = fmt.Sprintf("deleted_%s_%d", externalUserId, timestamp)
+	user.SetExternalUserId(fmt.Sprintf("deleted_%s_%d", externalUserId, timestamp))
 	user.AccessToken = nil
 	user.AffCode = fmt.Sprintf("del_%d", timestamp) // avoid unique constraint
 

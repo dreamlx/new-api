@@ -168,7 +168,7 @@ func TestV2GetPlatformLogs(t *testing.T) {
 	user := &model.User{
 		Username:       "platform_logtest",
 		Email:          "logtest@platform.local",
-		ExternalUserId: "platform_logtest",
+		ExternalUserId: ptrExternalUserId("platform_logtest"),
 		IsExternal:     true,
 		Quota:          PlatformQuotaForNewUser,
 	}
@@ -334,7 +334,7 @@ func TestV2GetPlatformLogsCacheTokens(t *testing.T) {
 	user := &model.User{
 		Username:       "platform_cachetest",
 		Email:          "cachetest@platform.local",
-		ExternalUserId: "platform_cachetest",
+		ExternalUserId: ptrExternalUserId("platform_cachetest"),
 		IsExternal:     true,
 		Quota:          PlatformQuotaForNewUser,
 	}

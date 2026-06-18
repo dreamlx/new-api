@@ -8,6 +8,9 @@ upload
 build
 *.db-journal
 logs
+web/default/dist
+web/classic/dist
+web/node_modules
 web/dist
 .env
 one-api
@@ -19,14 +22,16 @@ tiktoken_cache
 .gocache
 .gomodcache/
 .cache
-web/bun.lock
 plans
+!docs/superpowers/plans/
 .claude
+.worktrees/
 .aim
 .serena
 .pid
 new-api-test
 new-api.log
+.cursor
 
 electron/node_modules
 electron/dist
@@ -34,3 +39,18 @@ data/
 .gomodcache/
 .gocache-temp
 .gopath
+.test
+token_estimator_test.go
+skills-lock.json
+
+# Never commit SSH keys (private or public) — credentials must live in CI
+# secret stores, not in the repo. The pattern below catches the GitLab→GitHub
+# sync key that was previously parked in the working tree.
+gitlab_ci_github_sync_key
+gitlab_ci_github_sync_key.pub
+*.pem
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+.playwright-mcp

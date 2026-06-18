@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -8,13 +9,14 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Wisemodel Points/Tokens 换算常量
-// 定价: 100,000,000 points = $100 USD → 1,000,000 points = $1 = QuotaPerUnit quota
+// WiseModel usage units map 1:1 to internal quota at the default QuotaPerUnit.
 const (
-	WisemodelPointsPerUnit = 1_000_000
-	WisemodelTokensPerUnit = 1_000_000
+	WisemodelPointsPerUnit = 500_000
+	WisemodelTokensPerUnit = 500_000
 )
 
 // WisemodelPackage Wisemodel资源包模型
@@ -26,11 +28,15 @@ type WisemodelPackage struct {
 	OrderId           string `json:"order_id" gorm:"type:varchar(50);not null;index"`
 
 	// 原始值（Wisemodel传来的，仅用于显示）
-	OriginalPoints int `json:"original_points" gorm:"type:int;default:0"`
-	OriginalTokens int `json:"original_tokens" gorm:"type:int;default:0"`
+	OriginalPoints int `json:"original_points" gorm:"type:bigint;default:0"`
+	OriginalTokens int `json:"original_tokens" gorm:"type:bigint;default:0"`
 
 	// 转换后的quota
 	QuotaGranted int64 `json:"quota_granted" gorm:"type:bigint;not null"`
+
+	// RemainQuota 该包剩余额度，单一权威账本。订阅时 = QuotaGranted；
+	// 预扣 -= est；结算 += est-actual；过期回收后清零。
+	RemainQuota int64 `json:"remain_quota" gorm:"type:bigint;not null;default:0"`
 
 	// 可用模型列表（逗号分隔，仅供展示）
 	AvailableModels string `json:"available_models" gorm:"type:text"`
@@ -47,6 +53,46 @@ func (WisemodelPackage) TableName() string {
 	return "wisemodel_packages"
 }
 
+// IsWisemodelToken 判定给定 token 名/密钥是否属于 wisemodel 渠道。
+// 单一判定来源，供 middleware 与 relay 门控共用，避免命名规则变更时两处分叉。
+func IsWisemodelToken(tokenName, tokenKey string) bool {
+	return tokenName == "wisemodel-token" || strings.HasPrefix(tokenKey, "wisemodel-")
+}
+
+// TryDeductPackageRemain 原子扣减单个资源包的剩余额度。
+// 通过单条 `UPDATE ... WHERE remain_quota >= amount` 实现，行锁保证并发不超卖，
+// 三种数据库一致。返回 true 表示扣减成功，false 表示剩余额度不足（未改动）。
+// amount <= 0 视为无需扣减，直接返回成功。
+func TryDeductPackageRemain(packageId string, amount int64) (bool, error) {
+	if amount <= 0 {
+		return true, nil
+	}
+	// 扣减即校验有效性：未回收、未过期、额度足额，三者在同一原子语句内判定，
+	// 消除"选包(t)→扣减(t+δ)"之间包过期/被回收的 TOCTOU 窗口。
+	result := DB.Model(&WisemodelPackage{}).
+		Where("package_id = ? AND reclaimed_at IS NULL AND (valid_until IS NULL OR valid_until > ?) AND remain_quota >= ?",
+			packageId, time.Now(), amount).
+		UpdateColumn("remain_quota", gorm.Expr("remain_quota - ?", amount))
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+// AdjustPackageRemain 结算时调整资源包剩余额度。
+// delta = 预扣 - 实扣：正值表示退还过估，负值表示补扣低估。
+// 补扣允许将 remain 扣为负（实际已消费），不做下限检查。
+func AdjustPackageRemain(packageId string, delta int64) error {
+	if delta == 0 {
+		return nil
+	}
+	// reclaimed_at IS NULL 守卫：包若在请求飞行期间已被回收(cron 已退还其 remain 到钱包),
+	// 结算不得再写回，否则会在已回收的死包上复活幻影余额并与钱包重复计数。
+	return DB.Model(&WisemodelPackage{}).
+		Where("package_id = ? AND reclaimed_at IS NULL", packageId).
+		UpdateColumn("remain_quota", gorm.Expr("remain_quota + ?", delta)).Error
+}
+
 // GetWisemodelPackageByPackageId 根据PackageId查询资源包
 func GetWisemodelPackageByPackageId(packageId string) (*WisemodelPackage, error) {
 	var pkg WisemodelPackage
@@ -61,11 +107,13 @@ func GetWisemodelPackagesByUserId(userId int) ([]*WisemodelPackage, error) {
 	return packages, err
 }
 
-// GetActiveWisemodelPackages 查询用户的有效资源包（未过期）
+// GetActiveWisemodelPackages 查询用户的有效资源包（未过期、未回收）。
+// 已回收包通常已过期(reclaim 只处理 valid_until<now)，加 reclaimed_at IS NULL
+// 显式排除，防未来出现"已回收但未到期"包被纳入候选却在扣减时被拒。
 func GetActiveWisemodelPackages(userId int) ([]*WisemodelPackage, error) {
 	var packages []*WisemodelPackage
 	now := time.Now()
-	err := DB.Where("user_id = ? AND (valid_until IS NULL OR valid_until > ?)", userId, now).
+	err := DB.Where("user_id = ? AND reclaimed_at IS NULL AND (valid_until IS NULL OR valid_until > ?)", userId, now).
 		Order("created_at DESC").
 		Find(&packages).Error
 	return packages, err
@@ -80,8 +128,9 @@ func HasPaidPackages(userId int) (bool, error) {
 	return count > 0, err
 }
 
-// CreateWisemodelPackage 创建资源包记录
+// CreateWisemodelPackage 创建资源包记录，剩余额度初始化为授予总额。
 func CreateWisemodelPackage(pkg *WisemodelPackage) error {
+	pkg.RemainQuota = pkg.QuotaGranted
 	return DB.Create(pkg).Error
 }
 
@@ -93,6 +142,77 @@ func DeleteWisemodelPackagesByUserId(userId int) error {
 // MigrateWisemodelPackage 数据库迁移
 func MigrateWisemodelPackage(db *gorm.DB) error {
 	return db.AutoMigrate(&WisemodelPackage{})
+}
+
+const wisemodelRemainBackfilledKey = "WisemodelRemainBackfilled"
+
+// BackfillWisemodelRemainQuota 一次性把每个未回收资源包的 remain_quota 从历史消费回填。
+// remain = max(0, QuotaGranted - 精确历史消费)，仅按 wisemodel_package_id 精确归因
+// (getPreciseAttributionByPackages)。通过 option flag 保证全局只执行一次。
+//
+// 调用时机：由 extension/wisemodel.Init() 在 model.InitDB() 之后、HTTP 服务接客之前
+// 同步执行(见 main.go)。因此回填期间没有并发请求消费 remain_quota，重跑天然幂等
+// (已完成的消费都已落入 consume 日志、会被归因重新算入)——故意保持阻塞式而非后台，
+// 后台回填会让尚未回填的包短暂显示 remain=0 而被误拒。
+// 每个用户的回填在单事务内完成，进程中途崩溃不会留下半写状态。
+func BackfillWisemodelRemainQuota() error {
+	// 用结构体条件而非裸 "key = ?"：key 是 MySQL/PostgreSQL 保留字，
+	// GORM 对结构体字段会自动按库加引号(跨库安全，符合 Rule 2)。
+	var flag Option
+	err := DB.Where(&Option{Key: wisemodelRemainBackfilledKey}).First(&flag).Error
+	if err == nil && flag.Value == "true" {
+		return nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	var userIds []int
+	if err := DB.Model(&WisemodelPackage{}).
+		Where("reclaimed_at IS NULL").
+		Distinct("user_id").Pluck("user_id", &userIds).Error; err != nil {
+		return err
+	}
+	for _, uid := range userIds {
+		var packages []*WisemodelPackage
+		if err := DB.Where("user_id = ? AND reclaimed_at IS NULL", uid).Find(&packages).Error; err != nil {
+			return err
+		}
+		if len(packages) == 0 {
+			continue
+		}
+		// 仅用精确归因(按 wisemodel_package_id 精确匹配的消费)。不做无主历史日志的
+		// FIFO 摊派——那会把已回收包/通用消费误摊到存活包、把 remain 种太低导致迁移即
+		// 误判耗尽。精确归因的失败方向是"略多给额度"(安全),且无主消费当时已计入钱包。
+		pkgIds := make([]string, len(packages))
+		for i, p := range packages {
+			pkgIds[i] = p.PackageId
+		}
+		attribution, err := getPreciseAttributionByPackages(pkgIds)
+		if err != nil {
+			return err
+		}
+		if err := DB.Transaction(func(tx *gorm.DB) error {
+			for _, pkg := range packages {
+				remain := pkg.QuotaGranted - attribution[pkg.PackageId]
+				if remain < 0 {
+					remain = 0
+				}
+				if err := tx.Model(&WisemodelPackage{}).Where("id = ?", pkg.Id).
+					UpdateColumn("remain_quota", remain).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	// 同样用结构体条件的 upsert(FirstOrCreate+Assign),避免裸保留字且在标志行
+	// 不存在时正确插入、存在时置为 true。
+	return DB.Where(&Option{Key: wisemodelRemainBackfilledKey}).
+		Assign(&Option{Value: "true"}).
+		FirstOrCreate(&Option{}).Error
 }
 
 // SortPackagesByValidUntil 按 ValidUntil ASC 排序，nil（永久包）排最后
@@ -124,31 +244,31 @@ func ReclaimExpiredPackages(userId int) error {
 		return err
 	}
 	for _, pkg := range packages {
-		// 1. 估算该包时间窗口内的消费（近似值）
-		var consumed int64
-		if err := DB.Model(&Log{}).
-			Where("user_id = ? AND type = ? AND created_at >= ? AND created_at < ?",
-				userId, LogTypeConsume, pkg.CreatedAt.Unix(), pkg.ValidUntil.Unix()).
-			Select("COALESCE(SUM(quota), 0)").Scan(&consumed).Error; err != nil {
-			return err
-		}
-
-		refund := pkg.QuotaGranted - consumed
-		if refund < 0 {
-			refund = 0
-		}
-
-		// 2. 事务内：先原子抢占 reclaimed_at，再扣 quota
+		// 事务内：锁定读取该包"当前"剩余额度作为退款额，再原子抢占 reclaimed_at + 清零，
+		// 最后从钱包扣回未消费额度。锁定读(MySQL/PG 走 FOR UPDATE；SQLite 写串行)消除
+		// 外层 Find→事务之间被并发结算改动导致退款用陈旧值的窗口。
+		//
+		// 已知有界取舍：若某请求在该包过期前已预扣、却在 reclaim 之后才结算，其结算会被
+		// AdjustPackageRemain 的 reclaimed_at 守卫丢弃，该请求的"过估退还"(<=单次 est)
+		// 不会回到钱包。窗口极窄(请求恰在 5 分钟 cron tick 时在途且包刚过期)、影响被单次
+		// est 封顶，故不做完整钱包对账(YAGNI)。
 		err := DB.Transaction(func(tx *gorm.DB) error {
-			result := tx.Model(&WisemodelPackage{}).
+			var fresh WisemodelPackage
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("id = ? AND reclaimed_at IS NULL", pkg.Id).
-				Update("reclaimed_at", now)
-			if result.Error != nil {
-				return result.Error
+				First(&fresh).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil // 已被其他 goroutine 回收
+				}
+				return err
 			}
-			if result.RowsAffected == 0 {
-				// 已被其他 goroutine 处理，跳过
-				return nil
+			refund := fresh.RemainQuota
+			if refund < 0 {
+				refund = 0
+			}
+			if err := tx.Model(&WisemodelPackage{}).Where("id = ?", pkg.Id).
+				Updates(map[string]interface{}{"reclaimed_at": now, "remain_quota": 0}).Error; err != nil {
+				return err
 			}
 			if refund > 0 {
 				return tx.Model(&User{}).Where("id = ?", userId).
@@ -189,59 +309,6 @@ func (pkg *WisemodelPackage) DisplayPackageId() string {
 	return RestoreOriginalPackageId(pkg.PackageId)
 }
 
-// AttributeLogsToPackages 按 FIFO 规则将 logs 归属到 packages。
-// packages 必须已按 ValidUntil ASC（nil 排最后）排序。
-// logs 必须已按 CreatedAt ASC 排序。
-// 返回 map[packageId] -> 归属消费 quota 之和。
-func AttributeLogsToPackages(packages []*WisemodelPackage, logs []Log) map[string]int64 {
-	return AttributeLogsToPackagesWithBaseline(packages, logs, nil)
-}
-
-// AttributeLogsToPackagesWithBaseline attributes old logs by FIFO while respecting
-// each package's remaining capacity after baseline consumption has already been
-// precisely attributed.
-func AttributeLogsToPackagesWithBaseline(packages []*WisemodelPackage, logs []Log, baseline map[string]int64) map[string]int64 {
-	result := make(map[string]int64, len(packages))
-	consumed := make(map[string]int64, len(packages))
-	for _, pkg := range packages {
-		result[pkg.PackageId] = 0
-		if baseline != nil {
-			consumed[pkg.PackageId] = baseline[pkg.PackageId]
-		}
-	}
-	for _, log := range logs {
-		logTime := log.CreatedAt // Unix 秒
-		remainingQuota := int64(log.Quota)
-		if remainingQuota <= 0 {
-			continue
-		}
-		for _, pkg := range packages {
-			if logTime < pkg.CreatedAt.Unix() {
-				continue // log 早于此包创建时间
-			}
-			if pkg.ValidUntil != nil && logTime >= pkg.ValidUntil.Unix() {
-				continue // log 晚于此包到期时间
-			}
-			available := pkg.QuotaGranted - consumed[pkg.PackageId]
-			if available <= 0 {
-				continue
-			}
-			take := remainingQuota
-			if take > available {
-				take = available
-			}
-			result[pkg.PackageId] += take
-			consumed[pkg.PackageId] += take
-			remainingQuota -= take
-			if remainingQuota == 0 {
-				break
-			}
-		}
-		// 若无匹配包，此 log 忽略
-	}
-	return result
-}
-
 // ModelUsageRow 用于 GetModelUsageByPackages 的数据库扫描结果。
 // 导出供 controller 包引用。
 type ModelUsageRow struct {
@@ -274,10 +341,16 @@ func GetModelUsageByPackages(pkgIds []string) (map[string][]ModelUsageRow, error
 	return result, nil
 }
 
-func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]int64, modelMap map[string][]ModelUsageRow) []map[string]interface{} {
+// BuildPackageUsageRows 构建用量展示行。剩余额度直接取自单账本 remain_quota，
+// 与门控同源，杜绝"展示有余额却被门控拒绝"的双账本背离。per-model 明细仍取自
+// 精确归因(GetModelUsageByPackages)。
+func BuildPackageUsageRows(packages []*WisemodelPackage, modelMap map[string][]ModelUsageRow) []map[string]interface{} {
 	rows := make([]map[string]interface{}, 0, len(packages))
 	for _, pkg := range packages {
-		consumed := attribution[pkg.PackageId]
+		remain := pkg.RemainQuota
+		if remain < 0 {
+			remain = 0
+		}
 
 		availableModels := []string{}
 		if pkg.AvailableModels != "" {
@@ -288,17 +361,21 @@ func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]
 			}
 		}
 
+		// quota→原始单位换算因子（先除后乘，避免大数 * 1_000_000 溢出 int64）
+		pointsPerQuota := WisemodelPointsPerUnit / int64(common.QuotaPerUnit)
+		tokensPerQuota := WisemodelTokensPerUnit / int64(common.QuotaPerUnit)
+
 		// 构建 per-model details
 		details := []interface{}{}
 		for _, u := range modelMap[pkg.PackageId] {
 			if pkg.OriginalPoints > 0 {
-				usedAmount := u.UsedQuota * WisemodelPointsPerUnit / int64(common.QuotaPerUnit)
+				usedAmount := u.UsedQuota * pointsPerQuota
 				details = append(details, map[string]interface{}{
 					"model_name":  u.ModelName,
 					"used_amount": usedAmount,
 				})
 			} else {
-				usedAmount := u.UsedQuota * WisemodelTokensPerUnit / int64(common.QuotaPerUnit)
+				usedAmount := u.UsedQuota * tokensPerQuota
 				details = append(details, map[string]interface{}{
 					"model_name":         u.ModelName,
 					"used_amount_tokens": usedAmount,
@@ -314,18 +391,12 @@ func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]
 		}
 
 		if pkg.OriginalPoints > 0 {
-			remainPoints := (pkg.QuotaGranted - consumed) * WisemodelPointsPerUnit / int64(common.QuotaPerUnit)
-			if remainPoints < 0 {
-				remainPoints = 0
-			}
+			remainPoints := remain * pointsPerQuota
 			row["points"] = pkg.OriginalPoints
 			row["remain_points"] = remainPoints
 			row["amount"] = int64(pkg.OriginalPoints) - remainPoints
 		} else {
-			remainTokens := (pkg.QuotaGranted - consumed) * WisemodelTokensPerUnit / int64(common.QuotaPerUnit)
-			if remainTokens < 0 {
-				remainTokens = 0
-			}
+			remainTokens := remain * tokensPerQuota
 			row["tokens"] = pkg.OriginalTokens
 			row["remain_tokens"] = remainTokens
 			row["amount_tokens"] = int64(pkg.OriginalTokens) - remainTokens
@@ -336,83 +407,56 @@ func BuildPackageUsageRows(packages []*WisemodelPackage, attribution map[string]
 	return rows
 }
 
-func CalculatePackageAttribution(userId int, packages []*WisemodelPackage) (map[string]int64, error) {
-	attribution := make(map[string]int64, len(packages))
-	if len(packages) == 0 {
-		return attribution, nil
+// FilterPackagesByModel 返回能承载指定模型请求的资源包子集。
+// 规则（按包逐个判断）：
+//   - 包的 AvailableModels 为空 → 通用包，能承载任意模型
+//   - 包的 AvailableModels 非空 → 仅当请求模型在列表中（大小写不敏感）才能承载
+//
+// requestedModel 为空时直接返回全部包（无法确定模型，不做限制）。
+func FilterPackagesByModel(packages []*WisemodelPackage, requestedModel string) []*WisemodelPackage {
+	if requestedModel == "" {
+		return packages
 	}
-
-	SortPackagesByValidUntil(packages)
-
-	minTime := packages[0].CreatedAt.Unix()
-	maxTime := time.Now().Unix()
-	for _, pkg := range packages {
-		if createdAt := pkg.CreatedAt.Unix(); createdAt < minTime {
-			minTime = createdAt
-		}
-		if pkg.ValidUntil != nil && pkg.ValidUntil.Unix() > maxTime {
-			maxTime = pkg.ValidUntil.Unix()
-		}
-	}
-
-	preciseAttribution := make(map[string]int64, len(packages))
-	for _, pkg := range packages {
-		var sum int64
-		if err := LOG_DB.Model(&Log{}).
-			Where("wisemodel_package_id = ? AND type = ?", pkg.PackageId, LogTypeConsume).
-			Select("COALESCE(SUM(quota), 0)").Scan(&sum).Error; err != nil {
-			return nil, err
-		}
-		preciseAttribution[pkg.PackageId] = sum
-	}
-
-	var oldLogs []Log
-	if err := LOG_DB.
-		Where("user_id = ? AND type = ? AND (wisemodel_package_id IS NULL OR wisemodel_package_id = '') AND created_at >= ? AND created_at <= ?",
-			userId, LogTypeConsume, minTime, maxTime).
-		Order("created_at ASC").
-		Find(&oldLogs).Error; err != nil {
-		return nil, err
-	}
-
-	fifoAttribution := AttributeLogsToPackagesWithBaseline(packages, oldLogs, preciseAttribution)
-	for _, pkg := range packages {
-		attribution[pkg.PackageId] = preciseAttribution[pkg.PackageId] + fifoAttribution[pkg.PackageId]
-	}
-
-	return attribution, nil
-}
-
-func SelectPackageWithRemainingQuota(packages []*WisemodelPackage, attribution map[string]int64) *WisemodelPackage {
-	for _, pkg := range packages {
-		if pkg.QuotaGranted-attribution[pkg.PackageId] > 0 {
-			return pkg
-		}
-	}
-	return nil
-}
-
-// IsModelAllowedByPackages 检查请求的模型是否被用户活跃资源包允许。
-// 规则：
-//   - 所有包 AvailableModels 均为空 → 不限制，返回 true
-//   - 任意包有非空 AvailableModels → 模型须出现在至少一个包的列表中（大小写不敏感）
-func IsModelAllowedByPackages(packages []*WisemodelPackage, requestedModel string) bool {
 	requestedModelLower := strings.ToLower(strings.TrimSpace(requestedModel))
-	hasAnyRestriction := false
-
+	eligible := make([]*WisemodelPackage, 0, len(packages))
 	for _, pkg := range packages {
 		if pkg.AvailableModels == "" {
+			eligible = append(eligible, pkg) // 通用包
 			continue
 		}
-		hasAnyRestriction = true
 		for _, m := range strings.Split(pkg.AvailableModels, ",") {
 			if strings.ToLower(strings.TrimSpace(m)) == requestedModelLower {
-				return true
+				eligible = append(eligible, pkg)
+				break
 			}
 		}
 	}
+	return eligible
+}
 
-	return !hasAnyRestriction // 无任何限制 → 放行
+// getPreciseAttributionByPackages 批量查询多个资源包的精确消费总和（一次 GROUP BY 替代 N 次单包查询）。
+func getPreciseAttributionByPackages(pkgIds []string) (map[string]int64, error) {
+	if len(pkgIds) == 0 {
+		return map[string]int64{}, nil
+	}
+	type row struct {
+		WisemodelPackageId string `gorm:"column:wisemodel_package_id"`
+		UsedQuota          int64  `gorm:"column:used_quota"`
+	}
+	var rows []row
+	err := LOG_DB.Model(&Log{}).
+		Where("wisemodel_package_id IN ? AND type = ?", pkgIds, LogTypeConsume).
+		Group("wisemodel_package_id").
+		Select("wisemodel_package_id, COALESCE(SUM(quota), 0) AS used_quota").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int64, len(pkgIds))
+	for _, r := range rows {
+		result[r.WisemodelPackageId] = r.UsedQuota
+	}
+	return result, nil
 }
 
 // ReclaimAllExpiredPackages 全局扫描所有用户的过期未回收包，供后台定时任务调用。

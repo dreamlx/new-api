@@ -31,14 +31,10 @@ func CreateOrder(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{
-			"message": "参数错误: " + err.Error(),
-			"success": false,
-		})
+		c.JSON(400, gin.H{"message": "参数错误: " + err.Error(), "success": false})
 		return
 	}
 
-	// 验证package_count与实际packages数量是否一致
 	if req.PackageCount != len(req.Packages) {
 		c.JSON(400, gin.H{
 			"message": fmt.Sprintf("package_count(%d)与实际packages数量(%d)不一致", req.PackageCount, len(req.Packages)),
@@ -47,9 +43,7 @@ func CreateOrder(c *gin.Context) {
 		return
 	}
 
-	// 处理每个资源包
 	for _, pkg := range req.Packages {
-		// 查找用户
 		user := model.GetUserByPhone(pkg.Phone)
 		if user == nil {
 			c.JSON(404, gin.H{
@@ -59,7 +53,6 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
-		// 转换：1,000,000 points = $1 = QuotaPerUnit quota（非 1 point = $1）
 		quota := int64(0)
 		originalPoints := 0
 		originalTokens := 0
@@ -78,7 +71,6 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
-		// 解析时间（Fix 1：在事务之前校验，避免无效数据入库）
 		validUntil, err := time.Parse(time.RFC3339, pkg.ValidUntil)
 		if err != nil {
 			c.JSON(400, gin.H{
@@ -87,10 +79,7 @@ func CreateOrder(c *gin.Context) {
 			})
 			return
 		}
-
-		// Fix 1：valid_until 必须是未来时间
-		now := time.Now()
-		if !validUntil.After(now) {
+		if !validUntil.After(time.Now()) {
 			c.JSON(400, gin.H{
 				"message": fmt.Sprintf("资源包 %s 的valid_until必须是未来时间，当前值: %s", pkg.Id, pkg.ValidUntil),
 				"success": false,
@@ -98,13 +87,9 @@ func CreateOrder(c *gin.Context) {
 			return
 		}
 
-		// 获取可用模型列表（由调用方通过 model_names 字段传入）
 		availableModels := strings.TrimSpace(pkg.ModelNames)
-
-		// 追加纳秒时间戳确保 DB 唯一性，允许同一 package_id 多次合法提交
 		internalPackageId := fmt.Sprintf("%s_%d", pkg.Id, time.Now().UnixNano())
 
-		// Fix 2：将quota更新和包记录创建包在同一事务中，保证原子性
 		wisemodelPkg := &model.WisemodelPackage{
 			UserId:            user.Id,
 			PackageId:         internalPackageId,
@@ -113,6 +98,7 @@ func CreateOrder(c *gin.Context) {
 			OriginalPoints:    originalPoints,
 			OriginalTokens:    originalTokens,
 			QuotaGranted:      quota,
+			RemainQuota:       quota,
 			AvailableModels:   availableModels,
 			Amount:            pkg.Amount,
 			IsFree:            pkg.IsFree,
@@ -120,37 +106,29 @@ func CreateOrder(c *gin.Context) {
 		}
 
 		err = model.DB.Transaction(func(tx *gorm.DB) error {
-			// 步骤1：更新用户quota
 			if err := tx.Model(&model.User{}).Where("id = ?", user.Id).
 				UpdateColumn("quota", gorm.Expr("quota + ?", quota)).Error; err != nil {
 				return err
 			}
-			// 步骤2：创建资源包记录
 			return tx.Create(wisemodelPkg).Error
 		})
 		if err != nil {
-			c.JSON(500, gin.H{
-				"message": "创建订单失败（事务回滚）: " + err.Error(),
-				"success": false,
-			})
+			c.JSON(500, gin.H{"message": "创建订单失败（事务回滚）: " + err.Error(), "success": false})
 			return
 		}
 
-		// 创建充值日志
+		_ = model.InvalidateUserCache(user.Id)
+
 		content := fmt.Sprintf("Wisemodel资源包充值: %s", pkg.Id)
 		if pkg.Amount > 0 {
 			content += fmt.Sprintf(", 金额: $%.2f", pkg.Amount)
 		} else {
 			content += ", 免费资源包"
 		}
-
 		model.RecordLog(user.Id, model.LogTypeTopup, content)
 	}
 
-	c.JSON(200, gin.H{
-		"message": "创建成功",
-		"success": true,
-	})
+	c.JSON(200, gin.H{"message": "创建成功", "success": true})
 }
 
 // GetPackageUsage 资源包使用情况接口
@@ -180,13 +158,6 @@ func GetPackageUsage(c *gin.Context) {
 		return
 	}
 
-	attribution, err := model.CalculatePackageAttribution(user.Id, packages)
-	if err != nil {
-		c.JSON(500, gin.H{"message": "查询资源包消费失败: " + err.Error(), "success": false})
-		return
-	}
-
-	// 收集所有 pkgId，批量查询 per-model 消费明细
 	pkgIds := make([]string, len(packages))
 	for i, p := range packages {
 		pkgIds[i] = p.PackageId
@@ -197,8 +168,7 @@ func GetPackageUsage(c *gin.Context) {
 		return
 	}
 
-	// 构建响应
-	data := model.BuildPackageUsageRows(packages, attribution, modelMap)
-
+	// 剩余额度直接取自单账本 remain_quota（与门控同源）。
+	data := model.BuildPackageUsageRows(packages, modelMap)
 	c.JSON(200, gin.H{"code": 200, "data": data, "msg": "success"})
 }

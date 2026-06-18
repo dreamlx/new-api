@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
+	taskhappyhorse "github.com/QuantumNous/new-api/relay/channel/task/happyhorse"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -23,10 +24,11 @@ import (
 )
 
 type TaskSubmitResult struct {
-	UpstreamTaskID string
-	TaskData       []byte
-	Platform       constant.TaskPlatform
-	Quota          int
+	UpstreamTaskID        string
+	TaskData              []byte
+	Platform              constant.TaskPlatform
+	Quota                 int
+	DisablePerCallBilling bool
 	//PerCallPrice   types.PriceData
 }
 
@@ -250,10 +252,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	return &TaskSubmitResult{
-		UpstreamTaskID: upstreamTaskID,
-		TaskData:       taskData,
-		Platform:       platform,
-		Quota:          finalQuota,
+		UpstreamTaskID:        upstreamTaskID,
+		TaskData:              taskData,
+		Platform:              platform,
+		Quota:                 finalQuota,
+		DisablePerCallBilling: adaptor.DisablePerCallBilling(),
 	}, nil
 }
 
@@ -373,6 +376,21 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 	if !exist {
 		taskResp = service.TaskErrorWrapperLocal(errors.New("task_not_exist"), "task_not_exist", http.StatusBadRequest)
+		return
+	}
+
+	if strings.HasPrefix(c.Request.URL.Path, "/happyhorse/api/status") {
+		respBody, err = taskhappyhorse.ConvertTaskToStatusResponseBody(originTask)
+		if err != nil {
+			taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Volcano-compatible API format (Seedance and other Volcano-compatible channels)
+	if strings.HasPrefix(c.Request.URL.Path, "/api/v3/contents/generations/tasks") {
+		// Return the raw upstream response (ResponseTask format)
+		respBody = originTask.Data
 		return
 	}
 

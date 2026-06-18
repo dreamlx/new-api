@@ -1,0 +1,11 @@
+{
+  "external_platform_integration": "Интеграция с внешней платформой",
+  "only_users": "Только пользователи WiseModel",
+  "package_id_placeholder": "ID пакета WiseModel",
+  "quota_consumed": "Потреблённая квота WiseModel",
+  "quota_consumed_description": "Квота WiseModel, потреблённая за выбранный период",
+  "request_count": "Запросы WiseModel",
+  "request_count_description": "Количество запросов WiseModel за выбранный период",
+  "select_downstream_platform": "Выберите нижестоящую платформу",
+  "usage_statistics": "Статистика использования WiseModel"
+}

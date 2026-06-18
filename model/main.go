@@ -70,6 +70,19 @@ var DB *gorm.DB
 
 var LOG_DB *gorm.DB
 
+// extraAutoMigrate holds GORM model types registered by extensions
+// (e.g. the wisemodel-main customer branch's WisemodelPackage). Populated
+// by RegisterExtraAutoMigrate() before model.InitDB() runs. Empty on main.
+var extraAutoMigrate []interface{}
+
+// RegisterExtraAutoMigrate appends extension-owned GORM model types to the
+// AutoMigrate set. Call from an extension's wiring (e.g. wisemodel.RegisterModels())
+// BEFORE InitDB runs migrateDB(). The slice is iterated as part of the
+// AutoMigrate call inside migrateDB.
+func RegisterExtraAutoMigrate(targets ...interface{}) {
+	extraAutoMigrate = append(extraAutoMigrate, targets...)
+}
+
 func createRootAccountIfNeed() error {
 	var user User
 	//if user.Status != common.UserStatusEnabled {
@@ -196,9 +209,10 @@ func InitDB() (err error) {
 		if err != nil {
 			return err
 		}
-		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
-		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
+		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 20))
+		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 100))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		sqlDB.SetConnMaxIdleTime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_IDLE_TIME", 30)))
 
 		if !common.IsMasterNode {
 			return nil
@@ -236,9 +250,10 @@ func InitLogDB() (err error) {
 		if err != nil {
 			return err
 		}
-		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
-		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
+		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 20))
+		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 100))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		sqlDB.SetConnMaxIdleTime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_IDLE_TIME", 30)))
 
 		if !common.IsMasterNode {
 			return nil
@@ -259,8 +274,14 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
+	// Migrate users.quota INT → BIGINT to support large quota values.
+	// (Generic improvement; wisemodel_packages.* migration is handled by
+	// extension/wisemodel/init.go on the wisemodel-main customer branch.)
+	if err := migrateUserQuotaToBigint(); err != nil {
+		return err
+	}
 
-	err := DB.AutoMigrate(
+	autoMigrateTargets := []interface{}{
 		&Channel{},
 		&Token{},
 		&User{},
@@ -285,8 +306,17 @@ func migrateDB() error {
 		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
-	)
+		&PerfMetric{},
+		&Platform{},
+	}
+	// Extensions (e.g. wisemodel) may have registered additional model
+	// types via RegisterExtraAutoMigrate before this function ran.
+	autoMigrateTargets = append(autoMigrateTargets, extraAutoMigrate...)
+	err := DB.AutoMigrate(autoMigrateTargets...)
 	if err != nil {
+		return err
+	}
+	if err := normalizeEmptyExternalUserIds(); err != nil {
 		return err
 	}
 	if common.UsingSQLite {
@@ -333,6 +363,8 @@ func migrateDBFast() error {
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
+		{&PerfMetric{}, "PerfMetric"},
+		{&Platform{}, "Platform"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -357,6 +389,9 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := normalizeEmptyExternalUserIds(); err != nil {
+		return err
+	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -376,6 +411,13 @@ func migrateLOGDB() error {
 		return err
 	}
 	return nil
+}
+
+func normalizeEmptyExternalUserIds() error {
+	if !DB.Migrator().HasTable(&User{}) || !DB.Migrator().HasColumn(&User{}, "external_user_id") {
+		return nil
+	}
+	return DB.Model(&User{}).Where("external_user_id = ?", "").Update("external_user_id", nil).Error
 }
 
 type sqliteColumnDef struct {
@@ -400,8 +442,10 @@ func ensureSubscriptionPlanTableSQLite() error {
 ` + "`custom_seconds`" + ` bigint NOT NULL DEFAULT 0,
 ` + "`enabled`" + ` numeric DEFAULT 1,
 ` + "`sort_order`" + ` integer DEFAULT 0,
+` + "`allow_balance_pay`" + ` numeric DEFAULT 1,
 ` + "`stripe_price_id`" + ` varchar(128) DEFAULT '',
 ` + "`creem_product_id`" + ` varchar(128) DEFAULT '',
+` + "`waffo_pancake_product_id`" + ` varchar(128) DEFAULT '',
 ` + "`max_purchase_per_user`" + ` integer DEFAULT 0,
 ` + "`upgrade_group`" + ` varchar(64) DEFAULT '',
 ` + "`total_amount`" + ` bigint NOT NULL DEFAULT 0,
@@ -433,8 +477,10 @@ PRIMARY KEY (` + "`id`" + `)
 		{Name: "custom_seconds", DDL: "`custom_seconds` bigint NOT NULL DEFAULT 0"},
 		{Name: "enabled", DDL: "`enabled` numeric DEFAULT 1"},
 		{Name: "sort_order", DDL: "`sort_order` integer DEFAULT 0"},
+		{Name: "allow_balance_pay", DDL: "`allow_balance_pay` numeric DEFAULT 1"},
 		{Name: "stripe_price_id", DDL: "`stripe_price_id` varchar(128) DEFAULT ''"},
 		{Name: "creem_product_id", DDL: "`creem_product_id` varchar(128) DEFAULT ''"},
+		{Name: "waffo_pancake_product_id", DDL: "`waffo_pancake_product_id` varchar(128) DEFAULT ''"},
 		{Name: "max_purchase_per_user", DDL: "`max_purchase_per_user` integer DEFAULT 0"},
 		{Name: "upgrade_group", DDL: "`upgrade_group` varchar(64) DEFAULT ''"},
 		{Name: "total_amount", DDL: "`total_amount` bigint NOT NULL DEFAULT 0"},
@@ -565,6 +611,76 @@ func migrateSubscriptionPlanPriceAmount() {
 			common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to decimal(10,6)", tableName, columnName))
 		}
 	}
+}
+
+// migrateUserQuotaToBigint upgrades users.quota from INT to BIGINT to support
+// large quota values.
+//
+// SQLite uses dynamic INTEGER (up to 64-bit) so no change is needed.
+// AutoMigrate does not alter column types for existing tables, so this must
+// run explicitly.
+//
+// The wisemodel_packages.* column migration has moved to
+// extension/wisemodel/init.go's migrateWisemodelBigint (only relevant on the
+// wisemodel-main customer branch).
+func migrateUserQuotaToBigint() error {
+	if common.UsingSQLite {
+		return nil // SQLite INTEGER is already 64-bit
+	}
+
+	type colSpec struct {
+		table  string
+		column string
+	}
+	cols := []colSpec{
+		{"users", "quota"},
+	}
+
+	for _, c := range cols {
+		if !DB.Migrator().HasTable(c.table) {
+			continue
+		}
+
+		// Use information_schema to read the current column type.
+		// An empty result means the column doesn't exist yet — AutoMigrate will create it
+		// with the correct BIGINT type from the struct tag, so we can safely skip.
+		var alterSQL string
+		if common.UsingPostgreSQL {
+			var dataType string
+			if err := DB.Raw(
+				`SELECT data_type FROM information_schema.columns
+				 WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
+				c.table, c.column).Scan(&dataType).Error; err != nil {
+				common.SysLog(fmt.Sprintf("Warning: failed to query %s.%s type: %v", c.table, c.column, err))
+				continue
+			}
+			if dataType == "" || dataType == "bigint" {
+				continue // column absent (AutoMigrate handles it) or already correct
+			}
+			alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE bigint`, c.table, c.column)
+		} else if common.UsingMySQL {
+			var columnType string
+			if err := DB.Raw(
+				`SELECT COLUMN_TYPE FROM information_schema.columns
+				 WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+				c.table, c.column).Scan(&columnType).Error; err != nil {
+				common.SysLog(fmt.Sprintf("Warning: failed to query %s.%s type: %v", c.table, c.column, err))
+				continue
+			}
+			if columnType == "" || strings.HasPrefix(strings.ToLower(columnType), "bigint") {
+				continue // column absent or already correct
+			}
+			alterSQL = fmt.Sprintf("ALTER TABLE `%s` MODIFY COLUMN `%s` bigint NOT NULL DEFAULT 0", c.table, c.column)
+		}
+
+		if alterSQL != "" {
+			if err := DB.Exec(alterSQL).Error; err != nil {
+				return fmt.Errorf("failed to migrate %s.%s to bigint: %w", c.table, c.column, err)
+			}
+			common.SysLog(fmt.Sprintf("Migrated %s.%s to bigint", c.table, c.column))
+		}
+	}
+	return nil
 }
 
 func closeDB(db *gorm.DB) error {

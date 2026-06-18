@@ -1,0 +1,527 @@
+# OpenRouter Models API 配置文件
+#
+# 此配置文件用于扩展模型的元数据信息，使其符合 OpenRouter 格式
+# 配置路径可通过环境变量 OPENROUTER_CONFIG_PATH 覆盖
+
+# 全局配置
+enabled: true        # 是否启用 OpenRouter API
+cache_ttl: 300       # 缓存过期时间（秒），默认5分钟
+
+# 默认值配置（未在 models 中定义的模型使用这些默认值）
+fallback:
+  use_defaults: true
+  default_context_length: 8192
+  default_pricing:
+    prompt: "0.00001"
+    completion: "0.00002"
+    request: "0"
+    image: "0"
+    web_search: "0"
+    internal_reasoning: "0"
+  default_architecture:
+    modality: "text->text"
+    input_modalities: ["text"]
+    output_modalities: ["text"]
+    tokenizer: "Unknown"
+    instruct_type: null
+
+# 模型扩展配置
+# 为特定模型提供详细的元数据信息
+models:
+  # ==================== DeepSeek 系列 ====================
+  "deepseek-chat":
+    canonical_slug: "deepseek/deepseek-chat"
+    name: "DeepSeek Chat"
+    description: "DeepSeek 对话模型，支持多轮对话和复杂推理任务"
+    context_length: 65536
+    architecture:
+      modality: "text->text"
+      input_modalities: ["text"]
+      output_modalities: ["text"]
+      tokenizer: "DeepSeek"
+      instruct_type: "deepseek"
+    pricing:
+      prompt: "0.0000014"
+      completion: "0.0000028"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 65536
+      max_completion_tokens: 8192
+      is_moderated: false
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "frequency_penalty"
+      - "presence_penalty"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  "deepseek-reasoner":
+    canonical_slug: "deepseek/deepseek-reasoner"
+    name: "DeepSeek Reasoner"
+    description: "DeepSeek 推理模型，专注于复杂逻辑推理任务"
+    context_length: 65536
+    architecture:
+      modality: "text->text"
+      input_modalities: ["text"]
+      output_modalities: ["text"]
+      tokenizer: "DeepSeek"
+      instruct_type: "deepseek"
+    pricing:
+      prompt: "0.0000055"
+      completion: "0.000022"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 65536
+      max_completion_tokens: 8192
+      is_moderated: false
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+    default_parameters:
+      temperature: 0.5
+
+  # ==================== OpenAI GPT 系列 ====================
+  "gpt-4":
+    canonical_slug: "openai/gpt-4"
+    name: "GPT-4"
+    description: "OpenAI GPT-4 模型，强大的多任务语言模型"
+    context_length: 8192
+    architecture:
+      modality: "text->text"
+      input_modalities: ["text"]
+      output_modalities: ["text"]
+      tokenizer: "OpenAI"
+      instruct_type: "chatml"
+    pricing:
+      prompt: "0.00003"
+      completion: "0.00006"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 8192
+      max_completion_tokens: 4096
+      is_moderated: true
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "frequency_penalty"
+      - "presence_penalty"
+      - "stop"
+      - "logit_bias"
+    default_parameters:
+      temperature: 0.7
+
+  "gpt-4-turbo":
+    canonical_slug: "openai/gpt-4-turbo"
+    name: "GPT-4 Turbo"
+    description: "OpenAI GPT-4 Turbo，更快速更经济的 GPT-4 版本"
+    context_length: 128000
+    architecture:
+      modality: "text+image->text"
+      input_modalities: ["text", "image"]
+      output_modalities: ["text"]
+      tokenizer: "OpenAI"
+      instruct_type: "chatml"
+    pricing:
+      prompt: "0.00001"
+      completion: "0.00003"
+      request: "0"
+      image: "0.00001"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 128000
+      max_completion_tokens: 4096
+      is_moderated: true
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "frequency_penalty"
+      - "presence_penalty"
+      - "stop"
+      - "response_format"
+    default_parameters:
+      temperature: 0.7
+
+  "gpt-4o":
+    canonical_slug: "openai/gpt-4o"
+    name: "GPT-4o"
+    description: "OpenAI GPT-4o 多模态模型"
+    context_length: 128000
+    architecture:
+      modality: "text+image->text"
+      input_modalities: ["text", "image"]
+      output_modalities: ["text"]
+      tokenizer: "OpenAI"
+      instruct_type: "chatml"
+    pricing:
+      prompt: "0.000005"
+      completion: "0.000015"
+      request: "0"
+      image: "0.000005"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 128000
+      max_completion_tokens: 16384
+      is_moderated: true
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "frequency_penalty"
+      - "presence_penalty"
+      - "stop"
+      - "response_format"
+    default_parameters:
+      temperature: 0.7
+
+  "gpt-3.5-turbo":
+    canonical_slug: "openai/gpt-3.5-turbo"
+    name: "GPT-3.5 Turbo"
+    description: "OpenAI GPT-3.5 Turbo，快速经济的对话模型"
+    context_length: 16384
+    architecture:
+      modality: "text->text"
+      input_modalities: ["text"]
+      output_modalities: ["text"]
+      tokenizer: "OpenAI"
+      instruct_type: "chatml"
+    pricing:
+      prompt: "0.0000005"
+      completion: "0.0000015"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 16384
+      max_completion_tokens: 4096
+      is_moderated: true
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "frequency_penalty"
+      - "presence_penalty"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  # ==================== Claude 系列 ====================
+  "claude-3-opus-20240229":
+    canonical_slug: "anthropic/claude-3-opus"
+    name: "Claude 3 Opus"
+    description: "Anthropic Claude 3 Opus，最强大的 Claude 模型"
+    context_length: 200000
+    architecture:
+      modality: "text+image->text"
+      input_modalities: ["text", "image"]
+      output_modalities: ["text"]
+      tokenizer: "Claude"
+      instruct_type: "claude"
+    pricing:
+      prompt: "0.000015"
+      completion: "0.000075"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 200000
+      max_completion_tokens: 4096
+      is_moderated: true
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  "claude-3-sonnet-20240229":
+    canonical_slug: "anthropic/claude-3-sonnet"
+    name: "Claude 3 Sonnet"
+    description: "Anthropic Claude 3 Sonnet，平衡性能和成本的选择"
+    context_length: 200000
+    architecture:
+      modality: "text+image->text"
+      input_modalities: ["text", "image"]
+      output_modalities: ["text"]
+      tokenizer: "Claude"
+      instruct_type: "claude"
+    pricing:
+      prompt: "0.000003"
+      completion: "0.000015"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 200000
+      max_completion_tokens: 4096
+      is_moderated: true
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  "claude-3-5-sonnet-20241022":
+    canonical_slug: "anthropic/claude-3.5-sonnet"
+    name: "Claude 3.5 Sonnet"
+    description: "Anthropic Claude 3.5 Sonnet，最新版本"
+    context_length: 200000
+    architecture:
+      modality: "text+image->text"
+      input_modalities: ["text", "image"]
+      output_modalities: ["text"]
+      tokenizer: "Claude"
+      instruct_type: "claude"
+    pricing:
+      prompt: "0.000003"
+      completion: "0.000015"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 200000
+      max_completion_tokens: 8192
+      is_moderated: true
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  "claude-3-haiku-20240307":
+    canonical_slug: "anthropic/claude-3-haiku"
+    name: "Claude 3 Haiku"
+    description: "Anthropic Claude 3 Haiku，最快速最经济的 Claude 模型"
+    context_length: 200000
+    architecture:
+      modality: "text+image->text"
+      input_modalities: ["text", "image"]
+      output_modalities: ["text"]
+      tokenizer: "Claude"
+      instruct_type: "claude"
+    pricing:
+      prompt: "0.00000025"
+      completion: "0.00000125"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 200000
+      max_completion_tokens: 4096
+      is_moderated: true
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  # ==================== Gemini 系列 ====================
+  "gemini-pro":
+    canonical_slug: "google/gemini-pro"
+    name: "Gemini Pro"
+    description: "Google Gemini Pro 模型"
+    context_length: 32768
+    architecture:
+      modality: "text->text"
+      input_modalities: ["text"]
+      output_modalities: ["text"]
+      tokenizer: "Gemini"
+      instruct_type: null
+    pricing:
+      prompt: "0.0000005"
+      completion: "0.0000015"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 32768
+      max_completion_tokens: 8192
+      is_moderated: true
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  "gemini-1.5-pro":
+    canonical_slug: "google/gemini-1.5-pro"
+    name: "Gemini 1.5 Pro"
+    description: "Google Gemini 1.5 Pro，支持超长上下文"
+    context_length: 2097152
+    architecture:
+      modality: "text+image->text"
+      input_modalities: ["text", "image", "video", "audio"]
+      output_modalities: ["text"]
+      tokenizer: "Gemini"
+      instruct_type: null
+    pricing:
+      prompt: "0.00000125"
+      completion: "0.000005"
+      request: "0"
+      image: "0.00000125"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 2097152
+      max_completion_tokens: 8192
+      is_moderated: true
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  # ==================== Qwen 系列 ====================
+  "qwen-turbo":
+    canonical_slug: "alibaba/qwen-turbo"
+    name: "Qwen Turbo"
+    description: "阿里云通义千问 Turbo 版本"
+    context_length: 8192
+    architecture:
+      modality: "text->text"
+      input_modalities: ["text"]
+      output_modalities: ["text"]
+      tokenizer: "Qwen"
+      instruct_type: "chatml"
+    pricing:
+      prompt: "0.0000008"
+      completion: "0.000002"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 8192
+      max_completion_tokens: 2048
+      is_moderated: false
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  "qwen-plus":
+    canonical_slug: "alibaba/qwen-plus"
+    name: "Qwen Plus"
+    description: "阿里云通义千问 Plus 版本"
+    context_length: 32768
+    architecture:
+      modality: "text->text"
+      input_modalities: ["text"]
+      output_modalities: ["text"]
+      tokenizer: "Qwen"
+      instruct_type: "chatml"
+    pricing:
+      prompt: "0.000004"
+      completion: "0.000012"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 32768
+      max_completion_tokens: 8192
+      is_moderated: false
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  # ==================== GLM 系列 ====================
+  "glm-4":
+    canonical_slug: "zhipu/glm-4"
+    name: "GLM-4"
+    description: "智谱 GLM-4 模型"
+    context_length: 128000
+    architecture:
+      modality: "text->text"
+      input_modalities: ["text"]
+      output_modalities: ["text"]
+      tokenizer: "GLM"
+      instruct_type: "glm"
+    pricing:
+      prompt: "0.0001"
+      completion: "0.0001"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 128000
+      max_completion_tokens: 4096
+      is_moderated: false
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
+
+  "glm-4-flash":
+    canonical_slug: "zhipu/glm-4-flash"
+    name: "GLM-4 Flash"
+    description: "智谱 GLM-4 Flash，快速经济版本"
+    context_length: 128000
+    architecture:
+      modality: "text->text"
+      input_modalities: ["text"]
+      output_modalities: ["text"]
+      tokenizer: "GLM"
+      instruct_type: "glm"
+    pricing:
+      prompt: "0.000001"
+      completion: "0.000001"
+      request: "0"
+      image: "0"
+      web_search: "0"
+      internal_reasoning: "0"
+    top_provider:
+      context_length: 128000
+      max_completion_tokens: 4096
+      is_moderated: false
+    supported_parameters:
+      - "max_tokens"
+      - "temperature"
+      - "top_p"
+      - "stop"
+    default_parameters:
+      temperature: 0.7
