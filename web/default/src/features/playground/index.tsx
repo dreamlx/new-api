@@ -27,7 +27,6 @@ import { usePlaygroundState, useChatHandler } from './hooks'
 import { createUserMessage, createLoadingAssistantMessage } from './lib'
 import type { Message as MessageType } from './types'
 import { useSystemConfig } from '@/hooks/use-system-config'
-import { useTranslation } from 'react-i18next'
 
 export function Playground() {
   const { t } = useTranslation()
@@ -44,7 +43,6 @@ export function Playground() {
   } = usePlaygroundState()
 
   const { systemName } = useSystemConfig()
-  const { t } = useTranslation()
 
   const { sendChat, stopGeneration, isGenerating } = useChatHandler({
     config,
