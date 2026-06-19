@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
@@ -19,7 +20,11 @@ const PlatformQuotaForNewUser = 499999500000
 // ==================== Request Structs ====================
 
 type V2TokenAuthorizeRequest struct {
-	PlatformId string                 `json:"platform_id" binding:"required,min=1,max=100"`
+	// PlatformId is OPTIONAL and no longer authoritative: the platform identity
+	// is derived from PlatformAuth (X-Platform-Id/X-Platform-Sk). When present it
+	// is validated to match the authenticated platform, so an older client that
+	// still sends it keeps working, but a mismatched value is rejected.
+	PlatformId string                 `json:"platform_id" binding:"omitempty,max=100"`
 	TokenKey   string                 `json:"token_key" binding:"required,min=10,max=200"`
 	Metadata   map[string]interface{} `json:"metadata"`
 }
@@ -32,6 +37,21 @@ func V2AuthorizeToken(c *gin.Context) {
 	var req V2TokenAuthorizeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求参数错误: " + err.Error()})
+		return
+	}
+
+	// platform_id is authoritative from the authenticated platform (PlatformAuth),
+	// never trusted from the body. A body platform_id, if present, must match —
+	// this blocks an authenticated platform from minting tokens under another
+	// platform's identity.
+	platform := middleware.PlatformFromContext(c)
+	if platform == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "unauthorized"})
+		return
+	}
+	platformId := platform.PlatformId
+	if req.PlatformId != "" && req.PlatformId != platformId {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "platform_id 与鉴权平台不一致"})
 		return
 	}
 
@@ -51,7 +71,7 @@ func V2AuthorizeToken(c *gin.Context) {
 	}
 
 	// Find or create platform user
-	platformUsername := "platform_" + req.PlatformId
+	platformUsername := "platform_" + platformId
 	user, err := getOrCreatePlatformUser(platformUsername, req.PlatformId)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "创建平台用户失败: " + err.Error()})
@@ -74,7 +94,7 @@ func V2AuthorizeToken(c *gin.Context) {
 				"token_key":   req.TokenKey,
 				"token_id":    existingToken.Id,
 				"status":      "exists",
-				"platform_id": req.PlatformId,
+				"platform_id": platformId,
 				"created_at":  time.Unix(existingToken.CreatedTime, 0).UTC().Format(time.RFC3339),
 			},
 		})
@@ -82,10 +102,10 @@ func V2AuthorizeToken(c *gin.Context) {
 	}
 
 	// Build metadata name
-	tokenName := fmt.Sprintf("v2_%s", req.PlatformId)
+	tokenName := fmt.Sprintf("v2_%s", platformId)
 	if req.Metadata != nil {
 		if uid, ok := req.Metadata["platform_user_id"]; ok {
-			tokenName = fmt.Sprintf("v2_%s_%v", req.PlatformId, uid)
+			tokenName = fmt.Sprintf("v2_%s_%v", platformId, uid)
 		}
 	}
 
@@ -125,7 +145,7 @@ func V2AuthorizeToken(c *gin.Context) {
 			Username:  user.Username,
 			CreatedAt: common.GetTimestamp(),
 			Type:      model.LogTypeManage,
-			Content:   fmt.Sprintf("V2平台Token授权，platform: %s, metadata: %s", req.PlatformId, metadataStr),
+			Content:   fmt.Sprintf("V2平台Token授权，platform: %s, metadata: %s", platformId, metadataStr),
 			TokenId:   token.Id,
 		}).Error
 	}
@@ -137,25 +157,27 @@ func V2AuthorizeToken(c *gin.Context) {
 			"token_key":   req.TokenKey,
 			"token_id":    token.Id,
 			"status":      "authorized",
-			"platform_id": req.PlatformId,
+			"platform_id": platformId,
 			"created_at":  time.Unix(token.CreatedTime, 0).UTC().Format(time.RFC3339),
 		},
 	})
 }
 
-// V2GetPlatformLogs returns consumption logs for a platform.
-// GET /api/v2/external/platforms/:platform_id/logs
+// V2GetPlatformLogs returns consumption logs for the authenticated platform.
+// The platform identity and its shadow user come from PlatformAuth context —
+// there is no platform_id path/query param. Tokens minted via V2AuthorizeToken
+// are owned by that same shadow user, so logs are scoped by shadow user id.
+// GET /api/v2/external/logs
 func V2GetPlatformLogs(c *gin.Context) {
-	platformId := c.Param("platform_id")
-	if platformId == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "platform_id 不能为空"})
+	platform := middleware.PlatformFromContext(c)
+	if platform == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "unauthorized"})
 		return
 	}
-
-	platformUsername := "platform_" + platformId
-	var user model.User
-	if err := model.DB.Where("username = ?", platformUsername).First(&user).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "平台不存在"})
+	platformId := platform.PlatformId
+	shadowUserId := middleware.ShadowUserIdFromContext(c)
+	if shadowUserId <= 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "platform shadow user 未初始化"})
 		return
 	}
 
@@ -192,7 +214,7 @@ func V2GetPlatformLogs(c *gin.Context) {
 	}
 
 	// Build query
-	tx := model.LOG_DB.Where("user_id = ? AND type = ?", user.Id, model.LogTypeConsume)
+	tx := model.LOG_DB.Where("user_id = ? AND type = ?", shadowUserId, model.LogTypeConsume)
 
 	// Optional token_id filter (takes precedence over token_key)
 	if tokenIdStr != "" {
@@ -202,7 +224,7 @@ func V2GetPlatformLogs(c *gin.Context) {
 	} else if tokenKeyFilter != "" {
 		tokenKeyBody := strings.TrimPrefix(tokenKeyFilter, "sk-")
 		filterToken, err := model.GetTokenByKey(tokenKeyBody, true)
-		if err != nil || filterToken == nil || filterToken.UserId != user.Id {
+		if err != nil || filterToken == nil || filterToken.UserId != shadowUserId {
 			// Token not found or doesn't belong to this platform — return empty results
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
