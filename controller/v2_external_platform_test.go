@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -36,6 +37,7 @@ func setupV2TestRouter(t *testing.T) (router *gin.Engine, platformId string, sha
 	v2.Use(middleware.PlatformAuth())
 	{
 		v2.POST("/tokens/authorize", V2AuthorizeToken)
+		v2.DELETE("/tokens/:id", V2RevokeToken)
 		v2.GET("/logs", V2GetPlatformLogs)
 	}
 
@@ -200,6 +202,108 @@ func TestV2AuthorizeMissingAuth(t *testing.T) {
 		"token_key": "sk-a99416b67cb54e178e9ffe8a55c255ae",
 	})
 	assert.Equal(t, 401, w.Code)
+}
+
+// ==================== Revoke (disable) ====================
+
+func TestV2RevokeToken(t *testing.T) {
+	router, pid, shadowUserId := setupV2TestRouter(t)
+
+	mkToken := func(key string) *model.Token {
+		tok := &model.Token{
+			UserId: shadowUserId, Key: key, Name: "v2_" + pid,
+			Status: common.TokenStatusEnabled,
+			CreatedTime: common.GetTimestamp(), ExpiredTime: -1, UnlimitedQuota: true,
+		}
+		require.NoError(t, model.DB.Create(tok).Error)
+		return tok
+	}
+
+	t.Run("禁用自有token成功", func(t *testing.T) {
+		tok := mkToken("revoketokenaaaaaaaaaaaaaaaaaaaaaaa")
+		w := doV2Request(router, "DELETE", fmt.Sprintf("/api/v2/external/tokens/%d", tok.Id), nil)
+		assert.Equal(t, 200, w.Code)
+		resp := parseV2Response(t, w)
+		data := resp["data"].(map[string]interface{})
+		assert.Equal(t, "disabled", data["status"])
+		assert.Equal(t, pid, data["platform_id"])
+
+		// Disable, not delete: the row survives with status=disabled.
+		var reloaded model.Token
+		require.NoError(t, model.DB.First(&reloaded, tok.Id).Error)
+		assert.Equal(t, common.TokenStatusDisabled, reloaded.Status)
+	})
+
+	t.Run("幂等-重复禁用返回already_disabled", func(t *testing.T) {
+		tok := mkToken("revoketokenbbbbbbbbbbbbbbbbbbbbbbb")
+		first := doV2Request(router, "DELETE", fmt.Sprintf("/api/v2/external/tokens/%d", tok.Id), nil)
+		require.Equal(t, 200, first.Code)
+		second := doV2Request(router, "DELETE", fmt.Sprintf("/api/v2/external/tokens/%d", tok.Id), nil)
+		assert.Equal(t, 200, second.Code)
+		assert.Equal(t, "already_disabled", parseV2Response(t, second)["data"].(map[string]interface{})["status"])
+	})
+
+	t.Run("跨平台token禁用拒绝-404", func(t *testing.T) {
+		// A token owned by a different platform must not be revocable.
+		otherId, _ := setupTestPlatform(t, "v2revother")
+		otherShadow, err := model.GetOrCreatePlatformShadowUser(otherId)
+		require.NoError(t, err)
+		otherTok := &model.Token{
+			UserId: otherShadow.Id, Key: "foreigntokencccccccccccccccccccccc",
+			Name: "v2_other", Status: common.TokenStatusEnabled,
+			CreatedTime: common.GetTimestamp(), ExpiredTime: -1, UnlimitedQuota: true,
+		}
+		require.NoError(t, model.DB.Create(otherTok).Error)
+
+		// Authenticated as the DEFAULT platform, revoking the other's token → 404.
+		w := doV2Request(router, "DELETE", fmt.Sprintf("/api/v2/external/tokens/%d", otherTok.Id), nil)
+		assert.Equal(t, 404, w.Code)
+
+		// And the foreign token is untouched.
+		var reloaded model.Token
+		require.NoError(t, model.DB.First(&reloaded, otherTok.Id).Error)
+		assert.Equal(t, common.TokenStatusEnabled, reloaded.Status)
+	})
+
+	t.Run("不存在的token-404", func(t *testing.T) {
+		w := doV2Request(router, "DELETE", "/api/v2/external/tokens/999999", nil)
+		assert.Equal(t, 404, w.Code)
+	})
+
+	t.Run("无效id-400", func(t *testing.T) {
+		w := doV2Request(router, "DELETE", "/api/v2/external/tokens/abc", nil)
+		assert.Equal(t, 400, w.Code)
+	})
+
+	t.Run("缺少鉴权-401", func(t *testing.T) {
+		tok := mkToken("revoketokenddddddddddddddddddddddd")
+		w := doRequestNoAuth(router, "DELETE", fmt.Sprintf("/api/v2/external/tokens/%d", tok.Id), nil)
+		assert.Equal(t, 401, w.Code)
+	})
+
+	// The whole point of disable-not-delete: revoking a token must NOT drop its
+	// historical consumption logs nor blank the token_key enrichment.
+	t.Run("禁用后日志与token_key仍完整", func(t *testing.T) {
+		tok := mkToken("revoketokeneeeeeeeeeeeeeeeeeeeeeee")
+		for i := 0; i < 2; i++ {
+			model.LOG_DB.Create(&model.Log{
+				UserId: shadowUserId, Username: "platform_" + pid, TokenId: tok.Id,
+				CreatedAt: common.GetTimestamp(), Type: model.LogTypeConsume,
+				ModelName: "deepseek-chat", Quota: 1000, PromptTokens: 100, CompletionTokens: 50,
+			})
+		}
+		// Revoke it.
+		require.Equal(t, 200, doV2Request(router, "DELETE", fmt.Sprintf("/api/v2/external/tokens/%d", tok.Id), nil).Code)
+
+		// Logs still present, token_key still resolved, stats intact.
+		w := doV2Request(router, "GET", fmtV2LogPath("page=1&page_size=50&token_id="+strconv.Itoa(tok.Id)), nil)
+		assert.Equal(t, 200, w.Code)
+		data := parseV2Response(t, w)["data"].(map[string]interface{})
+		logs := data["logs"].([]interface{})
+		require.Len(t, logs, 2)
+		assert.Equal(t, "sk-revoketokeneeeeeeeeeeeeeeeeeeeeeee", logs[0].(map[string]interface{})["token_key"])
+		assert.Equal(t, float64(2000), data["summary"].(map[string]interface{})["total_quota_consumed"])
+	})
 }
 
 // ==================== Platform Logs ====================

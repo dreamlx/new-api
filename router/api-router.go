@@ -224,6 +224,7 @@ func SetApiRouter(router *gin.Engine) {
 		v2ExternalRoute.Use(middleware.PlatformAuth())
 		{
 			v2ExternalRoute.POST("/tokens/authorize", controller.V2AuthorizeToken)
+			v2ExternalRoute.DELETE("/tokens/:id", controller.V2RevokeToken)
 			v2ExternalRoute.GET("/logs", controller.V2GetPlatformLogs)
 		}
 

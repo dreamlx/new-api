@@ -163,6 +163,65 @@ func V2AuthorizeToken(c *gin.Context) {
 	})
 }
 
+// V2RevokeToken revokes a token owned by the authenticated platform. New API
+// uses DISABLE (not delete) as the revocation primitive: the row and its
+// log/billing trail are preserved, the key stops working at relay immediately
+// (cache is invalidated), and the action is reversible (re-enable). This keeps
+// the V2 logs endpoint's token_key enrichment intact for historical entries.
+//
+// Ownership is enforced via the platform's shadow user — a platform can only
+// revoke tokens it owns. Idempotent: revoking an already-disabled token is a
+// success and reports status "already_disabled".
+//
+// DELETE /api/v2/external/tokens/:id
+func V2RevokeToken(c *gin.Context) {
+	platform := middleware.PlatformFromContext(c)
+	if platform == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "unauthorized"})
+		return
+	}
+	shadowUserId := middleware.ShadowUserIdFromContext(c)
+	if shadowUserId <= 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "platform shadow user 未初始化"})
+		return
+	}
+
+	tokenId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || tokenId <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的 token id"})
+		return
+	}
+
+	// Scope by shadow user id: a platform may only revoke its own tokens.
+	token, err := model.GetTokenByIds(tokenId, shadowUserId)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Token 不存在或不属于该平台"})
+		return
+	}
+
+	alreadyDisabled := token.Status == common.TokenStatusDisabled
+	if !alreadyDisabled {
+		if err := model.DisableTokenByKey(token.Key); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "禁用 Token 失败: " + err.Error()})
+			return
+		}
+	}
+
+	status := "disabled"
+	if alreadyDisabled {
+		status = "already_disabled"
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Token 已禁用",
+		"data": gin.H{
+			"token_id":    tokenId,
+			"platform_id": platform.PlatformId,
+			"status":      status,
+		},
+	})
+}
+
 // V2GetPlatformLogs returns consumption logs for the authenticated platform.
 // The platform identity and its shadow user come from PlatformAuth context —
 // there is no platform_id path/query param. Tokens minted via V2AuthorizeToken
