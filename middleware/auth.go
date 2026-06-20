@@ -355,6 +355,13 @@ func TokenAuth() func(c *gin.Context) {
 				common.SysLog("TokenAuth ValidateUserToken database error: " + err.Error())
 				abortWithOpenAiMessage(c, http.StatusInternalServerError,
 					common.TranslateMessage(c, i18n.MsgDatabaseError))
+			} else if token != nil && token.Status == common.TokenStatusDisabled {
+				// A disabled token is a revoked key. Surface a distinct 403 +
+				// code so callers (e.g. the LH platform) can tell revocation
+				// apart from an unknown/invalid key (which stays 401). The key
+				// stops working immediately because revoke also clears the cache.
+				abortWithOpenAiMessage(c, http.StatusForbidden,
+					common.TranslateMessage(c, i18n.MsgTokenRevoked), types.ErrorCodeApiKeyRevoked)
 			} else {
 				abortWithOpenAiMessage(c, http.StatusUnauthorized,
 					common.TranslateMessage(c, i18n.MsgTokenInvalid))

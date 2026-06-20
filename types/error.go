@@ -64,6 +64,11 @@ const (
 	ErrorCodeReadRequestBodyFailed ErrorCode = "read_request_body_failed"
 	ErrorCodeConvertRequestFailed  ErrorCode = "convert_request_failed"
 	ErrorCodeAccessDenied          ErrorCode = "access_denied"
+	// ErrorCodeApiKeyRevoked is returned (HTTP 403) when a relay request uses a
+	// token whose status is disabled, i.e. it has been revoked. It lets callers
+	// (e.g. the LH platform) distinguish revocation from an unknown/invalid key
+	// (which stays HTTP 401, code "").
+	ErrorCodeApiKeyRevoked ErrorCode = "api_key_revoked"
 
 	// request error
 	ErrorCodeBadRequestBody ErrorCode = "bad_request_body"
