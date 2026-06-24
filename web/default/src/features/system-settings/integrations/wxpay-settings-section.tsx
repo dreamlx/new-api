@@ -16,12 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { useQueryClient } from '@tanstack/react-query'
+import type { UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
@@ -35,8 +31,8 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { SettingsSection } from '../components/settings-section'
-import { useUpdateOption } from '../hooks/use-update-option'
 import { isMaskedSecret } from './paypal-settings-section'
+import type { PaymentFormValues } from './payment-settings-section'
 
 export interface WxpaySettingsValues {
   WxpayEnabled: boolean
@@ -51,112 +47,82 @@ export interface WxpaySettingsValues {
 }
 
 interface Props {
-  defaultValues: WxpaySettingsValues
+  form: UseFormReturn<PaymentFormValues>
   serverAddress?: string
 }
 
-export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
+type WxpayUpdate = { key: string; value: string }
+
+/**
+ * Build option updates for WeChat Pay using the same mask/changed guards as the
+ * original self-contained save. Credentials go in `options`; the Enabled switch
+ * is returned separately in `enable` so the caller persists it AFTER credentials
+ * (the backend rejects enable=true while credentials are empty).
+ */
+export function buildWxpayUpdates(
+  values: WxpaySettingsValues,
+  initial: WxpaySettingsValues
+): { options: WxpayUpdate[]; enable: WxpayUpdate | null } {
+  const options: WxpayUpdate[] = []
+
+  // Plain (non-secret) fields — push when changed
+  const plainFields: (keyof WxpaySettingsValues)[] = [
+    'WxpayAppId',
+    'WxpayMchId',
+    'WxpayMchSerialNo',
+    'WxpayPublicKeyId',
+  ]
+  for (const key of plainFields) {
+    if (values[key] !== initial[key]) {
+      options.push({ key, value: String(values[key] || '') })
+    }
+  }
+
+  // Secret fields — only push if not masked (i.e., actually edited)
+  if (values.WxpayApiV3Key && !isMaskedSecret(values.WxpayApiV3Key)) {
+    options.push({ key: 'WxpayApiV3Key', value: values.WxpayApiV3Key })
+  }
+  if (values.WxpayPrivateKey && !isMaskedSecret(values.WxpayPrivateKey)) {
+    options.push({ key: 'WxpayPrivateKey', value: values.WxpayPrivateKey })
+  }
+  if (values.WxpayPublicKey && !isMaskedSecret(values.WxpayPublicKey)) {
+    options.push({ key: 'WxpayPublicKey', value: values.WxpayPublicKey })
+  }
+
+  if (
+    values.WxpayMinTopUp !== undefined &&
+    values.WxpayMinTopUp !== null &&
+    values.WxpayMinTopUp !== initial.WxpayMinTopUp
+  ) {
+    options.push({
+      key: 'WxpayMinTopUp',
+      value: String(values.WxpayMinTopUp || 1),
+    })
+  }
+
+  // Enabled switch — persisted AFTER credentials by the caller.
+  let enable: WxpayUpdate | null = null
+  if (initial.WxpayEnabled !== values.WxpayEnabled) {
+    enable = { key: 'WxpayEnabled', value: String(values.WxpayEnabled) }
+  }
+
+  return { options, enable }
+}
+
+export function WxpaySettingsSection({ form, serverAddress }: Props) {
   const { t } = useTranslation()
-  const updateOption = useUpdateOption()
-  const queryClient = useQueryClient()
-  const [loading, setLoading] = useState(false)
-
-  const form = useForm<WxpaySettingsValues>({
-    defaultValues,
-  })
-
-  useEffect(() => {
-    form.reset(defaultValues)
-  }, [defaultValues, form])
 
   const notifyUrl = serverAddress
     ? `${serverAddress.replace(/\/+$/, '')}/api/user/wxpay/notify`
     : `<ServerAddress>/api/user/wxpay/notify`
 
-  const handleSave = async () => {
-    setLoading(true)
-    try {
-      const values = form.getValues()
-      const options: { key: string; value: string }[] = []
-
-      // Plain (non-secret) fields — push when changed
-      const plainFields: (keyof WxpaySettingsValues)[] = [
-        'WxpayAppId',
-        'WxpayMchId',
-        'WxpayMchSerialNo',
-        'WxpayPublicKeyId',
-      ]
-      for (const key of plainFields) {
-        if (values[key] !== defaultValues[key]) {
-          options.push({ key, value: String(values[key] || '') })
-        }
-      }
-
-      // Secret fields — only push if not masked (i.e., actually edited)
-      if (values.WxpayApiV3Key && !isMaskedSecret(values.WxpayApiV3Key)) {
-        options.push({ key: 'WxpayApiV3Key', value: values.WxpayApiV3Key })
-      }
-      if (values.WxpayPrivateKey && !isMaskedSecret(values.WxpayPrivateKey)) {
-        options.push({ key: 'WxpayPrivateKey', value: values.WxpayPrivateKey })
-      }
-      if (values.WxpayPublicKey && !isMaskedSecret(values.WxpayPublicKey)) {
-        options.push({ key: 'WxpayPublicKey', value: values.WxpayPublicKey })
-      }
-
-      if (
-        values.WxpayMinTopUp !== undefined &&
-        values.WxpayMinTopUp !== null &&
-        values.WxpayMinTopUp !== defaultValues.WxpayMinTopUp
-      ) {
-        options.push({
-          key: 'WxpayMinTopUp',
-          value: String(values.WxpayMinTopUp || 1),
-        })
-      }
-
-      // Enabled switch — saved AFTER credentials, because backend validation
-      // rejects enable=true when credentials are still empty
-      let enabledOption: { key: string; value: string } | null = null
-      if (defaultValues.WxpayEnabled !== values.WxpayEnabled) {
-        enabledOption = {
-          key: 'WxpayEnabled',
-          value: String(values.WxpayEnabled),
-        }
-      }
-
-      if (options.length === 0 && !enabledOption) {
-        toast.success(t('Updated successfully'))
-        setLoading(false)
-        return
-      }
-
-      for (const opt of options) {
-        await updateOption.mutateAsync(opt)
-      }
-      if (enabledOption) {
-        await updateOption.mutateAsync(enabledOption)
-      }
-      // Re-fetch options from the API. The backend strips sensitive fields
-      // (suffix Key/Secret/Token), so WxpayApiV3Key, WxpayPrivateKey, and
-      // WxpayPublicKey will come back empty. Non-sensitive fields like
-      // WxpayAppId, WxpayMchId, WxpayMchSerialNo, WxpayPublicKeyId,
-      // WxpayMinTopUp, WxpayEnabled will be re-populated with saved values.
-      await queryClient.invalidateQueries({ queryKey: ['system-options'] })
-      toast.success(t('Updated successfully'))
-    } catch {
-      toast.error(t('Update failed'))
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
-    <SettingsSection
-      title={t('WeChat Pay Settings')}
-      description={t('Configure WeChat Pay payment gateway for top-ups')}
-    >
+    <SettingsSection title={t('WeChat Pay Settings')}>
+      <p className='text-muted-foreground text-sm'>
+        {t('Configure WeChat Pay payment gateway for top-ups')}
+      </p>
       <Form {...form}>
-        <form className='space-y-4'>
+        <div className='space-y-4'>
           {/* Blue info box */}
           <div className='rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950'>
             <p className='text-sm text-blue-900 dark:text-blue-100'>
@@ -375,10 +341,7 @@ export function WxpaySettingsSection({ defaultValues, serverAddress }: Props) {
             />
           </div>
 
-          <Button type='button' onClick={handleSave} disabled={loading}>
-            {loading ? t('Saving...') : t('Save WeChat Pay settings')}
-          </Button>
-        </form>
+        </div>
       </Form>
     </SettingsSection>
   )

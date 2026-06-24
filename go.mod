@@ -6,7 +6,6 @@ go 1.25.1
 require (
 	github.com/Calcium-Ion/go-epay v0.0.4
 	github.com/abema/go-mp4 v1.4.1
-	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/andybalholm/brotli v1.1.1
 	github.com/anknown/ahocorasick v0.0.0-20190904063843-d75dbd5169c0
 	github.com/aws/aws-sdk-go-v2 v1.41.5
@@ -61,7 +60,7 @@ require (
 	gorm.io/gorm v1.25.2
 )
 
-require github.com/waffo-com/waffo-pancake-sdk-go v0.2.0
+require github.com/waffo-com/waffo-pancake-sdk-go v0.3.1
 
 require (
 	github.com/DmitriyVTitov/size v1.5.0 // indirect
@@ -137,7 +136,6 @@ require (
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	github.com/wechatpay-apiv3/wechatpay-go v0.2.21
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/yuin/gopher-lua v1.1.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
 	golang.org/x/arch v0.21.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect

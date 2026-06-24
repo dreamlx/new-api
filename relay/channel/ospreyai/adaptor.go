@@ -213,7 +213,7 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 
 	// ─── Image Generation ─────────────────────────────────────────
 	case types.RelayFormatOpenAIImage:
-		return openai.OpenaiHandlerWithUsage(c, info, resp)
+		return openai.OpenaiImageHandler(c, info, resp)
 
 	// ─── Embedding ────────────────────────────────────────────────
 	case types.RelayFormatEmbedding:

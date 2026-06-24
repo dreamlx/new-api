@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useState } from 'react'
+import type { UseFormReturn } from 'react-hook-form'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -41,6 +41,7 @@ import {
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { buildDisablePayPalOptions } from './paypal-options'
+import type { PaymentFormValues } from './payment-settings-section'
 
 /**
  * Heuristic to detect a masked secret returned from the server.
@@ -62,80 +63,59 @@ export interface PayPalSettingsValues {
 }
 
 interface Props {
-  defaultValues: PayPalSettingsValues
+  form: UseFormReturn<PaymentFormValues>
   serverAddress?: string
 }
 
-export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
+type PayPalUpdate = { key: string; value: string }
+
+/**
+ * Build option updates for PayPal using the same mask/changed guards as the
+ * original self-contained save. PayPal has no Enabled switch; Mode and MinTopUp
+ * are always written (matching prior behavior).
+ */
+export function buildPayPalUpdates(values: PayPalSettingsValues): {
+  options: PayPalUpdate[]
+} {
+  const options: PayPalUpdate[] = []
+
+  // ClientId — only push if not masked (sensitive field)
+  if (values.PayPalClientId && !isMaskedSecret(values.PayPalClientId)) {
+    options.push({ key: 'PayPalClientId', value: values.PayPalClientId })
+  }
+
+  // Only push sensitive fields if they were actually edited
+  // (i.e., not still masked from the server response)
+  if (values.PayPalClientSecret && !isMaskedSecret(values.PayPalClientSecret)) {
+    options.push({
+      key: 'PayPalClientSecret',
+      value: values.PayPalClientSecret,
+    })
+  }
+  if (
+    values.PayPalWebhookSecret &&
+    !isMaskedSecret(values.PayPalWebhookSecret)
+  ) {
+    options.push({
+      key: 'PayPalWebhookSecret',
+      value: values.PayPalWebhookSecret,
+    })
+  }
+
+  options.push({ key: 'PayPalMode', value: values.PayPalMode || 'sandbox' })
+  options.push({
+    key: 'PayPalMinTopUp',
+    value: String(values.PayPalMinTopUp || 1),
+  })
+
+  return { options }
+}
+
+export function PayPalSettingsSection({ form, serverAddress }: Props) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
   const queryClient = useQueryClient()
   const [loading, setLoading] = useState(false)
-
-  const form = useForm<PayPalSettingsValues>({
-    defaultValues,
-  })
-
-  useEffect(() => {
-    form.reset(defaultValues)
-  }, [defaultValues, form])
-
-  const handleSave = async () => {
-    setLoading(true)
-    try {
-      const values = form.getValues()
-      const options: { key: string; value: string }[] = []
-
-      // ClientId — only push if not masked (sensitive field)
-      if (values.PayPalClientId && !isMaskedSecret(values.PayPalClientId)) {
-        options.push({ key: 'PayPalClientId', value: values.PayPalClientId })
-      }
-
-      // Only push sensitive fields if they were actually edited
-      // (i.e., not still masked from the server response)
-      if (
-        values.PayPalClientSecret &&
-        !isMaskedSecret(values.PayPalClientSecret)
-      ) {
-        options.push({
-          key: 'PayPalClientSecret',
-          value: values.PayPalClientSecret,
-        })
-      }
-      if (
-        values.PayPalWebhookSecret &&
-        !isMaskedSecret(values.PayPalWebhookSecret)
-      ) {
-        options.push({
-          key: 'PayPalWebhookSecret',
-          value: values.PayPalWebhookSecret,
-        })
-      }
-
-      options.push({
-        key: 'PayPalMode',
-        value: values.PayPalMode || 'sandbox',
-      })
-      options.push({
-        key: 'PayPalMinTopUp',
-        value: String(values.PayPalMinTopUp || 1),
-      })
-
-      for (const opt of options) {
-        await updateOption.mutateAsync(opt)
-      }
-      // Re-fetch options from the API. The backend strips sensitive fields
-      // (suffix Secret/Key/Token), so the refreshed defaultValues will have
-      // those fields as empty — non-sensitive fields like PayPalMode and
-      // PayPalMinTopUp will be re-populated with their saved values.
-      await queryClient.invalidateQueries({ queryKey: ['system-options'] })
-      toast.success(t('Updated successfully'))
-    } catch {
-      toast.error(t('Update failed'))
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const handleDisable = async () => {
     setLoading(true)
@@ -143,12 +123,9 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
       for (const opt of buildDisablePayPalOptions()) {
         await updateOption.mutateAsync(opt)
       }
-      form.reset({
-        ...form.getValues(),
-        PayPalClientId: '',
-        PayPalClientSecret: '',
-        PayPalWebhookSecret: '',
-      })
+      form.setValue('PayPalClientId', '')
+      form.setValue('PayPalClientSecret', '')
+      form.setValue('PayPalWebhookSecret', '')
       await queryClient.invalidateQueries({ queryKey: ['system-options'] })
       toast.success(t('PayPal disabled'))
     } catch {
@@ -163,12 +140,12 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
     : '<ServerAddress>/api/paypal/webhook'
 
   return (
-    <SettingsSection
-      title={t('PayPal Settings')}
-      description={t('Configure PayPal payment gateway for top-ups')}
-    >
+    <SettingsSection title={t('PayPal Settings')}>
+      <p className='text-muted-foreground text-sm'>
+        {t('Configure PayPal payment gateway for top-ups')}
+      </p>
       <Form {...form}>
-        <form className='space-y-4'>
+        <div className='space-y-4'>
           <div className='rounded-md bg-blue-50 p-4 text-sm text-blue-900 dark:bg-blue-950 dark:text-blue-100'>
             <p className='mb-2 font-medium'>
               {t('PayPal Webhook Configuration:')}
@@ -331,9 +308,6 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
           />
 
           <div className='flex flex-wrap gap-2'>
-            <Button type='button' onClick={handleSave} disabled={loading}>
-              {loading ? t('Saving...') : t('Save PayPal settings')}
-            </Button>
             <Button
               type='button'
               variant='outline'
@@ -343,7 +317,7 @@ export function PayPalSettingsSection({ defaultValues, serverAddress }: Props) {
               {t('Disable PayPal')}
             </Button>
           </div>
-        </form>
+        </div>
       </Form>
     </SettingsSection>
   )

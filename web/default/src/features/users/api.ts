@@ -53,13 +53,20 @@ export async function searchUsers(
     keyword = '',
     group = '',
     downstream = '',
+    role = '',
+    status = '',
     p = 1,
     page_size = 10,
   } = params
-  const downstreamParam = downstream ? `&downstream=${downstream}` : ''
-  const res = await api.get(
-    `/api/user/search?keyword=${keyword}&group=${group}${downstreamParam}&p=${p}&page_size=${page_size}`
-  )
+  const queryParams = new URLSearchParams()
+  queryParams.set('keyword', keyword)
+  queryParams.set('group', group)
+  if (downstream) queryParams.set('downstream', downstream)
+  if (role) queryParams.set('role', role)
+  if (status) queryParams.set('status', status)
+  queryParams.set('p', String(p))
+  queryParams.set('page_size', String(page_size))
+  const res = await api.get(`/api/user/search?${queryParams.toString()}`)
   return res.data
 }
 
