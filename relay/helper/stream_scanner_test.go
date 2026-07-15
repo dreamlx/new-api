@@ -484,7 +484,13 @@ func TestStreamScannerHandler_StreamStatus_InitializedIfNil(t *testing.T) {
 	assert.NotNil(t, info.StreamStatus)
 }
 
-func TestStreamScannerHandler_StreamStatus_ReplacesPreInitialized(t *testing.T) {
+// TestStreamScannerHandler_StreamStatus_PreservesPreInitialized verifies the
+// handler PRESERVES a pre-existing StreamStatus (incl. its recorded errors)
+// rather than replacing it — it only creates a new StreamStatus when nil
+// (relay/helper/stream_scanner.go). Behavior changed from unconditional-replace
+// to preserve-if-nil in 48b379e4a (stabilize shared relay tests); this test was
+// updated to assert the current preserve semantics instead of the old replace.
+func TestStreamScannerHandler_StreamStatus_PreservesPreInitialized(t *testing.T) {
 	t.Parallel()
 
 	body := buildSSEBody(5)
@@ -496,5 +502,6 @@ func TestStreamScannerHandler_StreamStatus_ReplacesPreInitialized(t *testing.T) 
 	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {})
 
 	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
-	assert.Equal(t, 0, info.StreamStatus.TotalErrorCount())
+	// The pre-existing error is preserved (handler keeps a non-nil StreamStatus).
+	assert.Equal(t, 1, info.StreamStatus.TotalErrorCount())
 }
