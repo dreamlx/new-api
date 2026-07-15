@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -40,6 +41,32 @@ func applyUpstreamContentLength(req *http.Request, info *common.RelayInfo) {
 	if info.UpstreamRequestBodySize > 0 && req.ContentLength <= 0 {
 		req.ContentLength = info.UpstreamRequestBodySize
 	}
+}
+
+// replayBodyLimit caps the upstream request body size (bytes) that DoApiRequest
+// buffers into RAM so net/http can replay it on an HTTP/2 GOAWAY / PROTOCOL_ERROR
+// mid-stream retry. net/http auto-installs Request.GetBody (and ContentLength) for
+// *bytes.Reader; without GetBody, a peer PROTOCOL_ERROR arriving after the body was
+// written fails as "cannot retry ... define Request.GetBody" and surfaces to the
+// client as a 500 (tokenpony sends these under concurrent load). Bodies at/above
+// this limit — typically disk-backed vision/image uploads — pass through unbuffered
+// and stay non-replayable, trading retry-safety for OOM-safety.
+const replayBodyLimit = 1 << 20 // 1 MiB
+
+// makeReplayableBody returns a body net/http can replay on HTTP/2 mid-stream
+// retries. Bodies whose size is known and <= replayBodyLimit are buffered into a
+// *bytes.Reader (http.NewRequest then auto-sets GetBody + ContentLength). Larger,
+// unknown-size, or nil-info bodies pass through unchanged (no GetBody) to avoid
+// materializing disk-backed or oversized payloads into RAM.
+func makeReplayableBody(requestBody io.Reader, info *common.RelayInfo) (io.Reader, error) {
+	if info == nil || info.UpstreamRequestBodySize <= 0 || info.UpstreamRequestBodySize > replayBodyLimit {
+		return requestBody, nil
+	}
+	bodyBytes, err := io.ReadAll(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("buffer replayable request body: %w", err)
+	}
+	return bytes.NewReader(bodyBytes), nil
 }
 
 func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Header) {
@@ -310,7 +337,11 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", fullRequestURL)
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	replayBody, err := makeReplayableBody(requestBody, info)
+	if err != nil {
+		return nil, fmt.Errorf("prepare request body failed: %w", err)
+	}
+	req, err := http.NewRequest(c.Request.Method, fullRequestURL, replayBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
@@ -340,7 +371,11 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", fullRequestURL)
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	replayBody, err := makeReplayableBody(requestBody, info)
+	if err != nil {
+		return nil, fmt.Errorf("prepare request body failed: %w", err)
+	}
+	req, err := http.NewRequest(c.Request.Method, fullRequestURL, replayBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
@@ -537,15 +572,18 @@ func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, req
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	replayBody, err := makeReplayableBody(requestBody, info)
+	if err != nil {
+		return nil, fmt.Errorf("prepare request body failed: %w", err)
+	}
+	req, err := http.NewRequest(c.Request.Method, fullRequestURL, replayBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
 	applyUpstreamContentLength(req, info)
-	req.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(requestBody), nil
-	}
-
+	// GetBody is auto-set by http.NewRequest when replayBody is *bytes.Reader
+	// (see makeReplayableBody); the old io.NopCloser(requestBody) override that
+	// returned an exhausted shared reader on retry is removed.
 	err = a.BuildRequestHeader(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
