@@ -343,6 +343,7 @@ var streamSupportedChannels = map[int]bool{
 	constant.ChannelTypeSiliconFlow:    true,
 	constant.ChannelTypeOspreyAI:       true,
 	constant.ChannelTypeAdvancedCustom: true,
+	constant.ChannelTypeOpenRouter:     true,
 }
 
 func GenRelayInfoWs(c *gin.Context, ws *websocket.Conn) *RelayInfo {

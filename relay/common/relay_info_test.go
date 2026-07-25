@@ -58,3 +58,22 @@ func TestRelayInfoInitChannelMetaEnablesStreamOptionsForOspreyAI(t *testing.T) {
 	require.NotNil(t, info.ChannelMeta)
 	require.True(t, info.SupportStreamOptions)
 }
+
+// TestRelayInfoInitChannelMetaEnablesStreamOptionsForOpenRouter pins issue #18:
+// OpenRouter must be in streamSupportedChannels so include_usage is forwarded
+// to upstream and the native final-usage-chunk path (HandleFinalResponse) can
+// activate for OpenRouter-backed streamed /chat/completions.
+func TestRelayInfoInitChannelMetaEnablesStreamOptionsForOpenRouter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	common2.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenRouter)
+	common2.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://openrouter.ai")
+	common2.SetContextKey(c, constant.ContextKeyChannelKey, "test-key")
+
+	info := &RelayInfo{}
+	info.InitChannelMeta(c)
+
+	require.NotNil(t, info.ChannelMeta)
+	require.True(t, info.SupportStreamOptions, "OpenRouter must support stream options (issue #18)")
+}
