@@ -26,9 +26,7 @@ type expiryMocks struct {
 
 func setupTopUpExpiryTest(t *testing.T) (*gorm.DB, *expiryMocks) {
 	t.Helper()
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	model.InitColumnsForTest()
 
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
