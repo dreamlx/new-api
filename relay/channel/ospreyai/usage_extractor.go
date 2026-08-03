@@ -2,7 +2,7 @@ package ospreyai
 
 import (
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 )
 
 // UsageExtractor extracts token usage information from different protocol responses

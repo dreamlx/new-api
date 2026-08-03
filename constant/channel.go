@@ -59,7 +59,9 @@ const (
 	ChannelTypeHappyHorse     = 59
 	ChannelTypeSeedance       = 60
 	ChannelTypeAdvancedCustom = 61
-	ChannelTypeDummy          = 62 // this one is only for count, do not add any channel after this
+	ChannelTypeSub2API        = 62
+	ChannelTypeNewAPI         = 63
+	ChannelTypeDummy          // this one is only for count, do not add any channel after this
 
 )
 
@@ -126,7 +128,8 @@ var ChannelBaseURLs = []string{
 	"https://dashscope.aliyuncs.com",            //59 HappyHorse
 	"",                                          //60 Seedance (third-party gateway URL)
 	"",                                          //61 AdvancedCustom
-	"",                                          //62 Dummy
+	"",                                          //62 Sub2API
+	"",                                          //63 NewAPI
 }
 
 var ChannelTypeNames = map[int]string{
@@ -188,6 +191,8 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeHappyHorse:     "HappyHorse",
 	ChannelTypeSeedance:       "Seedance",
 	ChannelTypeAdvancedCustom: "Advanced Custom",
+	ChannelTypeSub2API:        "Sub2API",
+	ChannelTypeNewAPI:         "New API",
 }
 
 func GetChannelTypeName(channelType int) string {
