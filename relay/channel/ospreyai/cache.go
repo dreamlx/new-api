@@ -4,7 +4,7 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
 // HeaderMappingCache caches header mappings to avoid repeated lookups

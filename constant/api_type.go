@@ -63,5 +63,7 @@ const (
 	APITypeHappyHorse     // 59
 	APITypeSeedance       // 60
 	APITypeAdvancedCustom // 61
+	APITypeSub2API        // 62
+	APITypeNewAPI         // 63
 	APITypeDummy          // this one is only for count, do not add any channel after this
 )

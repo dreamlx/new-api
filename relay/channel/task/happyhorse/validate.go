@@ -8,14 +8,14 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
 
-func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
+func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *taskdto.TaskError {
 	if isHappyHorseNativeRequest(c) {
 		return validateNativeRequest(c, info)
 	}
@@ -27,7 +27,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 }
 
 // validateHappyHorseTaskRequest validates V1-path requests after ValidateBasicTaskRequest.
-func validateHappyHorseTaskRequest(c *gin.Context) *dto.TaskError {
+func validateHappyHorseTaskRequest(c *gin.Context) *taskdto.TaskError {
 	req, err := relaycommon.GetTaskRequest(c)
 	if err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
@@ -206,7 +206,7 @@ func v1ToMediaItems(req relaycommon.TaskSubmitReq) ([]MediaItem, error) {
 	}
 }
 
-func validateNativeRequest(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
+func validateNativeRequest(c *gin.Context, info *relaycommon.RelayInfo) *taskdto.TaskError {
 	var req GenerateRequest
 	if err := common.UnmarshalBodyReusable(c, &req); err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)

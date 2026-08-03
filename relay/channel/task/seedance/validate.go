@@ -8,7 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
 	"github.com/gin-gonic/gin"
@@ -51,21 +51,21 @@ type VolcanoRequestBody struct {
 // ValidateRequestAndSetAction overrides the default validation to support both:
 // 1. OpenAI Video style: {model, prompt, images, videos, audios, duration, size}
 // 2. Volcano content[] style: {model, content: [{type, text, image_url, video, audio}]}
-func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *dto.TaskError) {
+func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) (taskErr *taskdto.TaskError) {
 	// Read the raw body bytes
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
-		return &dto.TaskError{Code: "read_body_failed", Message: err.Error(), StatusCode: http.StatusInternalServerError, LocalError: true, Error: err}
+		return &taskdto.TaskError{Code: "read_body_failed", Message: err.Error(), StatusCode: http.StatusInternalServerError, LocalError: true, Error: err}
 	}
 	bodyBytes, err := storage.Bytes()
 	if err != nil {
-		return &dto.TaskError{Code: "read_body_failed", Message: err.Error(), StatusCode: http.StatusInternalServerError, LocalError: true, Error: err}
+		return &taskdto.TaskError{Code: "read_body_failed", Message: err.Error(), StatusCode: http.StatusInternalServerError, LocalError: true, Error: err}
 	}
 
 	// Parse as generic map to detect format
 	var raw map[string]json.RawMessage
 	if err := common.Unmarshal(bodyBytes, &raw); err != nil {
-		return &dto.TaskError{Code: "invalid_request", Message: err.Error(), StatusCode: http.StatusBadRequest, LocalError: true, Error: err}
+		return &taskdto.TaskError{Code: "invalid_request", Message: err.Error(), StatusCode: http.StatusBadRequest, LocalError: true, Error: err}
 	}
 
 	var req relaycommon.TaskSubmitReq
@@ -75,24 +75,24 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		// Volcano content[] format
 		var volcanoReq VolcanoRequestBody
 		if err := common.Unmarshal(bodyBytes, &volcanoReq); err != nil {
-			return &dto.TaskError{Code: "invalid_request", Message: err.Error(), StatusCode: http.StatusBadRequest, LocalError: true, Error: err}
+			return &taskdto.TaskError{Code: "invalid_request", Message: err.Error(), StatusCode: http.StatusBadRequest, LocalError: true, Error: err}
 		}
 		req = convertVolcanoContentToTaskSubmit(volcanoReq, raw)
 	} else {
 		// Standard OpenAI Video format
 		if err := common.Unmarshal(bodyBytes, &req); err != nil {
-			return &dto.TaskError{Code: "invalid_request", Message: err.Error(), StatusCode: http.StatusBadRequest, LocalError: true, Error: err}
+			return &taskdto.TaskError{Code: "invalid_request", Message: err.Error(), StatusCode: http.StatusBadRequest, LocalError: true, Error: err}
 		}
 	}
 
 	// Validate prompt
 	if strings.TrimSpace(req.Prompt) == "" {
-		return &dto.TaskError{Code: "invalid_request", Message: "prompt is required", StatusCode: http.StatusBadRequest, LocalError: true, Error: errors.New("prompt is required")}
+		return &taskdto.TaskError{Code: "invalid_request", Message: "prompt is required", StatusCode: http.StatusBadRequest, LocalError: true, Error: errors.New("prompt is required")}
 	}
 
 	// Reject fast model + 1080p (fast models only support 480p/720p)
 	if IsFastModel(req.Model) && normalizeResolution(req.Size) == Resolution1080P {
-		return &dto.TaskError{
+		return &taskdto.TaskError{
 			Code:        "invalid_resolution",
 			Message:     "Fast models do not support 1080p resolution. Please use 480p or 720p.",
 			StatusCode:  http.StatusBadRequest,

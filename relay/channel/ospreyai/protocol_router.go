@@ -1,7 +1,7 @@
 package ospreyai
 
 import (
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
 // ProtocolRouter routes responses based on relay format
