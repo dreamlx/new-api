@@ -283,6 +283,12 @@ func migrateDB() error {
 	if err := migrateUserQuotaToBigint(); err != nil {
 		return err
 	}
+	// Drop legacy single-column UNIQUE constraints before AutoMigrate sees the
+	// columns — gorm >= v1.25.7 fatals on them (SQLSTATE 42704). See
+	// migrateLegacyUniqueConstraints for the full rationale.
+	if err := migrateLegacyUniqueConstraints(); err != nil {
+		return err
+	}
 
 	autoMigrateTargets := []interface{}{
 		&Channel{},
@@ -806,6 +812,56 @@ func migrateUserQuotaToBigint() error {
 			}
 			common.SysLog(fmt.Sprintf("Migrated %s.%s to bigint", c.table, c.column))
 		}
+	}
+	return nil
+}
+
+// migrateLegacyUniqueConstraints drops legacy single-column UNIQUE constraints
+// that gorm >= v1.25.7 (arrived with the glebarez/sqlite v1.11.0 bump, #12)
+// cannot reconcile. Migrator.MigrateColumnUnique sees a column-level UNIQUE
+// constraint the model does not declare via the `unique` tag and issues
+// DROP CONSTRAINT under gorm's OWN name (uni_<table>_<column>) — a name that
+// never existed in legacy schemas — so AutoMigrate fatals with
+// SQLSTATE 42704 on every boot. Uniqueness on the affected columns is also
+// enforced by the tagged unique indexes (which survive this drop), so removing
+// the legacy constraint only strips the duplicate enforcement layer gorm
+// trips over. PostgreSQL only; SQLite/MySQL schemas never carried these names.
+func migrateLegacyUniqueConstraints() error {
+	if !common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		return nil
+	}
+
+	type colSpec struct {
+		table  string
+		column string
+	}
+	cols := []colSpec{
+		{"users", "external_user_id"}, // legacy constraint: users_external_user_id_key
+		{"prefill_groups", "name"},    // legacy constraint: idx_prefill_groups_name
+	}
+
+	for _, c := range cols {
+		if !DB.Migrator().HasTable(c.table) {
+			continue
+		}
+		var name string
+		if err := DB.Raw(
+			`SELECT conname FROM pg_constraint
+			 WHERE conrelid = ?::regclass AND contype = 'u'
+			   AND cardinality(conkey) = 1
+			   AND conkey[1] = (SELECT attnum FROM pg_attribute
+			                    WHERE attrelid = ?::regclass AND attname = ? AND NOT attisdropped)`,
+			c.table, c.table, c.column).Scan(&name).Error; err != nil {
+			common.SysLog(fmt.Sprintf("Warning: unique-constraint probe failed for %s.%s: %v", c.table, c.column, err))
+			continue
+		}
+		if name == "" {
+			continue // fresh schema or already normalized — nothing to do
+		}
+		if err := DB.Exec(fmt.Sprintf(`ALTER TABLE %q DROP CONSTRAINT %q`, c.table, name)).Error; err != nil {
+			return fmt.Errorf("failed to drop legacy unique constraint %s on %s: %w", name, c.table, err)
+		}
+		common.SysLog(fmt.Sprintf("Migrated: dropped legacy unique constraint %s on %s (uniqueness kept by tagged unique indexes)", name, c.table))
 	}
 	return nil
 }
