@@ -135,7 +135,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 			if err != nil {
 				return nil, fmt.Errorf("marshal generate request: %w", err)
 			}
-			return common.ReaderOnly(bytes.NewReader(body)), nil
+			return bytes.NewReader(body), nil
 		}
 	}
 
@@ -153,7 +153,7 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-	return common.ReaderOnly(bytes.NewReader(body)), nil
+	return bytes.NewReader(body), nil
 }
 
 func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (*http.Response, error) {
