@@ -225,9 +225,13 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		channelMeta.ChannelOtherSettings = channelOtherSettings
 	}
 
-	// Issue #19: a channel whose upstream rejects stream_options.include_usage
-	// (exchangetoken 400 "Unknown parameter") opts out via disable_stream_usage;
-	// billing then falls back to local estimation (relay-openai.go !containStreamUsage).
+	// DisableStreamUsage suppresses the SupportStreamOptions flag, which stops
+	// new-api from *injecting* stream_options.include_usage into outbound
+	// /v1/chat/completions (adaptor.go ConvertClaudeRequest path, driven by
+	// ForceStreamOption). NOTE: this only covers new-api-injected include_usage
+	// — it does NOT strip include_usage that the *client* sent (e.g. pi's OpenAI
+	// SDK body on /v1/responses, which bypasses the adaptor injection). For that
+	// path use channel param_override {delete stream_options} (see #20). Issue #19.
 	if streamSupportedChannels[channelMeta.ChannelType] && !channelOtherSettings.DisableStreamUsage {
 		channelMeta.SupportStreamOptions = true
 	}
