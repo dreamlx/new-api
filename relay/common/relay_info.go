@@ -225,7 +225,10 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		channelMeta.ChannelOtherSettings = channelOtherSettings
 	}
 
-	if streamSupportedChannels[channelMeta.ChannelType] {
+	// Issue #19: a channel whose upstream rejects stream_options.include_usage
+	// (exchangetoken 400 "Unknown parameter") opts out via disable_stream_usage;
+	// billing then falls back to local estimation (relay-openai.go !containStreamUsage).
+	if streamSupportedChannels[channelMeta.ChannelType] && !channelOtherSettings.DisableStreamUsage {
 		channelMeta.SupportStreamOptions = true
 	}
 

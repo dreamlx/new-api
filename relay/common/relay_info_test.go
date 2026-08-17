@@ -81,6 +81,29 @@ func TestRelayInfoInitChannelMetaEnablesStreamOptionsForOpenRouter(t *testing.T)
 	require.True(t, info.SupportStreamOptions, "OpenRouter must support stream options (issue #18)")
 }
 
+// TestRelayInfoInitChannelMetaDisableStreamUsage pins issue #19: a channel
+// whose upstream rejects stream_options.include_usage (exchangetoken 400
+// "Unknown parameter") must be able to opt out of the injection via the
+// channel other-setting disable_stream_usage; billing falls back to
+// ResponseText2Usage local estimation (relay-openai.go !containStreamUsage).
+func TestRelayInfoInitChannelMetaDisableStreamUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	common2.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common2.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://api.exchangetoken.ai")
+	common2.SetContextKey(c, constant.ContextKeyChannelKey, "test-key")
+	common2.SetContextKey(c, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{
+		DisableStreamUsage: true,
+	})
+
+	info := &RelayInfo{}
+	info.InitChannelMeta(c)
+
+	require.NotNil(t, info.ChannelMeta)
+	require.False(t, info.SupportStreamOptions, "disable_stream_usage must suppress stream_options.include_usage injection (issue #19)")
+}
+
 func TestRelayInfoMetaTypedNilReceiver(t *testing.T) {
 	var info *RelayInfo
 	var meta convmeta.Meta = info
