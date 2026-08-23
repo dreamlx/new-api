@@ -542,3 +542,51 @@ func TestV2GetPlatformLogsCacheTokens(t *testing.T) {
 	summary := data["summary"].(map[string]interface{})
 	assert.Equal(t, float64(80), summary["total_cache_tokens"])
 }
+
+// TestV2GetPlatformLogsCacheCreationTokens verifies that cache_creation_tokens
+// (Anthropic prompt-cache write count, billed at 1.25× by the upstream) is
+// surfaced from the per-log Other JSON into each log item and the summary.
+// LH pulls this to apply the 1.25× premium (#22 / lh-enterprise #588).
+func TestV2GetPlatformLogsCacheCreationTokens(t *testing.T) {
+	router, pid, shadowUserId := setupV2TestRouter(t)
+
+	token := &model.Token{
+		UserId: shadowUserId, Key: "cachecreatetest0000000000000000000",
+		Name: "v2_cachecreation", Status: common.TokenStatusEnabled,
+		CreatedTime: common.GetTimestamp(), ExpiredTime: -1, UnlimitedQuota: true,
+	}
+	require.NoError(t, model.DB.Create(token).Error)
+
+	now := common.GetTimestamp()
+	// One log with cache_creation_tokens (Anthropic cache write), one without.
+	model.LOG_DB.Create(&model.Log{
+		UserId: shadowUserId, Username: "platform_" + pid, TokenId: token.Id,
+		CreatedAt: now, Type: model.LogTypeConsume, ModelName: "claude-fable-5",
+		Quota: 5000, PromptTokens: 2175, CompletionTokens: 100,
+		Other: common.MapToJsonStr(map[string]interface{}{
+			"cache_creation_tokens": 2172, "cache_creation_ratio": 1.25,
+			"cache_tokens": 0, "claude": true,
+		}),
+	})
+	model.LOG_DB.Create(&model.Log{
+		UserId: shadowUserId, Username: "platform_" + pid, TokenId: token.Id,
+		CreatedAt: now - 100, Type: model.LogTypeConsume, ModelName: "claude-fable-5",
+		Quota: 2000, PromptTokens: 50, CompletionTokens: 20,
+	})
+
+	w := doV2Request(router, "GET", fmtV2LogPath("page=1&page_size=50"), nil)
+	assert.Equal(t, 200, w.Code)
+	resp := parseV2Response(t, w)
+	data := resp["data"].(map[string]interface{})
+	logs := data["logs"].([]interface{})
+	require.Len(t, logs, 2)
+
+	// Logs are ordered created_at DESC → cache-creation log first.
+	hit := logs[0].(map[string]interface{})
+	assert.Equal(t, float64(2172), hit["cache_creation_tokens"], "cache_creation_tokens must be surfaced from Other")
+	miss := logs[1].(map[string]interface{})
+	assert.Equal(t, float64(0), miss["cache_creation_tokens"], "absent cache_creation_tokens defaults to 0")
+
+	summary := data["summary"].(map[string]interface{})
+	assert.Equal(t, float64(2172), summary["total_cache_creation_tokens"])
+}
