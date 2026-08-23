@@ -340,7 +340,7 @@ func V2GetPlatformLogs(c *gin.Context) {
 	}
 
 	// Build response
-	var totalPromptTokens, totalCompletionTokens, totalQuotaConsumed, totalCacheTokens int
+	var totalPromptTokens, totalCompletionTokens, totalQuotaConsumed, totalCacheTokens, totalCacheCreationTokens int
 	uniqueTokens := make(map[int]bool)
 	logItems := make([]gin.H, 0, len(logs))
 
@@ -355,6 +355,13 @@ func V2GetPlatformLogs(c *gin.Context) {
 		cacheTokens := extractCacheTokens(log.Other)
 		totalCacheTokens += cacheTokens
 
+		// #22 — cache_creation_tokens: tokens written to the prompt cache (Anthropic
+		// bills these at 1.25× prompt price; LH must surface them to bill the
+		// premium). Same Other-JSON pattern as cache_tokens; absent on non-Anthropic
+		// models and older logs → 0.
+		cacheCreationTokens := extractCacheCreationTokens(log.Other)
+		totalCacheCreationTokens += cacheCreationTokens
+
 		// Resolve full token_key
 		var tokenKey string
 		if log.TokenId > 0 {
@@ -365,20 +372,21 @@ func V2GetPlatformLogs(c *gin.Context) {
 		}
 
 		logItems = append(logItems, gin.H{
-			"log_id":            log.Id,
-			"request_id":        log.RequestId,
-			"created_at":        log.CreatedAt,
-			"time":              time.Unix(log.CreatedAt, 0).UTC().Format(time.RFC3339),
-			"token_id":          log.TokenId,
-			"token_key":         tokenKey,
-			"model_name":        log.ModelName,
-			"channel_id":        log.ChannelId,
-			"channel_name":      log.ChannelName,
-			"prompt_tokens":     log.PromptTokens,
-			"completion_tokens": log.CompletionTokens,
-			"cache_tokens":      cacheTokens,
-			"total_tokens":      log.PromptTokens + log.CompletionTokens,
-			"quota_cost":        log.Quota,
+			"log_id":                 log.Id,
+			"request_id":             log.RequestId,
+			"created_at":             log.CreatedAt,
+			"time":                   time.Unix(log.CreatedAt, 0).UTC().Format(time.RFC3339),
+			"token_id":               log.TokenId,
+			"token_key":              tokenKey,
+			"model_name":             log.ModelName,
+			"channel_id":             log.ChannelId,
+			"channel_name":           log.ChannelName,
+			"prompt_tokens":          log.PromptTokens,
+			"completion_tokens":      log.CompletionTokens,
+			"cache_tokens":           cacheTokens,
+			"cache_creation_tokens":  cacheCreationTokens,
+			"total_tokens":           log.PromptTokens + log.CompletionTokens,
+			"quota_cost":             log.Quota,
 		})
 	}
 
@@ -396,13 +404,14 @@ func V2GetPlatformLogs(c *gin.Context) {
 				"total_pages": totalPages,
 			},
 			"summary": gin.H{
-				"total_requests":          len(logItems),
-				"total_prompt_tokens":     totalPromptTokens,
-				"total_completion_tokens": totalCompletionTokens,
-				"total_cache_tokens":      totalCacheTokens,
-				"total_tokens":            totalPromptTokens + totalCompletionTokens,
-				"total_quota_consumed":    totalQuotaConsumed,
-				"unique_tokens":           len(uniqueTokens),
+				"total_requests":             len(logItems),
+				"total_prompt_tokens":        totalPromptTokens,
+				"total_completion_tokens":    totalCompletionTokens,
+				"total_cache_tokens":         totalCacheTokens,
+				"total_cache_creation_tokens": totalCacheCreationTokens,
+				"total_tokens":               totalPromptTokens + totalCompletionTokens,
+				"total_quota_consumed":       totalQuotaConsumed,
+				"unique_tokens":              len(uniqueTokens),
 			},
 		},
 	})
@@ -423,6 +432,30 @@ func extractCacheTokens(other string) int {
 		return 0
 	}
 	switch v := m["cache_tokens"].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
+	}
+}
+
+// extractCacheCreationTokens reads the cache-write token count from a log's
+// Other JSON blob (key "cache_creation_tokens", written by
+// service/log_info_generate.go). Anthropic bills these at 1.25× prompt price;
+// LH surfaces the count to apply the premium (#22 / lh-enterprise #588). Returns
+// 0 when absent or unparseable — best-effort observability, must never break
+// the logs endpoint. Mirrors extractCacheTokens; JSON numbers decode to float64.
+func extractCacheCreationTokens(other string) int {
+	if other == "" {
+		return 0
+	}
+	m, err := common.StrToMap(other)
+	if err != nil || m == nil {
+		return 0
+	}
+	switch v := m["cache_creation_tokens"].(type) {
 	case float64:
 		return int(v)
 	case int:
