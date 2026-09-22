@@ -56,10 +56,11 @@ const (
 	ChannelTypeReplicate      = 56
 	ChannelTypeCodex          = 57
 	ChannelTypeOspreyAI       = 58
-// 59/60 removed: dormant happyhorse/seedance video channels (renounced ahead of upstream task-plugin sync)
+	// 59/60 retired (removed happyhorse/seedance); upstream types renumbered to avoid collision
 	ChannelTypeAdvancedCustom = 61
 	ChannelTypeSub2API        = 62
 	ChannelTypeNewAPI         = 63
+	ChannelTypeTaskPlugin     = 64
 	ChannelTypeDummy          // this one is only for count, do not add any channel after this
 
 )
@@ -124,11 +125,18 @@ var ChannelBaseURLs = []string{
 	"https://api.replicate.com",                 //56
 	"https://chatgpt.com",                       //57
 	"",                                          //58 OspreyAI (base URL configured per instance)
-	"",                                          //59 removed (happyhorse)
-	"",                                          //60 removed (seedance)
+	"",                                          //59/60 retired (happyhorse/seedance)
 	"",                                          //61 AdvancedCustom
 	"",                                          //62 Sub2API
 	"",                                          //63 NewAPI
+	"",                                          //64 TaskPlugin
+}
+
+func GetChannelBaseURL(channelType int) string {
+	if channelType < 0 || channelType >= len(ChannelBaseURLs) {
+		return ""
+	}
+	return ChannelBaseURLs[channelType]
 }
 
 var ChannelTypeNames = map[int]string{
@@ -190,6 +198,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeAdvancedCustom: "AdvancedCustom",
 	ChannelTypeSub2API:        "Sub2API",
 	ChannelTypeNewAPI:         "New API",
+	ChannelTypeTaskPlugin:     "Task Plugin",
 }
 
 func GetChannelTypeName(channelType int) string {
