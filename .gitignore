@@ -1,4 +1,5 @@
 .idea
+.review
 .vscode
 .zed
 .history
@@ -7,6 +8,8 @@ upload
 *.db
 build
 *.db-journal
+*.db-shm
+*.db-wal
 logs
 web/dist
 web/node_modules
@@ -22,6 +25,7 @@ tiktoken_cache
 .cache
 plans
 !docs/superpowers/plans/
+.plans
 .claude
 .worktrees/
 .aim
@@ -55,7 +59,8 @@ id_ed25519.pub
 
 # Local-only live probes and scratch test workspaces.
 .local-tests/
-service/relayconvert/chat_responses_live_local_test.go
+relaykit/relayconvert/chat_responses_live_local_test.go
 service/openaicompat/chat_responses_live_local_test.go
 go.work
 go.work.sum
+new-api.log

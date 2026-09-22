@@ -60,8 +60,8 @@ const (
 	_                 // 56: reserved
 	_                 // 57: reserved
 	APITypeOspreyAI       // 58
-	APITypeHappyHorse     // 59
-	APITypeSeedance       // 60
+	_                     // 59: removed (happyhorse)
+	_                     // 60: removed (seedance)
 	APITypeAdvancedCustom // 61
 	APITypeSub2API        // 62
 	APITypeNewAPI         // 63

@@ -56,15 +56,19 @@ const (
 	ChannelTypeReplicate      = 56
 	ChannelTypeCodex          = 57
 	ChannelTypeOspreyAI       = 58
-	ChannelTypeHappyHorse     = 59
-	ChannelTypeSeedance       = 60
+	// 59/60 retired (removed happyhorse/seedance); upstream types renumbered to avoid collision
 	ChannelTypeAdvancedCustom = 61
 	ChannelTypeSub2API        = 62
 	ChannelTypeNewAPI         = 63
+	ChannelTypeTaskPlugin     = 64
+	ChannelTypeVLLM           = 65
+	ChannelTypeSGLang         = 66
 	ChannelTypeDummy          // this one is only for count, do not add any channel after this
 
 )
 
+// ChannelBaseURLs 保存各渠道类型的内置默认 Base URL。
+// 非空值会通过 /api/channel/default_base_urls 下发到前端，作为渠道表单的 API 地址占位提示。
 var ChannelBaseURLs = []string{
 	"",                                    // 0
 	"https://api.openai.com",              // 1
@@ -125,11 +129,20 @@ var ChannelBaseURLs = []string{
 	"https://api.replicate.com",                 //56
 	"https://chatgpt.com",                       //57
 	"",                                          //58 OspreyAI (base URL configured per instance)
-	"https://dashscope.aliyuncs.com",            //59 HappyHorse
-	"",                                          //60 Seedance (third-party gateway URL)
+	"",                                          //59/60 retired (happyhorse/seedance)
 	"",                                          //61 AdvancedCustom
 	"",                                          //62 Sub2API
 	"",                                          //63 NewAPI
+	"",                                          //64 TaskPlugin
+	"",                                          //65 VLLM
+	"",                                          //66 SGLang
+}
+
+func GetChannelBaseURL(channelType int) string {
+	if channelType < 0 || channelType >= len(ChannelBaseURLs) {
+		return ""
+	}
+	return ChannelBaseURLs[channelType]
 }
 
 var ChannelTypeNames = map[int]string{
@@ -183,16 +196,17 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeJimeng:         "Jimeng",
 	ChannelTypeVidu:           "Vidu",
 	ChannelTypeSubmodel:       "Submodel",
-	ChannelTypeDoubaoVideo:    "DoubaoVideo",
+	ChannelTypeDoubaoVideo:    "Doubao",
 	ChannelTypeSora:           "Sora",
 	ChannelTypeReplicate:      "Replicate",
 	ChannelTypeCodex:          "ChatGPT Subscription (Codex)",
 	ChannelTypeOspreyAI:       "OspreyAI",
-	ChannelTypeHappyHorse:     "HappyHorse",
-	ChannelTypeSeedance:       "Seedance",
-	ChannelTypeAdvancedCustom: "Advanced Custom",
+	ChannelTypeAdvancedCustom: "AdvancedCustom",
 	ChannelTypeSub2API:        "Sub2API",
 	ChannelTypeNewAPI:         "New API",
+	ChannelTypeTaskPlugin:     "Task Plugin",
+	ChannelTypeVLLM:           "vLLM",
+	ChannelTypeSGLang:         "SGLang",
 }
 
 func GetChannelTypeName(channelType int) string {
@@ -224,4 +238,14 @@ var ChannelSpecialBases = map[string]ChannelSpecialBase{
 		ClaudeBaseURL: "https://ark.cn-beijing.volces.com/api/coding",
 		OpenAIBaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3",
 	},
+}
+
+// IsAdvancedCustomChannel includes named channels backed by route presets.
+func IsAdvancedCustomChannel(channelType int) bool {
+	switch channelType {
+	case ChannelTypeAdvancedCustom, ChannelTypeVLLM, ChannelTypeSGLang:
+		return true
+	default:
+		return false
+	}
 }
