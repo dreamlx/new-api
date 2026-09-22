@@ -70,7 +70,8 @@ export function parseTaskResult() { return {}; }
 	require.NoError(t, err)
 	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(key) })
 
-	taskPluginBody := `{"mode":"single","channel":{"type":61,"name":"plugin-channel","key":"sk","models":"doc","group":"default","base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind\"}"}}`
+	// type 64 = ChannelTypeTaskPlugin (fork renumbers upstream's 61 to avoid collision with our channel IDs)
+	taskPluginBody := `{"mode":"single","channel":{"type":64,"name":"plugin-channel","key":"sk","models":"doc","group":"default","base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind\"}"}}`
 	openaiBody := `{"mode":"single","channel":{"type":1,"name":"openai-channel","key":"sk","models":"gpt","group":"default"}}`
 
 	adminDenied := postAddChannel(t, 2, common.RoleAdminUser, taskPluginBody)
@@ -115,7 +116,8 @@ export function parseTaskResult() { return {}; }
 	require.NoError(t, channel.Insert())
 
 	payload := fmt.Sprintf(
-		`{"id":%d,"type":61,"name":"existing-plugin","key":"sk","models":"doc","group":"default","base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind-update\"}"}`,
+		// fork renumber: upstream hardcodes type 61 (= our ChannelTypeTaskPlugin 64)
+		`{"id":%d,"type":64,"name":"existing-plugin","key":"sk","models":"doc","group":"default","base_url":"https://example.com","setting":"{\"task_plugin_key\":\"channel-bind-update\"}"}`,
 		channel.Id,
 	)
 	gin.SetMode(gin.TestMode)
