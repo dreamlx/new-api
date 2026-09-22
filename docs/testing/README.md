@@ -42,7 +42,7 @@
 
 **运行方法**：
 ```bash
-cd /Users/dreamlinx/Dropbox/Projects/NetBeansProjects/new-api
+cd /Users/dreamlinx/Projects/businesses/lh/new-api
 bash scripts/test-v1-token-quota.sh
 ```
 
@@ -68,7 +68,7 @@ bash scripts/test-v1-token-quota.sh
 
 **运行方法**：
 ```bash
-cd /Users/dreamlinx/Dropbox/Projects/NetBeansProjects/new-api
+cd /Users/dreamlinx/Projects/businesses/lh/new-api
 bash scripts/test-v2-platform-quota.sh
 ```
 
@@ -95,7 +95,7 @@ bash scripts/test-v2-platform-quota.sh
 
 **运行方法**：
 ```bash
-cd /Users/dreamlinx/Dropbox/Projects/NetBeansProjects/new-api/docs/testing
+cd /Users/dreamlinx/Projects/businesses/lh/new-api/docs/testing
 bash real-api-test.sh
 ```
 
@@ -118,7 +118,7 @@ bash real-api-test.sh
 
 **运行方法**：
 ```bash
-cd /Users/dreamlinx/Dropbox/Projects/NetBeansProjects/new-api/docs/testing
+cd /Users/dreamlinx/Projects/businesses/lh/new-api/docs/testing
 bash real-v2-api-test.sh
 ```
 
@@ -172,7 +172,7 @@ bash real-v2-api-test.sh
 
 ```bash
 # 1. 测试V1 API（个人用户）
-cd /Users/dreamlinx/Dropbox/Projects/NetBeansProjects/new-api
+cd /Users/dreamlinx/Projects/businesses/lh/new-api
 bash scripts/test-v1-token-quota.sh
 
 # 2. 测试V2 API（平台集成）
