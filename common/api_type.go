@@ -77,10 +77,6 @@ func ChannelType2APIType(channelType int) (int, bool) {
 		apiType = constant.APITypeCodex
 	case constant.ChannelTypeOspreyAI:
 		apiType = constant.APITypeOspreyAI
-	case constant.ChannelTypeHappyHorse:
-		apiType = constant.APITypeHappyHorse
-	case constant.ChannelTypeSeedance:
-		apiType = constant.APITypeSeedance
 	case constant.ChannelTypeAdvancedCustom:
 		apiType = constant.APITypeAdvancedCustom
 	case constant.ChannelTypeSub2API:

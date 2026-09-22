@@ -56,8 +56,7 @@ const (
 	ChannelTypeReplicate      = 56
 	ChannelTypeCodex          = 57
 	ChannelTypeOspreyAI       = 58
-	ChannelTypeHappyHorse     = 59
-	ChannelTypeSeedance       = 60
+// 59/60 removed: dormant happyhorse/seedance video channels (renounced ahead of upstream task-plugin sync)
 	ChannelTypeAdvancedCustom = 61
 	ChannelTypeSub2API        = 62
 	ChannelTypeNewAPI         = 63
@@ -125,8 +124,8 @@ var ChannelBaseURLs = []string{
 	"https://api.replicate.com",                 //56
 	"https://chatgpt.com",                       //57
 	"",                                          //58 OspreyAI (base URL configured per instance)
-	"https://dashscope.aliyuncs.com",            //59 HappyHorse
-	"",                                          //60 Seedance (third-party gateway URL)
+	"",                                          //59 removed (happyhorse)
+	"",                                          //60 removed (seedance)
 	"",                                          //61 AdvancedCustom
 	"",                                          //62 Sub2API
 	"",                                          //63 NewAPI
@@ -188,9 +187,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeReplicate:      "Replicate",
 	ChannelTypeCodex:          "ChatGPT Subscription (Codex)",
 	ChannelTypeOspreyAI:       "OspreyAI",
-	ChannelTypeHappyHorse:     "HappyHorse",
-	ChannelTypeSeedance:       "Seedance",
-	ChannelTypeAdvancedCustom: "Advanced Custom",
+	ChannelTypeAdvancedCustom: "AdvancedCustom",
 	ChannelTypeSub2API:        "Sub2API",
 	ChannelTypeNewAPI:         "New API",
 }
