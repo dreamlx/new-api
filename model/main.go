@@ -356,6 +356,9 @@ func migrateDB() error {
 	if err := migrateUserQuotaToBigint(); err != nil {
 		return err
 	}
+	if err := migrateOptionPrimaryKey(DB); err != nil {
+		common.SysError("failed to migrate options primary key: " + err.Error())
+	}
 
 	autoMigrateTargets := []interface{}{
 		&Channel{},
