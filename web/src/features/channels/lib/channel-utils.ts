@@ -51,11 +51,11 @@ export function getChannelTypeIcon(type: number): string {
     6: 'OpenAI', // OpenAIMax
     7: 'OpenAI', // OhMyGPT
     8: 'OpenAI', // Custom
-    58: 'NewAPI', // Advanced Custom
-    59: 'Sub2API', // Sub2API
-    60: 'NewAPI', // New API
-    62: 'Vllm', // vLLM
-    63: 'SGLang', // SGLang
+    61: 'NewAPI', // Advanced Custom (fork renumber; upstream 58)
+    62: 'Sub2API', // Sub2API (upstream 59)
+    63: 'NewAPI', // New API (upstream 60)
+    65: 'Vllm', // vLLM (upstream 62)
+    66: 'SGLang', // SGLang (upstream 63)
     3: 'Azure', // Azure
 
     // Anthropic

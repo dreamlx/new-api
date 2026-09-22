@@ -469,7 +469,7 @@ it('keeps SGLang worker values separate and wraps long labels below them', async
 it.each([
   { type: CHANNEL_TYPE_VLLM, editable: false },
   { type: CHANNEL_TYPE_SGLANG, editable: false },
-  { type: 58, editable: true },
+  { type: 61, editable: true },
 ])(
   'limits the route editor to advanced custom channels: type $type',
   async ({ type, editable }) => {

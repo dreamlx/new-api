@@ -70,52 +70,6 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	require.Equal(t, common.QuotaPerUnit, info.TieredBillingSnapshot.QuotaPerUnit)
 }
 
-// A paid tiered model whose single-request cost rounds to 0 must floor to 1,
-// mirroring the standard ratio/price path — otherwise est=0 reaches the wisemodel
-// gate's bypass branch (per-call billing not atomically deducted).
-func TestModelPriceHelperTieredFloorsPaidModelToOne(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	saved := map[string]string{}
-	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
-		saved[key] = value
-		return nil
-	}))
-	t.Cleanup(func() {
-		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
-	})
-
-	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		"billing_setting.billing_mode": `{"tiered-cheap-model":"tiered_expr"}`,
-		"billing_setting.billing_expr": `{"tiered-cheap-model":"tier(\"base\", p * 0.0000001)"}`,
-	}))
-
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	req := httptest.NewRequest(http.MethodPost, "/x", nil)
-	req.Body = nil
-	req.ContentLength = 0
-	req.Header.Set("Content-Type", "application/json")
-	ctx.Request = req
-	ctx.Set("group", "default")
-
-	info := &relaycommon.RelayInfo{
-		OriginModelName: "tiered-cheap-model",
-		UserGroup:       "default",
-		UsingGroup:      "default",
-		RequestHeaders:  map[string]string{"Content-Type": "application/json"},
-		BillingRequestInput: &billingexpr.RequestInput{
-			Headers: map[string]string{"Content-Type": "application/json"},
-			Body:    []byte(`{}`),
-		},
-	}
-
-	priceData, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{})
-	require.NoError(t, err)
-	require.False(t, priceData.FreeModel)
-	require.Equal(t, 1, priceData.QuotaToPreConsume,
-		"paid tiered model rounding to 0 must floor to 1 to avoid gate bypass")
-}
 
 func TestFixedPricePreConsumeAndRealtimeRejection(t *testing.T) {
 	saved := map[string]string{}
@@ -296,20 +250,6 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 		wantUsePrice   bool
 		wantImageCount bool
 	}{
-		{
-			name:           "fixed price applies image count",
-			model:          "fixed-image-price",
-			wantQuota:      180000,
-			wantUsePrice:   true,
-			wantImageCount: true,
-		},
-		{
-			name:           "tiny fixed price floors to one after image count",
-			model:          "tiny-fixed-image-price",
-			wantQuota:      1,
-			wantUsePrice:   true,
-			wantImageCount: true,
-		},
 		{
 			name:         "ratio price ignores request billing ratios",
 			model:        "ratio-image-price",

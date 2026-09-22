@@ -24,7 +24,9 @@ import type {
   AdvancedCustomRouteAuth,
 } from '../types'
 
-export const CHANNEL_TYPE_ADVANCED_CUSTOM = 58
+// Fork renumbering: upstream's AdvancedCustom(58) is 61 here — keep in sync with
+// features/channels/constants.ts and constant/channel.go (single source of truth).
+export const CHANNEL_TYPE_ADVANCED_CUSTOM = 61
 export const ADVANCED_CUSTOM_MODEL_LIST_PATH = '/v1/models'
 export const ADVANCED_CUSTOM_MODEL_LIST_LABEL = 'OpenAI Models'
 export const ADVANCED_CUSTOM_BALANCE_PATH =

@@ -451,7 +451,7 @@ test('selecting a plugin opens a prefilled channel and creates its explicit bind
     mode: 'single',
     channel: {
       name: 'Video A',
-      type: 61,
+      type: 64,
       key: 'channel-secret',
       models: 'video-a-1',
       base_url: 'https://a.example',
@@ -665,7 +665,7 @@ test('creating a migrated provider uses its plugin binding instead of the legacy
     expect(post).toHaveBeenCalledWith(
       '/api/channel',
       expect.objectContaining({
-        channel: expect.objectContaining({ type: 61 }),
+        channel: expect.objectContaining({ type: 64 }),
       }),
       expect.anything()
     )
@@ -1038,7 +1038,7 @@ test.each([
         mode,
         channel: expect.objectContaining({
           key: 'first-key\nsecond-key',
-          type: 61,
+          type: 64,
         }),
       }),
       expect.anything()
@@ -1368,7 +1368,7 @@ test('editing legacy channels retains the full provider list and saves the origi
 test('opening and reselecting an existing plugin preserves its saved configuration', async () => {
   editingChannel = {
     ...editingChannel,
-    type: 61,
+    type: 64,
     setting: '{"task_plugin_key":"video-a"}',
     priority: 7,
   }
@@ -1402,7 +1402,7 @@ test('opening and reselecting an existing plugin preserves its saved configurati
 test('an unavailable plugin keeps its identifier and binding when other fields are updated', async () => {
   editingChannel = {
     ...editingChannel,
-    type: 61,
+    type: 64,
     setting: '{"task_plugin_key":"removed-plugin"}',
   }
   const put = vi
@@ -1505,7 +1505,7 @@ test('request processing configuration does not mark the network category as con
   ).not.toHaveAccessibleName(/Configured/)
 })
 
-test.each([1, 57, 58, 59, 60])(
+test.each([1, 57, 61, 62, 63])(
   'provider %s marks a saved Responses WebSocket setting in Request & Response and clears the mark when disabled',
   async (type) => {
     editingChannel = {
@@ -1533,7 +1533,7 @@ test.each([1, 57, 58, 59, 60])(
 )
 
 test.each([
-  [58, true],
+  [61, true],
   [1, false],
 ])(
   'provider %s explains the native-route limit under the Responses WebSocket toggle: %s',
@@ -1560,7 +1560,7 @@ test.each([
 test('configuration from fields unsupported by the selected provider stays unmarked', async () => {
   editingChannel = {
     ...editingChannel,
-    type: 61,
+    type: 64,
     setting:
       '{"task_plugin_key":"video-a","force_format":true,"responses_websocket_enabled":true}',
     settings:
@@ -1895,7 +1895,7 @@ test('model configuration is available for a plugin channel without upstream dis
 test('advanced custom edits preview draft connection settings with the saved key', async () => {
   editingChannel = {
     ...editingChannel,
-    type: 58,
+    type: 61,
     settings: JSON.stringify({
       advanced_custom: {
         advanced_routes: [
@@ -1927,7 +1927,7 @@ test('advanced custom edits preview draft connection settings with the saved key
   expect(post).toHaveBeenCalledWith(
     '/api/channel/fetch_models',
     expect.objectContaining({
-      type: 58,
+      type: 61,
       channel_id: 42,
       base_url: 'https://draft.example',
       key: undefined,
@@ -2752,7 +2752,7 @@ test('the header override passthrough template button confirms before filling th
 test('a New API channel binds upstream task plugins and publishes their models', async () => {
   const channel = channelSchema.parse({
     ...editingChannel,
-    type: 60,
+    type: 63,
     base_url: 'https://gateway.example',
     models: 'gpt-5',
     setting: JSON.stringify({ task_extend_plugin_keys: ['video-a'] }),

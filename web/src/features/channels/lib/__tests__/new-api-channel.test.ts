@@ -66,7 +66,7 @@ describe('New API channel', () => {
       CHANNEL_TYPE_OPTIONS.findIndex(
         (item) => item.value === CHANNEL_TYPE_NEW_API
       ) + 1
-    ).toBe(CHANNEL_TYPE_OPTIONS.findIndex((item) => item.value === 58))
+    ).toBe(CHANNEL_TYPE_OPTIONS.findIndex((item) => item.value === 61))
     expect(MODEL_FETCHABLE_TYPES.has(CHANNEL_TYPE_NEW_API)).toBe(true)
     expect(getChannelTypeIcon(CHANNEL_TYPE_NEW_API)).toBe('NewAPI')
     expect(getKeyPromptForType(CHANNEL_TYPE_NEW_API)).toBe(
@@ -97,7 +97,7 @@ describe('New API channel', () => {
   test('keeps Sub2API Base URL validation unchanged', () => {
     const result = channelFormSchema.safeParse({
       ...newAPIForm(''),
-      type: 59,
+      type: 62,
     })
 
     expect(result.success).toBe(true)
