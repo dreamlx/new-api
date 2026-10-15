@@ -3,7 +3,7 @@ package ospreyai
 import (
 	"fmt"
 
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
 // ErrorHandler handles OspreyAI error responses

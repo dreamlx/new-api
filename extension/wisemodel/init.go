@@ -86,7 +86,7 @@ func reclaimExpiredPackagesLoop() {
 // model.migrateUserQuotaToBigint, while the wisemodel_packages.* columns
 // moved here.
 func migrateWisemodelBigint() error {
-	if common.UsingSQLite {
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
 		return nil
 	}
 
@@ -105,7 +105,7 @@ func migrateWisemodelBigint() error {
 		}
 
 		var alterSQL string
-		if common.UsingPostgreSQL {
+		if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
 			var dataType string
 			if err := model.DB.Raw(
 				`SELECT data_type FROM information_schema.columns
@@ -118,7 +118,7 @@ func migrateWisemodelBigint() error {
 				continue
 			}
 			alterSQL = fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN %s TYPE bigint`, c.table, c.column)
-		} else if common.UsingMySQL {
+		} else if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
 			var columnType string
 			if err := model.DB.Raw(
 				`SELECT COLUMN_TYPE FROM information_schema.columns

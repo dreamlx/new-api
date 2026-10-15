@@ -255,6 +255,25 @@ gets older:
   parameter to `model.GetAllLogs`; our `controller/log.go` callers break;
   the failure is at compile time, easy to fix, but easy to miss if you
   only build a subset.
+- **(2026-09 sync) Upstream hardcodes channel type IDs in tests and frontend.**
+  The fork renumbers upstream's new channel types (58=OspreyAI, 59/60 retired,
+  AdvancedCustom=61, Sub2API=62, NewAPI=63, TaskPlugin=64, VLLM=65, SGLang=66;
+  `constant/channel.go` is the source of truth). Every sync must remap upstream's
+  literals in Go tests (`"type":61`), `web/src/features/channels/constants.ts`,
+  `lib/channel-type-config.ts`, `lib/channel-utils.ts` TYPE_TO_ICON, and channel
+  test files. Watch for a **second constant source**:
+  `web/src/features/channels/lib/advanced-custom.ts` defines its own
+  `CHANNEL_TYPE_ADVANCED_CUSTOM` and silently shadows `constants.ts` —
+  typecheck passes while behavior splits.
+- **(2026-09 sync) Upstream replaced Go task adaptors with a JS plugin engine**
+  (`pkg/jsplugin` + `plugins/tasks/*/plugin.js`, unified `/v1/video/generations`
+  endpoint; the `channel.TaskAdaptor` interface survived, `GetTaskAdaptor` now
+  wraps plugins). Dormant fork Go video channels (happyhorse/seedance) were
+  renounced rather than ported; `DisablePerCallBilling` on the TaskAdaptor
+  interface was fork-only heritage and removed with them. Pre-consume
+  floor-to-1 helpers were dropped: upstream's input-pre-consume semantics
+  require exact zero, and the wisemodel gate is enforced by
+  `PrepareWisemodelPackageForPreConsume`, not by price flooring.
 
 ---
 

@@ -95,8 +95,3 @@ func (BaseBilling) AdjustBillingOnSubmit(_ *relaycommon.RelayInfo, _ []byte) map
 func (BaseBilling) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
 	return 0
 }
-
-// DisablePerCallBilling returns false (use default per-call billing logic).
-func (BaseBilling) DisablePerCallBilling() bool {
-	return false
-}

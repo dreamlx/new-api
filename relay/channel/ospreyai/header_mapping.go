@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
 type UpstreamProtocol string

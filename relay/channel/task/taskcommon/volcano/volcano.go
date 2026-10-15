@@ -6,9 +6,10 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 )
 
@@ -162,7 +163,7 @@ func FetchTask(baseURL, apiKey string, body map[string]any, proxy string) (*http
 
 // ParseSubmitResponse parses the upstream submit response and returns the upstream task ID.
 // The caller is responsible for writing the response to the gin context.
-func ParseSubmitResponse(resp *http.Response) (upstreamTaskID string, taskData []byte, taskErr *dto.TaskError) {
+func ParseSubmitResponse(resp *http.Response) (upstreamTaskID string, taskData []byte, taskErr *taskdto.TaskError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		taskErr = service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
